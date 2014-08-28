@@ -57,7 +57,7 @@ Disclaimer: The above text describes our goal and not the current status.
 
 
 ## License and copyright
-See the files LICENSE and COPYING.
+See the files LICENSE and AUTHORS.
 
 
 ## Contributions
