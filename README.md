@@ -32,7 +32,7 @@ Disclaimer: The above text describes our goal and not the current status.
 
 ## Building from source
 1. Checkout the newest version of the source:
-   * `git clone https://github.com/brinchj/hat`
+   * `git clone https://github.com/google/hat-backup.git`
    * `cd hat`
 2. Setup dependencies using the sources provided in git submodules:
    * `git submodule init`
