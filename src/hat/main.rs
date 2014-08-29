@@ -77,7 +77,7 @@ fn usage() {
 }
 
 fn license() {
-  println(include_str!("../../COPYING"));
+  println(include_str!("../../LICENSE"));
 }
 
 
