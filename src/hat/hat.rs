@@ -247,19 +247,18 @@ impl <'db, B> InsertPathHandler<'db, B> {
 impl <'db, B: BlobStoreBackend + Clone> listdir::PathHandler<Option<~[u8]>>
   for InsertPathHandler<'db, B> {
   fn handlePath(&mut self, parent: Option<~[u8]>, path: Path) -> Option<Option<~[u8]>> {
-    let mut count = 0;
-    {
-      let mut c = self.count.lock();
-      *c += 1;
-      count = *c;
-    }
+    let mut count = {
+      let mut guarded_count = self.count.lock();
+      *guarded_count += 1;
+      *guarded_count
+    };
 
     if self.my_last_print.sec <= time::now().to_timespec().sec - 1 {
-      let mut t = self.last_print.lock();
+      let mut guarded_last_print = self.last_print.lock();
       let now = time::now().to_timespec();
-      if t.sec <= now.sec - 1 {
+      if guarded_last_print.sec <= now.sec - 1 {
         println(format!("\\#{}: {}", count, path.display()));
-        *t = now;
+        *guarded_last_print = now;
       }
       self.my_last_print = now;
     }

@@ -349,37 +349,39 @@ mod tests {
       }
     }
     fn saw_chunk(&self, chunk: &~[u8]) -> bool {
-      let mut seen = self.seen_chunks.lock();
-      seen.contains(chunk)
+      let mut guarded_seen = self.seen_chunks.lock();
+      guarded_seen.contains(chunk)
     }
   }
 
   impl HashTreeBackend for MemoryBackend {
 
     fn fetch_chunk(&mut self, hash:Hash) -> Option<~[u8]> {
-      let mut chunks = self.chunks.lock();
-      chunks.find(&hash.bytes).map(|&(_, _, ref chunk)| chunk.clone())
+      let mut guarded_chunks = self.chunks.lock();
+      guarded_chunks.find(&hash.bytes).map(|&(_, _, ref chunk)| chunk.clone())
     }
 
     fn fetch_payload(&mut self, hash:Hash) -> Option<~[u8]> {
-      let mut chunks = self.chunks.lock();
-      chunks.find(&hash.bytes).and_then(|&(_, ref payload, _)| payload.clone())
+      let mut guarded_chunks = self.chunks.lock();
+      guarded_chunks.find(&hash.bytes).and_then(|&(_, ref payload, _)| payload.clone())
     }
 
     fn fetch_persistent_ref(&mut self, hash:Hash) -> Option<~[u8]> {
-      let mut chunks = self.chunks.lock();
-      if chunks.contains_key(&hash.bytes) {
+      let mut guarded_chunks = self.chunks.lock();
+      if guarded_chunks.contains_key(&hash.bytes) {
         Some(hash.bytes.clone())
-      } else { None }
+      } else {
+        None
+      }
     }
 
     fn insert_chunk(&mut self, hash:Hash, level:i64,
                     payload:Option<~[u8]>, chunk:~[u8]) -> ~[u8] {
-      let mut seen = self.seen_chunks.lock();
-      seen.insert(chunk.clone());
+      let mut guarded_seen = self.seen_chunks.lock();
+      guarded_seen.insert(chunk.clone());
 
-      let mut chunks = self.chunks.lock();
-      chunks.insert(hash.bytes.clone(), (level, payload, chunk));
+      let mut guarded_chunks = self.chunks.lock();
+      guarded_chunks.insert(hash.bytes.clone(), (level, payload, chunk));
 
       hash.bytes
     }

@@ -77,27 +77,33 @@ impl BlobStoreBackend for FileBackend {
   }
 
   fn retrieve(&mut self, name: &[u8]) -> Result<~[u8], ~str> {
-    {
-      let mut my_cache = self.read_cache.lock();
-      match my_cache.get(&name.clone().to_owned()) {
-        Some(result) => return result.clone(),
-        None => (),
-      }
+    // Check for key in cache:
+    let value_opt = {
+      let mut guarded_cache = self.read_cache.lock();
+      guarded_cache.get(&name.clone().into_owned()).map(|v| v.clone())
+    };
+    match value_opt {
+      Some(result) => return result.clone(),
+      None => (),
     }
 
-    let mut path = self.root.clone();
-    path.push(name.to_hex());
+    // Read key:
+    let path = { let mut p = self.root.clone();
+                 p.push(name.to_hex());
+                 p };
 
     let mut fd = File::open(&path).unwrap();
 
     let res = fd.read_to_end().and_then(|data| {
       Ok(data.as_slice().into_owned()) }).or_else(|e| Err(e.to_str()));
 
+    // Update cache to contain key:
     {
-      let mut my_cache = self.read_cache.lock();
-      my_cache.put(name.clone().to_owned(), res.clone());
-      res
+      let mut guarded_cache = self.read_cache.lock();
+      guarded_cache.put(name.clone().to_owned(), res.clone());
     }
+
+    return res;
   }
 
 }
@@ -337,19 +343,25 @@ pub mod tests {
   impl BlobStoreBackend for MemoryBackend {
 
     fn store(&mut self, name: &[u8], data: &[u8]) -> Result<(), ~str> {
-      let mut files = self.files.lock();
       let key = name.to_owned();
-      if files.contains_key(&key) {
-        return Err(format!("Key already exists: '{}'", name));
+
+      {
+        let mut guarded_files = self.files.lock();
+        if guarded_files.contains_key(&key) {
+          return Err(format!("Key already exists: '{}'", name));
+        }
+        guarded_files.insert(key, data.into_owned());
       }
-      files.insert(key, data.into_owned());
-      Ok(())
+
+      return Ok(());
     }
 
     fn retrieve(&mut self, name: &[u8]) -> Result<~[u8], ~str> {
-      self.files.lock().find(&name.into_owned()).map(
-        |data| Ok(data.clone().into_owned())).unwrap_or_else(
-        || Err(format!("Unknown key: '{}'", name)))
+      let value_opt = {
+        let mut guarded_files = self.files.lock();
+        guarded_files.find(&name.into_owned()).map(|v| v.clone())
+      };
+      return value_opt.map(|v| Ok(v)).unwrap_or_else(|| Err(format!("Unknown key: '{}'", name)));
     }
   }
 

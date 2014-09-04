@@ -109,13 +109,13 @@ pub fn iterateRecursively<P: Send + Clone, W: PathHandler<P> + Send + Clone>
         let mut next = None;
         let mut task_count = 0;
         {
-          let mut tasks = t_in_progress.lock();
-          let mut q = t_queue.lock();
-          if q.len() > 0 {
-            next = q.pop();
-            *tasks += 1;
+          let mut guarded_tasks = t_in_progress.lock();
+          let mut guarded_queue = t_queue.lock();
+          if guarded_queue.len() > 0 {
+            next = guarded_queue.pop();
+            *guarded_tasks += 1;
           }
-          task_count = *tasks;
+          task_count = *guarded_tasks;
         }
 
         match next {
@@ -135,8 +135,8 @@ pub fn iterateRecursively<P: Send + Clone, W: PathHandler<P> + Send + Clone>
                   root.push(rel_path);
                   let dir_opt = t_worker.handlePath(payload.clone(), root.clone());
                   if dir_opt.is_some() {
-                    let mut q = t_queue.lock();
-                    q.push((root.clone(), dir_opt.unwrap()));
+                    let mut guarded_queue = t_queue.lock();
+                    guarded_queue.push((root.clone(), dir_opt.unwrap()));
                   }
                   root.pop();
                 }
@@ -144,23 +144,29 @@ pub fn iterateRecursively<P: Send + Clone, W: PathHandler<P> + Send + Clone>
             }
 
             // Tell waiting threads that will not produce more
-            let mut tasks = t_in_progress.lock();
-            *tasks -= 1;
+            {
+              let mut guarded_tasks = t_in_progress.lock();
+              *guarded_tasks -= 1;
+            }
           }
         }
       }
 
       // Loop is over, thread is stopping
-      let mut d = t_done.lock();
-      *d += 1;
-      d.cond.signal();
+      {
+        let mut guarded_tasks_done = t_done.lock();
+        *guarded_tasks_done += 1;
+        guarded_tasks_done.cond.signal();
+      }
     });
   }
 
   // Wait for threads to complete
-  let d = done.lock();
-  while *d < threads {
-      d.cond.wait();
+  {
+    let guarded_done = done.lock();
+    while *guarded_done < threads {
+      guarded_done.cond.wait();
+    }
   }
 }
 

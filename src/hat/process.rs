@@ -98,9 +98,9 @@ impl <Msg:Send, Reply:Send, Handler: MsgHandler<Msg, Reply>> Process<Msg, Reply,
       let mut my_handler = handler_proc();
       loop {
         { // increment available queueing tickets by one
-          let mut tickets = local_ticket_count.lock();
-          *tickets += 1;
-          tickets.cond.signal();
+          let mut guarded_tickets = local_ticket_count.lock();
+          *guarded_tickets += 1;
+          guarded_tickets.cond.signal();
         }
         match receiver.recv_opt() {
           Ok((msg, None)) => {
@@ -116,12 +116,12 @@ impl <Msg:Send, Reply:Send, Handler: MsgHandler<Msg, Reply>> Process<Msg, Reply,
   }
 
   fn takeTicket(&self) {
-    let mut tickets = self.ticket_count.lock();
-    while *tickets <= 0 {
+    let mut guarded_tickets = self.ticket_count.lock();
+    while *guarded_tickets <= 0 {
       // release lock while waiting for change
-      tickets.cond.wait();
+      guarded_tickets.cond.wait();
     }
-    *tickets -= 1;
+    *guarded_tickets -= 1;
   }
 
   /// Asynchronous send.
