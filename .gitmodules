@@ -1,6 +1,3 @@
-[submodule "rust-snappy"]
-	path = rust-snappy
-	url = https://github.com/brinchj/rust-snappy.git
 [submodule "sodiumoxide"]
 	path = sodiumoxide
 	url = https://github.com/brinchj/sodiumoxide.git

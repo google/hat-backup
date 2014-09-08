@@ -422,4 +422,3 @@ impl <'db> MsgHandler<Msg, Reply> for HashIndex<'db> {
     }
   }
 }
-

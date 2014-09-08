@@ -1,4 +1,4 @@
-LIBS=-L quickcheck -L rustsqlite -L rust-snappy -L sodiumoxide
+LIBS=-L quickcheck -L rustsqlite -L sodiumoxide
 RUST=rustc ${LIBS}
 
 SRC=src/hat
@@ -19,10 +19,7 @@ dep-sodiumoxide: sodiumoxide/src/sodiumoxide/*.rs
 dep-rustsqlite: rustsqlite/src/sqlite3/*.rs
 	${RUST} --crate-type lib -O rustsqlite/src/sqlite3/lib.rs && mv libsqlite*.rlib rustsqlite/
 
-dep-rustsnappy: rust-snappy/snappy.rs
-	${RUST} --crate-type lib -O rust-snappy/snappy.rs && mv libsnappy*.rlib rust-snappy/
-
-deps: dep-quickcheck dep-sodiumoxide dep-rustsqlite dep-rustsnappy
+deps: dep-quickcheck dep-sodiumoxide dep-rustsqlite
 
 
 

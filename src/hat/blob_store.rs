@@ -23,8 +23,6 @@ use serialize::json::{Json, ToJson, Decoder, from_str, Object};
 use collections::treemap::{TreeMap};
 use collections::{LruCache};
 
-use snappy::{compress, uncompress};
-
 use std::io::{File};
 use std::str;
 
@@ -280,15 +278,13 @@ impl <B: BlobStoreBackend> MsgHandler<Msg, Reply> for BlobStore<B> {
     match msg {
 
       Store(blob, cb) => {
-        let compressed = compress(blob);
-
-        let new_size = compressed.len() + self.buffer_data_bytes;
+        let new_size = blob.len() + self.buffer_data_bytes;
         let id = BlobID{name: self.blob_desc.name.clone(),
-                         begin: self.buffer_data_bytes,
-                         end: new_size};
+                        begin: self.buffer_data_bytes,
+                        end: new_size};
 
         self.buffer_data_bytes = new_size;
-        self.buffer_data.push((id.clone(), compressed, cb));
+        self.buffer_data.push((id.clone(), blob.as_slice().into_owned(), cb));
 
         // To avoid unnecessary blocking, we reply with the ID *before* possibly flushing.
         reply(StoreOK(id));
@@ -299,11 +295,8 @@ impl <B: BlobStoreBackend> MsgHandler<Msg, Reply> for BlobStore<B> {
 
       Retrieve(id) => {
         let blob = self.backend_read(id.name);
-        let chunk_compressed = blob.slice(id.begin, id.end).into_owned();
-        match uncompress(chunk_compressed) {
-          Some(chunk) => return reply(RetrieveOK(chunk)),
-          None => fail!("Could not decompress chunk."),
-        }
+        let chunk = blob.slice(id.begin, id.end);
+        return reply(RetrieveOK(chunk.as_slice().into_owned()));
       },
 
       Flush => {

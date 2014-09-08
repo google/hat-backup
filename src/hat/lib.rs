@@ -37,7 +37,6 @@ extern crate time;
 // Rust bindings
 extern crate sodiumoxide;
 extern crate sqlite3;
-extern crate snappy;
 
 // Testing
 #[cfg(test)]
