@@ -45,7 +45,7 @@ pub enum Msg<KE, IT> {
 
   /// List a "directory" (aka. a `level`) in the index.
   /// Returns `ListResult` with all the entries under the given parent.
-  ListDir(Option<~[u8]>),
+  ListDir(Option<Vec<u8>>),
 
   /// Flush this key store and its dependencies.
   /// Returns `FlushOK`.
@@ -53,8 +53,8 @@ pub enum Msg<KE, IT> {
 }
 
 pub enum Reply<'db, B> {
-  Id(~[u8]),
-  ListResult(Vec<(~[u8], ~[u8], u64, u64, u64, ~[u8], ~[u8],
+  Id(Vec<u8>),
+  ListResult(Vec<(Vec<u8>, Vec<u8>, u64, u64, u64, Vec<u8>, Vec<u8>,
                   ReaderResult<HashStoreBackend<'db, B>>)>),
   FlushOK,
 }
@@ -65,7 +65,7 @@ pub struct KeyStore<'db, KE, IT, B> {
 }
 
 // Implementations
-impl <'db, KE: KeyEntry<KE> + Send, IT: Iterator<~[u8]>, B: BlobStoreBackend + Send>
+impl <'db, KE: KeyEntry<KE> + Send, IT: Iterator<Vec<u8>>, B: BlobStoreBackend + Send>
   KeyStore<'db, KE, IT, B> {
   pub fn new(index: Box<KeyIndexProcess<KE>>, hash_store: Box<HashStoreProcess<B>>)
              -> KeyStore<KE, IT, B> {
@@ -100,7 +100,7 @@ impl <'db, B> HashStoreBackend<'db, B> {
 
 impl <'db, B: BlobStoreBackend + Clone> HashTreeBackend for HashStoreBackend<'db, B>
 {
-  fn fetch_chunk(&mut self, hash: hash_index::Hash) -> Option<~[u8]> {
+  fn fetch_chunk(&mut self, hash: hash_index::Hash) -> Option<Vec<u8>> {
     assert!(hash.bytes.len() > 0);
 
     match self.hash_store.sendReply(hash_store::FetchChunkFromHash(hash)) {
@@ -109,7 +109,7 @@ impl <'db, B: BlobStoreBackend + Clone> HashTreeBackend for HashStoreBackend<'db
     }
   }
 
-  fn fetch_persistent_ref(&mut self, hash: hash_index::Hash) -> Option<~[u8]> {
+  fn fetch_persistent_ref(&mut self, hash: hash_index::Hash) -> Option<Vec<u8>> {
     assert!(hash.bytes.len() > 0);
 
     loop {
@@ -125,7 +125,7 @@ impl <'db, B: BlobStoreBackend + Clone> HashTreeBackend for HashStoreBackend<'db
     };
   }
 
-  fn fetch_payload(&mut self, hash: hash_index::Hash) -> Option<~[u8]> {
+  fn fetch_payload(&mut self, hash: hash_index::Hash) -> Option<Vec<u8>> {
     match self.hash_store.sendReply(hash_store::FetchPayload(hash.clone()))
     {
       hash_store::Payload(p) => { return p }, // done
@@ -135,8 +135,8 @@ impl <'db, B: BlobStoreBackend + Clone> HashTreeBackend for HashStoreBackend<'db
   }
 
   fn insert_chunk(&mut self, hash: hash_index::Hash,
-                  level: i64, payload: Option<~[u8]>,
-                  chunk: ~[u8]) -> ~[u8] {
+                  level: i64, payload: Option<Vec<u8>>,
+                  chunk: Vec<u8>) -> Vec<u8> {
     match self.hash_store.sendReply(
       hash_store::Insert(hash, level, payload, chunk))
     {
@@ -146,7 +146,7 @@ impl <'db, B: BlobStoreBackend + Clone> HashTreeBackend for HashStoreBackend<'db
   }
 }
 
-impl <'db, KE: KeyEntry<KE> + Clone + Send, IT: Iterator<~[u8]> + Send,
+impl <'db, KE: KeyEntry<KE> + Clone + Send, IT: Iterator<Vec<u8>> + Send,
       B: BlobStoreBackend + Clone + Send>
         MsgHandler<Msg<KE, IT>, Reply<'db, B>> for KeyStore<'db, KE, IT, B>
 {
@@ -208,10 +208,16 @@ impl <'db, KE: KeyEntry<KE> + Clone + Send, IT: Iterator<~[u8]> + Send,
             let it_opt = chunk_it_opt.and_then(|p| p());
             if it_opt.is_some() {
 
-              it_opt.unwrap().map(|chunk: ~[u8]| {
-                tree.append(chunk)
+              let mut bytes_read = 0u64;
+              it_opt.unwrap().map(|chunk: Vec<u8>| {
+                bytes_read += chunk.len() as u64;
+                tree.append(chunk);
               }).last();
 
+              // Check that we read the whole file:
+              org_entry.size().map(|size| assert_eq!(size, bytes_read));
+
+              // Get top tree hash:
               let (hash, persistent_ref) = tree.hash();
 
               let local_index = self.index.clone();
@@ -246,7 +252,7 @@ mod tests {
   use blob_store::tests::{MemoryBackend, DevNullBackend};
   use hash_tree;
 
-  use rand::{Rng, task_rng};
+  use std::rand::{Rng, task_rng};
   use quickcheck::{Config, Testable, gen};
   use quickcheck::{quickcheck_config};
   use process::{Process};
@@ -254,7 +260,7 @@ mod tests {
   use test::{Bencher};
 
   // QuickCheck configuration
-  static SIZE: uint = 500;
+  static SIZE: uint = 50;
   static CONFIG: Config = Config {
     tests: 10,
     max_tests: 100,
@@ -265,26 +271,31 @@ mod tests {
     quickcheck_config(CONFIG, &mut gen(task_rng(), SIZE), f)
   }
 
+  fn random_ascii_bytes() -> Vec<u8> {
+    let ascii: String = task_rng().gen_ascii_chars().take(32).collect();
+    ascii.into_bytes()
+  }
+
   #[deriving(Clone)]
   struct KeyEntryStub {
-    parent_id: Option<~[u8]>,
+    parent_id: Option<Vec<u8>>,
 
-    id: ~[u8],
-    name: ~[u8],
+    id: Vec<u8>,
+    name: Vec<u8>,
 
-    data: Option<Vec<~[u8]>>,
+    data: Option<Vec<Vec<u8>>>,
 
     modified: Option<u64>,
   }
 
   #[deriving(Eq)]
   impl KeyEntryStub {
-    fn new(parent: Option<~[u8]>, name: ~[u8], data: Option<Vec<~[u8]>>,
+    fn new(parent: Option<Vec<u8>>, name: Vec<u8>, data: Option<Vec<Vec<u8>>>,
            modified: Option<u64>) ->
       KeyEntryStub
     {
       KeyEntryStub{parent_id: parent,
-                   id: task_rng().gen_ascii_str(32).as_bytes().into_owned(),
+                   id: random_ascii_bytes(),
                    name: name,
                    data: data,
                    modified: modified}
@@ -293,16 +304,20 @@ mod tests {
 
   impl KeyEntry<KeyEntryStub> for KeyEntryStub {
 
-    fn id(&self) -> Option<~[u8]> {
+    fn id(&self) -> Option<Vec<u8>> {
       Some(self.id.clone())
     }
 
-    fn parentId(&self) -> Option<~[u8]> {
+    fn parentId(&self) -> Option<Vec<u8>> {
       self.parent_id.clone()
     }
 
-    fn name(&self) -> ~[u8] {
+    fn name(&self) -> Vec<u8> {
       self.name.as_slice().into_owned()
+    }
+
+    fn size(&self) -> Option<u64> {
+      None
     }
 
     fn permissions(&self) -> Option<u64> {
@@ -329,15 +344,15 @@ mod tests {
       None
     }
 
-    fn withId(&self, id: ~[u8]) -> KeyEntryStub {
+    fn withId(&self, id: Vec<u8>) -> KeyEntryStub {
       assert_eq!(self.id, id);
       self.clone()
     }
 
   }
 
-  impl Iterator<~[u8]> for KeyEntryStub {
-    fn next(&mut self) -> Option<~[u8]> {
+  impl Iterator<Vec<u8>> for KeyEntryStub {
+    fn next(&mut self) -> Option<Vec<u8>> {
       if self.data.is_none() { return None }
       self.data.get_mut_ref().shift()
     }
@@ -351,22 +366,25 @@ mod tests {
 
   fn rng_filesystem(size: uint) -> FileSystem
   {
-    fn create_files(parent_id: Option<~[u8]>, size: uint) -> Vec<FileSystem> {
-      let child_size = size / 10;
+    fn create_files(parent_id: Option<Vec<u8>>, size: uint) -> Vec<FileSystem> {
+      let children = size as f32 / 10.0;
+
+      // dist_factor * i for i in range(children) + children == size
+      let dist_factor: f32 = (size as f32 - children) / ((children * (children - 1.0)) / 2.0);
+
+      let mut child_size = 0.0 as f32;
 
       let mut files = Vec::new();
-      for _ in range(0, child_size) {
+      for _ in range(0, children as uint) {
 
         let data_opt = if task_rng().gen() { None }
-                       else { Some(Vec::from_fn(
-                         task_rng().gen_range(0, 32) as uint,
-                         |_| task_rng().gen_ascii_str(128).as_bytes().into_owned()))
+                       else { Some(Vec::from_fn(8, |_| random_ascii_bytes()))
                        };
 
         let modified: u64 = task_rng().gen();
         let new_root = KeyEntryStub::new(
           parent_id.clone(),
-          task_rng().gen_ascii_str(32).as_bytes().into_owned(),
+          random_ascii_bytes(),
           data_opt,
           Some(modified % 2147483648)
         );
@@ -374,13 +392,14 @@ mod tests {
         let new_root_id = new_root.id();
 
         files.push(FileSystem{file: new_root,
-                              filelist: create_files(new_root_id, child_size)});
+                              filelist: create_files(new_root_id, child_size as uint)});
+        child_size += dist_factor;
       }
       files
     }
 
     let root = KeyEntryStub::new(None,
-                                 bytes!("root").into_owned(),
+                                 b"root".into_owned(),
                                  None, Some(123));
     let root_id = root.id();
     FileSystem{file: root,
@@ -428,7 +447,7 @@ mod tests {
                 hash_tree::NoData => fail!("No data."),
                 hash_tree::SingleBlock(chunk) => {
                   assert!(original.len() <= 1);
-                  assert_eq!(original.last().unwrap_or(&bytes!().into_owned()),
+                  assert_eq!(original.last().unwrap_or(&b"".into_owned()),
                              &chunk);
                   break
                 },
@@ -442,8 +461,8 @@ mod tests {
               assert_eq!(original.len(), chunk_count);
             },
             None => {
-              assert_eq!(hash, bytes!().into_owned());
-              assert_eq!(persistent_ref, bytes!().into_owned());
+              assert_eq!(hash, b"".into_owned());
+              assert_eq!(persistent_ref, b"".into_owned());
             }
           }
 
@@ -491,14 +510,14 @@ mod tests {
     let ksP : Box<KeyStoreProcess<KeyEntryStub, KeyEntryStub, DevNullBackend>>
       = Process::new(proc() { KeyStore::newForTesting(backend) });
 
-    let bytes = vec!(~[0 as u8, ..128*1024]);
+    let bytes = Vec::from_elem(128*1024, 0u8);
 
-    let mut i = 0;
+    let mut i = 0u;
     bench.iter(|| {
       i += 1;
 
       let entry = KeyEntryStub::new(None, format!("{}", i).as_bytes().into_owned(),
-                                    Some(bytes.clone()), None);
+                                    Some(vec![bytes.clone()]), None);
       ksP.sendReply(Insert(entry.clone(), Some(proc() { Some(entry) })));
 
     });
@@ -514,16 +533,20 @@ mod tests {
     let ksP : Box<KeyStoreProcess<KeyEntryStub, KeyEntryStub, DevNullBackend>>
       = Process::new(proc() { KeyStore::newForTesting(backend) });
 
-    let bytes = ~[0 as u8, ..128*1024];
+    let bytes = Vec::from_elem(128*1024, 0u8);
 
-    let mut i = 0;
+    let mut i = 0u;
     bench.iter(|| {
       i += 1;
 
       let mut my_bytes = bytes.clone();
-      my_bytes[0] = i as u8;
-      my_bytes[1] = (i / 256) as u8;
-      my_bytes[2] = (i / 65536) as u8;
+      {
+        let mut mut_view = my_bytes.as_mut_slice();
+        mut_view[0] = i as u8;
+        mut_view[1] = (i / 256) as u8;
+        mut_view[2] = (i / 65536) as u8;
+      }
+      let my_bytes = my_bytes;
 
       let entry = KeyEntryStub::new(None, format!("{}", i).as_bytes().into_owned(),
                                     Some(vec!(my_bytes)), None);
@@ -543,9 +566,9 @@ mod tests {
       = Process::new(proc() { KeyStore::newForTesting(backend) });
 
     bench.iter(|| {
-      let bytes = ~[0 as u8, ..128*1024];
+      let bytes = Vec::from_elem(128*1024, 0u8);
       let entry = KeyEntryStub::new(None,
-                                    (bytes!(1,2,3)).into_owned(),
+                                    vec![1u8, 2, 3].as_slice().into_owned(),
                                     Some(Vec::from_elem(16, bytes)),
                                     None);
 
@@ -568,22 +591,26 @@ mod tests {
     let ksP : Box<KeyStoreProcess<KeyEntryStub, KeyEntryStub, DevNullBackend>>
       = Process::new(proc() { KeyStore::newForTesting(backend) });
 
-    let bytes = ~[0 as u8, ..128*1024];
+    let bytes = Vec::from_elem(128*1024, 0u8);
     let mut i = 0;
 
     bench.iter(|| {
       i += 1;
 
       let mut my_bytes = bytes.clone();
-      my_bytes[0] = i as u8;
-      my_bytes[1] = (i / 256) as u8;
-      my_bytes[2] = (i / 65536) as u8;
+      {
+        let mut_view = my_bytes.as_mut_slice();
+        mut_view[0] = i as u8;
+        mut_view[1] = (i / 256) as u8;
+        mut_view[2] = (i / 65536) as u8;
+      }
+      let my_bytes = my_bytes;
 
       let entry = KeyEntryStub::new(None,
-                                    (bytes!(1,2,3)).into_owned(),
+                                    vec![1u8, 2, 3].as_slice().into_owned(),
                                     Some(Vec::from_fn(16, |i| {
                                       let mut local_bytes = my_bytes.clone();
-                                      local_bytes[3] = i as u8;
+                                      local_bytes.as_mut_slice()[3] = i as u8;
                                       local_bytes
                                     })),
                                     None);

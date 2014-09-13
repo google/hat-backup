@@ -16,8 +16,6 @@
 #![crate_type="bin"]
 #![license = "ALv2"]
 
-
-// #![warn(missing_doc)]
 #![warn(non_uppercase_statics)]
 #![warn(non_camel_case_types)]
 #![warn(managed_heap_memory)]
@@ -27,6 +25,7 @@
 
 // Standard Rust imports
 extern crate collections;
+extern crate debug;
 extern crate libc;
 extern crate rand;
 extern crate serialize;
@@ -43,7 +42,6 @@ extern crate sqlite3;
 extern crate quickcheck;
 
 use std::os;
-use std::io::stdio::{println};
 
 mod callback_container;
 mod cumulative_counter;
@@ -72,11 +70,11 @@ fn blob_dir() -> Path { Path::new("blobs") }
 
 
 fn usage() {
-  println(format!("Usage: {} [snapshot|checkout] name path", os::args().get(0)));
+  println!("Usage: {} [snapshot|checkout] name path", os::args().get(0));
 }
 
 fn license() {
-  println(include_str!("../../LICENSE"));
+  println!(include_str!("../../LICENSE"));
 }
 
 
@@ -88,10 +86,10 @@ fn main() {
   let args = os::args();
   if args.len() == 2 {
     let flag = args.get(1);
-    if flag == &"--license".to_owned() {
+    if flag == &"--license".to_string() {
         license();
     }
-    else if flag == &"--help".to_owned() {
+    else if flag == &"--help".to_string() {
       usage();
       license();
     }
@@ -104,7 +102,7 @@ fn main() {
 
   let cmd = args.get(1);
 
-  if cmd == &"snapshot".to_owned() {
+  if cmd == &"snapshot".to_string() {
     let name = args.get(2);  // used for naming the key index
     let path = args.get(3);
 
@@ -112,29 +110,29 @@ fn main() {
       let backend = blob_store::FileBackend::new(blob_dir());
       let hat_opt = hat::Hat::openRepository(
         &Path::new("repo"), backend, MAX_BLOB_SIZE);
-      let hat = hat_opt.expect(format!("Could not open repository in {}.", path));
+      let hat = hat_opt.expect(format!("Could not open repository in {}.", path).as_slice());
 
       let family_opt = hat.openFamily(name.clone());
-      let family = family_opt.expect(format!("Could not open family '{}'", name));
+      let family = family_opt.expect(format!("Could not open family '{}'", name).as_slice());
 
       family.snapshotDir(Path::new(path.clone()));
       family.flush();
     }
 
-    println("Waiting for final flush...");
+    println!("Waiting for final flush...");
     return;
   }
-  else if cmd == &"checkout".to_owned() {
+  else if cmd == &"checkout".to_string() {
     let name = args.get(2);  // used for naming the key index
     let path = args.get(3);
 
     let backend = blob_store::FileBackend::new(blob_dir());
     let hat_opt = hat::Hat::openRepository(
       &Path::new("repo"), backend, MAX_BLOB_SIZE);
-    let hat = hat_opt.expect(format!("Could not open repository in {}.", path));
+    let hat = hat_opt.expect(format!("Could not open repository in {}.", path).as_slice());
 
     let family_opt = hat.openFamily(name.clone());
-    let family = family_opt.expect(format!("Could not open family '{}'", name));
+    let family = family_opt.expect(format!("Could not open family '{}'", name).as_slice());
 
     family.checkoutInDir(&mut Path::new(path.clone()), None);
     return;

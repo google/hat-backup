@@ -34,7 +34,6 @@ use key_store::{KeyStore, KeyStoreProcess};
 use key_store;
 
 use listdir;
-use std::io::stdio::{println};
 
 use std::io::{Reader, IoResult, UserDir,
               TypeDirectory, TypeSymlink, TypeFile, FileStat};
@@ -50,18 +49,18 @@ pub struct Hat<'db, B> {
   max_blob_size: uint,
 }
 
-fn concat_filename(a: &Path, b: ~str) -> ~str {
+fn concat_filename(a: &Path, b: String) -> String {
   let mut result = a.clone();
   result.push(Path::new(b));
-  result.as_str().expect("Unable to decode repository_root.").to_owned()
+  result.as_str().expect("Unable to decode repository_root.").to_string()
 }
 
-fn blob_index_name(root: &Path) -> ~str {
-  concat_filename(root, "blob_index.sqlite3".to_owned())
+fn blob_index_name(root: &Path) -> String {
+  concat_filename(root, "blob_index.sqlite3".to_string())
 }
 
-fn hash_index_name(root: &Path) -> ~str {
-  concat_filename(root, "hash_index.sqlite3".to_owned())
+fn hash_index_name(root: &Path) -> String {
+  concat_filename(root, "hash_index.sqlite3".to_string())
 }
 
 impl <'db, B: BlobStoreBackend + Clone + Send> Hat<'db, B> {
@@ -81,7 +80,7 @@ impl <'db, B: BlobStoreBackend + Clone + Send> Hat<'db, B> {
     })
   }
 
-  pub fn openFamily(&self, name: ~str) -> Option<Family<'db, B>> {
+  pub fn openFamily(&self, name: String) -> Option<Family<'db, B>> {
     // We setup a standard pipeline of processes:
     // KeyStore -> KeyIndex
     //          -> HashStore -> HashIndex
@@ -108,9 +107,9 @@ impl <'db, B: BlobStoreBackend + Clone + Send> Hat<'db, B> {
 
 
 struct FileEntry {
-  name: ~[u8],
+  name: Vec<u8>,
 
-  parentId: Option<~[u8]>,
+  parentId: Option<Vec<u8>>,
 
   stat: FileStat,
   full_path: Path,
@@ -118,7 +117,7 @@ struct FileEntry {
 
 impl FileEntry {
   fn new(full_path: Path,
-         parent: Option<~[u8]>) -> Result<FileEntry, std::io::IoError> {
+         parent: Option<Vec<u8>>) -> Result<FileEntry, std::io::IoError> {
     let filename_opt = full_path.filename();
     if filename_opt.is_some() {
       lstat(&full_path).map(|st| {
@@ -162,16 +161,20 @@ impl Clone for FileEntry {
 }
 
 impl KeyEntry<FileEntry> for FileEntry {
-  fn name(&self) -> ~[u8] {
+  fn name(&self) -> Vec<u8> {
     self.name.clone()
   }
-  fn id(&self) -> Option<~[u8]> {
+  fn id(&self) -> Option<Vec<u8>> {
     Some(format!("d{:u}i{:u}",
                  self.stat.unstable.device,
                  self.stat.unstable.inode).as_bytes().into_owned())
   }
-  fn parentId(&self) -> Option<~[u8]> {
+  fn parentId(&self) -> Option<Vec<u8>> {
     self.parentId.clone()
+  }
+
+  fn size(&self) -> Option<u64> {
+    Some(self.stat.size)
   }
 
   fn created(&self) -> Option<u64> {
@@ -193,7 +196,7 @@ impl KeyEntry<FileEntry> for FileEntry {
   fn groupId(&self) -> Option<u64> {
     None
   }
-  fn withId(&self, id: ~[u8]) -> FileEntry {
+  fn withId(&self, id: Vec<u8>) -> FileEntry {
     assert_eq!(Some(id), self.id());
     self.clone()
   }
@@ -212,10 +215,10 @@ impl FileIterator {
   }
 }
 
-impl Iterator<~[u8]> for FileIterator {
-  fn next(&mut self) -> Option<~[u8]> {
-    let mut buf = ~[0, .. 128*1024];
-    match self.file.read(buf) {
+impl Iterator<Vec<u8>> for FileIterator {
+  fn next(&mut self) -> Option<Vec<u8>> {
+    let mut buf = Vec::from_elem(128*1024, 0u8);
+    match self.file.read(buf.as_mut_slice()) {
       Err(_) => None,
       Ok(size) => Some(buf.slice_to(size).into_owned()),
     }
@@ -244,9 +247,9 @@ impl <'db, B> InsertPathHandler<'db, B> {
   }
 }
 
-impl <'db, B: BlobStoreBackend + Clone> listdir::PathHandler<Option<~[u8]>>
+impl <'db, B: BlobStoreBackend + Clone> listdir::PathHandler<Option<Vec<u8>>>
   for InsertPathHandler<'db, B> {
-  fn handlePath(&mut self, parent: Option<~[u8]>, path: Path) -> Option<Option<~[u8]>> {
+  fn handlePath(&mut self, parent: Option<Vec<u8>>, path: Path) -> Option<Option<Vec<u8>>> {
     let mut count = {
       let mut guarded_count = self.count.lock();
       *guarded_count += 1;
@@ -257,7 +260,7 @@ impl <'db, B: BlobStoreBackend + Clone> listdir::PathHandler<Option<~[u8]>>
       let mut guarded_last_print = self.last_print.lock();
       let now = time::now().to_timespec();
       if guarded_last_print.sec <= now.sec - 1 {
-        println(format!("\\#{}: {}", count, path.display()));
+        println!("#{}: {}", count, path.display());
         *guarded_last_print = now;
       }
       self.my_last_print = now;
@@ -266,7 +269,7 @@ impl <'db, B: BlobStoreBackend + Clone> listdir::PathHandler<Option<~[u8]>>
     let fileEntry_opt = FileEntry::new(path.clone(), parent);
     match fileEntry_opt {
       Err(e) => {
-        println(format!("Skipping '{}': {}", path.display(), e.to_str()));
+        println!("Skipping '{}': {}", path.display(), e.to_str());
       },
       Ok(fileEntry) => {
         if fileEntry.isSymlink() {
@@ -277,8 +280,7 @@ impl <'db, B: BlobStoreBackend + Clone> listdir::PathHandler<Option<~[u8]>>
         let local_fileEntry = fileEntry.clone();
         let create_file_it = proc() {
           match local_fileEntry.fileIterator() {
-            Err(e) => {println(format!("Skipping '{}': {}",
-                                       local_root.display(), e.to_str()));
+            Err(e) => {println!("Skipping '{}': {}", local_root.display(), e.to_str());
                        None},
             Ok(it) => { Some(it) }
           }
@@ -303,7 +305,7 @@ impl <'db, B: BlobStoreBackend + Clone> listdir::PathHandler<Option<~[u8]>>
 
 
 struct Family<'db, B> {
-  name: ~str,
+  name: String,
   key_store: Box<KeyStoreProcess<'db, FileEntry, FileIterator, B>>,
 }
 
@@ -318,7 +320,7 @@ impl <'db, B: BlobStoreBackend + Clone> Family<'db, B> {
     self.key_store.sendReply(key_store::Flush);
   }
 
-  pub fn checkoutInDir(&self, output_dir: &mut Path, dir_id: Option<~[u8]>) {
+  pub fn checkoutInDir(&self, output_dir: &mut Path, dir_id: Option<Vec<u8>>) {
 
     fn put_chunks<B: hash_tree::HashTreeBackend + Clone>(
       fd: &mut File, tree: hash_tree::ReaderResult<B>)
@@ -326,14 +328,14 @@ impl <'db, B: BlobStoreBackend + Clone> Family<'db, B> {
       let mut it = match tree {
         hash_tree::NoData => fail!("Trying to read data where none exist."),
         hash_tree::SingleBlock(chunk) => {
-          fd.write(chunk).unwrap();
+          fd.write(chunk.as_slice()).unwrap();
           return;
         },
         hash_tree::Tree(it) => it,
       };
       // We have a tree
       for chunk in it {
-        fd.write(chunk).unwrap();
+        fd.write(chunk.as_slice()).unwrap();
       }
     }
 
@@ -348,7 +350,6 @@ impl <'db, B: BlobStoreBackend + Clone> Family<'db, B> {
     for (id, name, _, _, _, hash, _, data_res) in listing.move_iter() {
 
       output_dir.push(name);
-      println(format!("{}", output_dir.display()));
 
       if hash.len() == 0 {
         // This is a directory, recurse!
@@ -357,6 +358,7 @@ impl <'db, B: BlobStoreBackend + Clone> Family<'db, B> {
         // This is a file, write it
         let mut fd = File::create(output_dir).unwrap();
         put_chunks(&mut fd, data_res);
+        fd.flush();
       }
 
       output_dir.pop();

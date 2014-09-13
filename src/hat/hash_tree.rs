@@ -18,7 +18,7 @@
 //! a streaming hash-tree reader.
 
 use serialize::{json, Encodable, Decodable};
-use serialize::json::{Json, ToJson, Object, List};
+use serialize::json::{Json, ToJson};
 
 use collections::treemap::{TreeMap};
 use hash_index::{Hash};
@@ -27,12 +27,12 @@ use std::{str};
 
 #[deriving(Clone, Encodable, Decodable)]
 struct HashRef {
-  pub hash: ~[u8],
-  pub persistent_ref: ~[u8],
+  pub hash: Vec<u8>,
+  pub persistent_ref: Vec<u8>,
 }
 
 impl HashRef {
-  fn new(hash: ~[u8], persistent_ref: ~[u8]) -> HashRef {
+  fn new(hash: Vec<u8>, persistent_ref: Vec<u8>) -> HashRef {
     HashRef{hash: hash, persistent_ref: persistent_ref}
   }
 }
@@ -40,9 +40,9 @@ impl HashRef {
 impl ToJson for HashRef {
   fn to_json(&self) -> Json {
     let mut m = box TreeMap::new();
-    m.insert(StrBuf::from_str("hash"), self.hash.to_json());
-    m.insert(StrBuf::from_str("persistent_ref"), self.persistent_ref.to_json());
-    Object(m).to_json()
+    m.insert("hash".to_string(), self.hash.to_json());
+    m.insert("persistent_ref".to_string(), self.persistent_ref.to_json());
+    json::Object(m).to_json()
   }
 }
 
@@ -51,23 +51,23 @@ fn vec_to_json<J: ToJson>(vec: &Vec<J>) -> Json {
   for x in vec.iter() {
     json_vec.push(x.to_json());
   }
-  List(json_vec).to_json()
+  json::List(json_vec).to_json()
 }
 
 pub trait HashTreeBackend {
 
-  fn fetch_chunk(&mut self, Hash) -> Option<~[u8]>;
+  fn fetch_chunk(&mut self, Hash) -> Option<Vec<u8>>;
 
-  fn fetch_payload(&mut self, Hash) -> Option<~[u8]>;
+  fn fetch_payload(&mut self, Hash) -> Option<Vec<u8>>;
 
-  fn fetch_persistent_ref(&mut self, Hash) -> Option<~[u8]>;
+  fn fetch_persistent_ref(&mut self, Hash) -> Option<Vec<u8>>;
 
-  fn insert_chunk(&mut self, Hash, i64, Option<~[u8]>, ~[u8]) -> ~[u8];
+  fn insert_chunk(&mut self, Hash, i64, Option<Vec<u8>>, Vec<u8>) -> Vec<u8>;
 
 }
 
 
-fn hash_refs_to_bytes(refs: &Vec<HashRef>) -> ~[u8] {
+fn hash_refs_to_bytes(refs: &Vec<HashRef>) -> Vec<u8> {
   vec_to_json(refs).to_str().as_bytes().into_owned()
 }
 
@@ -117,13 +117,16 @@ impl <B: HashTreeBackend + Clone> SimpleHashTreeWriter<B> {
   /// When reading back the tree, these blocks will be returned exactly as they were written, in the
   /// same order, and split at the same boundaries (i.e. pushing 1-bytes blocks will give 1-byte
   /// blocks when reading; if needed, accummulation of data must be handled by the `backend`).
-  pub fn append(&mut self, chunk: ~[u8]) {
+  pub fn append(&mut self, chunk: Vec<u8>) {
     self.append_at_level(0, chunk, None);
   }
 
-  fn append_at_level(&mut self, level: uint, data: ~[u8],
-                     metadata: Option<~[u8]>) {
-    let hash = Hash::new(metadata.clone().unwrap_or_else(|| data.clone()));
+  fn append_at_level(&mut self, level: uint, data: Vec<u8>,
+                     metadata: Option<Vec<u8>>) {
+    let hash = match metadata {
+      Some(ref x) => Hash::new(x.as_slice()),
+      None => Hash::new(data.as_slice()),
+    };
     let persistent_ref = self.backend.insert_chunk(
       hash.clone(), level as i64, metadata, data);
 
@@ -162,7 +165,7 @@ impl <B: HashTreeBackend + Clone> SimpleHashTreeWriter<B> {
     let metadata_bytes = {
       let mut metadata = Vec::new();
       for hashref in level_v.move_iter() {
-        metadata.push_all(hashref.hash);
+        metadata.push_all(hashref.hash.as_slice());
       }
       metadata.as_slice().into_owned()
     };
@@ -175,13 +178,13 @@ impl <B: HashTreeBackend + Clone> SimpleHashTreeWriter<B> {
   /// This also flushes and finalizes the tree. It should be considered frozen after calling
   /// `hash()`, i.e. it's OK to call `hash()` multiple times, but it's **not OK** to call `append()`
   /// after `hash()`.
-  pub fn hash(&mut self) -> (Hash, ~[u8]) {
+  pub fn hash(&mut self) -> (Hash, Vec<u8>) {
     // Empty hash tree is equivalent to hash tree of one empty block:
     if self.levels.len() == 0 {
-      self.append(bytes!().into_owned());
+      self.append(b"".into_owned());
     }
     // Locate first level that isn't empty (has data to collapse)
-    let first_non_empty_level = self.levels.iter().take_while(|level| level.len() == 0).len();
+    let first_non_empty_level = self.levels.iter().take_while(|level| level.len() == 0).count();
     // Unless only root has data, collapse all levels up to top level (which is handled next)
     range(first_non_empty_level, self.top_level()).map(|l| self.collapse_level(l)).last();
     // Collapse top level if possible
@@ -204,19 +207,19 @@ impl <B: HashTreeBackend + Clone> SimpleHashTreeWriter<B> {
 /// A structure for reading hash-trees written with `SimpleHashTreeWriter`.
 ///
 /// The hash-tree is "opened" as read-only and is streamed from first to last data-block. The data
-/// blocks are read in the same order as they were written. The reader implement a `~[u8]` iterator
+/// blocks are read in the same order as they were written. The reader implement a `Vec<u8>` iterator
 /// used for extracting the tree blocks.
 ///
 /// ```rust
 /// use hash_tree::SimpleHashTreeReader;
 ///
 /// let tree_it = match SimpleHashTreeReader::new(backend, top_hash, top_persisitent_ref) {
-///     SingleBlock(block) => return println(block),
+///     SingleBlock(block) => return println!(block),
 ///     Tree(it) => it,
 /// };
 ///
 /// for data_chunk in tree_it {
-///     println(data_chunk);
+///     println!(data_chunk);
 /// }
 /// ```
 pub struct SimpleHashTreeReader<B> {
@@ -233,7 +236,7 @@ pub enum ReaderResult<B> {
   NoData,
 
   /// The tree consists of just a single node and its data-chunk is given here.
-  SingleBlock(~[u8]),
+  SingleBlock(Vec<u8>),
 
   /// The tree has more than one node, so a data-chunk iterator is returned.
   Tree(SimpleHashTreeReader<B>),
@@ -243,7 +246,7 @@ impl <B: HashTreeBackend + Clone> SimpleHashTreeReader<B> {
 
   /// Creates a new `HashTreeReader` that reads through the `backend` the blocks of the hash tree
   /// defined by `root_hash` and `root_ref`.
-  pub fn new(backend: B, root_hash: Hash, root_ref: ~[u8]) ->  ReaderResult<B>
+  pub fn new(backend: B, root_hash: Hash, root_ref: Vec<u8>) ->  ReaderResult<B>
   {
     if root_hash.bytes.len() == 0 {
       return NoData;
@@ -252,7 +255,7 @@ impl <B: HashTreeBackend + Clone> SimpleHashTreeReader<B> {
     let data = backend.clone().fetch_chunk(root_hash.clone()).expect(
       "Could not find tree root hash.");
 
-    match hash_refs_from_bytes(data) {
+    match hash_refs_from_bytes(data.as_slice()) {
       None => SingleBlock(data), // There's no tree top, just a data block
       Some(childs) => Tree(SimpleHashTreeReader{
         stack: vec!((HashRef{hash: root_hash.bytes, persistent_ref: root_ref},
@@ -261,7 +264,7 @@ impl <B: HashTreeBackend + Clone> SimpleHashTreeReader<B> {
     }
   }
 
-  fn extract(&mut self) -> Option<~[u8]> {
+  fn extract(&mut self) -> Option<Vec<u8>> {
     while self.stack.len() > 0 {
       let child_opt = self.stack.mut_last().and_then(
         |&(_, ref mut childs)| childs.shift());
@@ -275,7 +278,7 @@ impl <B: HashTreeBackend + Clone> SimpleHashTreeReader<B> {
             Some(data) => data,
           };
 
-          match hash_refs_from_bytes(data) {
+          match hash_refs_from_bytes(data.as_slice()) {
             None => {
               return Some(data)
             },
@@ -297,11 +300,11 @@ impl <B: HashTreeBackend + Clone> SimpleHashTreeReader<B> {
 }
 
 
-impl <B: HashTreeBackend + Clone> Iterator<~[u8]> for SimpleHashTreeReader<B> {
+impl <B: HashTreeBackend + Clone> Iterator<Vec<u8>> for SimpleHashTreeReader<B> {
 
   /// Read the next block of the hash-tree.
   /// This operation can be expensive, as it may require fetching a file through the backend.
-  fn next(&mut self) -> Option<~[u8]> {
+  fn next(&mut self) -> Option<Vec<u8>> {
     self.extract()
   }
 }
@@ -316,12 +319,11 @@ mod tests {
 
   use std;
   use hash_index::{Hash};
-  use collections::hashmap::{HashMap, HashSet};
+  use std::collections::hashmap::{HashMap, HashSet};
 
-  use rand::{task_rng};
+  use std::rand::{task_rng};
   use quickcheck::{Config, Testable, gen};
   use quickcheck::{quickcheck_config};
-  use std::io::stdio::{println};
 
   // QuickCheck configuration
   static SIZE: uint = 500;
@@ -337,8 +339,8 @@ mod tests {
 
   #[deriving(Clone)]
   struct MemoryBackend {
-    chunks: Arc<Mutex<HashMap<~[u8], (i64, Option<~[u8]>, ~[u8])>>>,
-    seen_chunks: Arc<Mutex<HashSet<~[u8]>>>,
+    chunks: Arc<Mutex<HashMap<Vec<u8>, (i64, Option<Vec<u8>>, Vec<u8>)>>>,
+    seen_chunks: Arc<Mutex<HashSet<Vec<u8>>>>,
   }
 
   impl MemoryBackend {
@@ -348,7 +350,7 @@ mod tests {
         seen_chunks: Arc::new(Mutex::new(HashSet::new()))
       }
     }
-    fn saw_chunk(&self, chunk: &~[u8]) -> bool {
+    fn saw_chunk(&self, chunk: &Vec<u8>) -> bool {
       let mut guarded_seen = self.seen_chunks.lock();
       guarded_seen.contains(chunk)
     }
@@ -356,17 +358,17 @@ mod tests {
 
   impl HashTreeBackend for MemoryBackend {
 
-    fn fetch_chunk(&mut self, hash:Hash) -> Option<~[u8]> {
+    fn fetch_chunk(&mut self, hash:Hash) -> Option<Vec<u8>> {
       let mut guarded_chunks = self.chunks.lock();
       guarded_chunks.find(&hash.bytes).map(|&(_, _, ref chunk)| chunk.clone())
     }
 
-    fn fetch_payload(&mut self, hash:Hash) -> Option<~[u8]> {
+    fn fetch_payload(&mut self, hash:Hash) -> Option<Vec<u8>> {
       let mut guarded_chunks = self.chunks.lock();
       guarded_chunks.find(&hash.bytes).and_then(|&(_, ref payload, _)| payload.clone())
     }
 
-    fn fetch_persistent_ref(&mut self, hash:Hash) -> Option<~[u8]> {
+    fn fetch_persistent_ref(&mut self, hash:Hash) -> Option<Vec<u8>> {
       let mut guarded_chunks = self.chunks.lock();
       if guarded_chunks.contains_key(&hash.bytes) {
         Some(hash.bytes.clone())
@@ -376,7 +378,7 @@ mod tests {
     }
 
     fn insert_chunk(&mut self, hash:Hash, level:i64,
-                    payload:Option<~[u8]>, chunk:~[u8]) -> ~[u8] {
+                    payload:Option<Vec<u8>>, chunk:Vec<u8>) -> Vec<u8> {
       let mut guarded_seen = self.seen_chunks.lock();
       guarded_seen.insert(chunk.clone());
 
@@ -394,7 +396,7 @@ mod tests {
       let mut ht = SimpleHashTreeWriter::new(4, backend.clone());
 
       for _ in range(0, chunks_count) {
-        ht.append(bytes!("a").into_owned());
+        ht.append(b"a".into_owned());
       }
 
       let (hash, hash_ref) = ht.hash();
@@ -403,10 +405,10 @@ mod tests {
         NoData => fail!("No data."),
         SingleBlock(found_chunk) => {
           if chunks_count == 0 {
-            assert_eq!(found_chunk, bytes!().into_owned());
+            assert_eq!(found_chunk, b"".into_owned());
           } else {
             assert_eq!(chunks_count, 1);
-            assert_eq!(found_chunk, bytes!("a").into_owned());
+            assert_eq!(found_chunk, b"a".into_owned());
           }
           return true;
         },
@@ -416,7 +418,7 @@ mod tests {
       // We have a tree, let's investigate!
       let mut actual_count = 0;
       for chunk in tree_it {
-        assert_eq!(chunk, bytes!("a").into_owned());
+        assert_eq!(chunk, b"a".into_owned());
         actual_count += 1;
       }
       assert_eq!(chunks_count, actual_count);
@@ -428,7 +430,7 @@ mod tests {
 
   #[test]
   fn identity_empty() {
-    let block = bytes!().into_owned();
+    let block = b"".into_owned();
 
     let backend = MemoryBackend::new();
     let mut ht = SimpleHashTreeWriter::new(4, backend.clone());
@@ -446,7 +448,7 @@ mod tests {
 
   #[test]
   fn identity_append1() {
-    let block = bytes!("foobar").into_owned();
+    let block = b"foobar".into_owned();
 
     let backend = MemoryBackend::new();
     let mut ht = SimpleHashTreeWriter::new(4, backend.clone());
@@ -468,16 +470,16 @@ mod tests {
     let backend = MemoryBackend::new();
     let mut ht = SimpleHashTreeWriter::new(order, backend.clone());
 
-    let mut bytes = ~[0];
+    let mut bytes = vec!(0u8);
     {
       for i in std::iter::range_inclusive(1u8, (order * 4) as u8) {
-        bytes[0] = i;
+        bytes.as_mut_slice()[0] = i;
         ht.append(bytes.clone());
       }
     }
 
     for i in std::iter::range_inclusive(1u8, (order * 4) as u8) {
-      bytes[0] = i;
+      bytes.as_mut_slice()[0] = i;
       assert!(backend.saw_chunk(&bytes));
     }
 
@@ -490,7 +492,7 @@ mod tests {
     };
 
     for (i, chunk) in it.enumerate() {
-      bytes[0] = (i+1) as u8;
+      bytes.as_mut_slice()[0] = (i+1) as u8;
       assert_eq!(bytes, chunk);
     }
   }
@@ -500,18 +502,17 @@ mod tests {
     let order = 8;
     let backend = MemoryBackend::new();
     let mut ht = SimpleHashTreeWriter::new(order, backend.clone());
-    let mut bytes = ~[0];
+    let mut bytes = vec!(0u8);
 
     for i in std::iter::range_inclusive(1u8, (order - 1) as u8) {
-      bytes[0] = i;
+      bytes.as_mut_slice()[0] = i;
       ht.append(bytes.clone());
     }
 
     let (hash, hash_ref) = ht.hash();
 
     for i in std::iter::range_inclusive(1u8, (order - 1) as u8) {
-      println(format!("{}", i));
-      bytes[0] = i;
+      bytes.as_mut_slice()[0] = i;
       assert!(backend.saw_chunk(&bytes));
     }
 
@@ -522,7 +523,7 @@ mod tests {
     };
 
     for (i, chunk) in it.enumerate() {
-      bytes[0] = (i+1) as u8;
+      bytes.as_mut_slice()[0] = (i+1) as u8;
       assert_eq!(bytes, chunk);
     }
   }
@@ -530,12 +531,12 @@ mod tests {
 
   #[bench]
   fn append_unknown_16x128KB(bench: &mut Bencher) {
-    let mut bytes : ~[u8] = ~[0, ..128*1024];
+    let mut bytes = Vec::from_elem(128*1024, 0u8);
 
     bench.iter(|| {
       let mut ht = SimpleHashTreeWriter::new(8, MemoryBackend::new());
-      for i in range(0, 16) {
-        bytes[0] = i as u8;
+      for i in range(0u8, 16) {
+        bytes.as_mut_slice()[0] = i;
         ht.append(bytes.clone());
       };
       ht.hash();
@@ -546,11 +547,11 @@ mod tests {
 
   #[bench]
   fn append_known_16x128KB(bench: &mut Bencher) {
-    let bytes : ~[u8] = ~[0, ..128*1024];
+    let bytes = Vec::from_elem(128*1024, 0u8);
 
     bench.iter(|| {
       let mut ht = SimpleHashTreeWriter::new(8, MemoryBackend::new());
-      for _ in range(0, 16) {
+      for _ in range(0i, 16) {
         ht.append(bytes.clone());
       }
       ht.hash();

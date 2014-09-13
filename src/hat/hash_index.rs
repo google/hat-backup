@@ -35,9 +35,9 @@ pub type HashIndexProcess<'db> = Process<Msg, Reply, HashIndex<'db>>;
 
 
 /// A wrapper around Hash digests.
-#[deriving(Clone, Show, Hash, Eq, TotalEq)]
+#[deriving(Clone, Show, Hash, Eq, PartialEq)]
 pub struct Hash{
-  pub bytes: ~[u8],
+  pub bytes: Vec<u8>,
 }
 
 impl Hash {
@@ -62,11 +62,11 @@ pub struct HashEntry{
   pub level: i64,
 
   /// A local payload to store inside the index, along with this entry.
-  pub payload: Option<~[u8]>,
+  pub payload: Option<Vec<u8>>,
 
   /// A reference to a location in the external persistent storage (a blob reference) that contains
   /// the data for this entry (e.g. an object-name and a byte range).
-  pub persistent_ref: Option<~[u8]>,
+  pub persistent_ref: Option<Vec<u8>>,
 }
 
 pub enum Msg {
@@ -96,7 +96,7 @@ pub enum Msg {
   /// A `Hash` is committed when it has been `finalized` in the external storage. `Commit` includes
   /// the persistent reference that the content is available at.
   /// Returns CommitOK.
-  Commit(Hash, ~[u8]),
+  Commit(Hash, Vec<u8>),
 
   /// Install a "on-commit" handler to be called after `Hash` is committed.
   /// Returns `CallbackRegistered` or `HashNotKnown`.
@@ -111,8 +111,8 @@ pub enum Reply {
   HashNotKnown,
   HashEntry(HashEntry),
 
-  Payload(Option<~[u8]>),
-  PersistentRef(~[u8]),
+  Payload(Option<Vec<u8>>),
+  PersistentRef(Vec<u8>),
 
   ReserveOK,
   CommitOK,
@@ -126,8 +126,8 @@ pub enum Reply {
 struct QueueEntry {
   id: i64,
   level: i64,
-  payload: Option<~[u8]>,
-  persistent_ref: Option<~[u8]>,
+  payload: Option<Vec<u8>>,
+  persistent_ref: Option<Vec<u8>>,
 }
 
 pub struct HashIndex<'db> {
@@ -135,9 +135,9 @@ pub struct HashIndex<'db> {
 
   id_counter: CumulativeCounter<i64>,
 
-  queue: UniquePriorityQueue<i64, ~[u8], QueueEntry>,
+  queue: UniquePriorityQueue<i64, Vec<u8>, QueueEntry>,
 
-  callbacks: CallbackContainer<~[u8]>,
+  callbacks: CallbackContainer<Vec<u8>>,
 
   flush_timer: PeriodicTimer,
 
@@ -145,8 +145,8 @@ pub struct HashIndex<'db> {
 
 impl <'db> HashIndex<'db> {
 
-  pub fn new(path: ~str) -> HashIndex<'db> {
-    let mut hi = match open(path) {
+  pub fn new(path: String) -> HashIndex<'db> {
+    let mut hi = match open(path.as_slice()) {
       Ok(dbh) => {
         HashIndex{dbh: dbh,
                   id_counter: CumulativeCounter::new(0i64),
@@ -164,9 +164,9 @@ impl <'db> HashIndex<'db> {
                               payload   BLOB,
                               blob_ref  BLOB)");
 
-    hi.execOrDie("CREATE UNIQUE INDEX IF NOT EXISTS " +
-                 "HashIndex_UniqueHash " +
-                 "ON hash_index(hash)");
+    hi.execOrDie("CREATE UNIQUE INDEX IF NOT EXISTS
+                  HashIndex_UniqueHash
+                  ON hash_index(hash)");
 
     hi.execOrDie("BEGIN");
 
@@ -182,7 +182,7 @@ impl <'db> HashIndex<'db> {
   fn execOrDie(&self, sql: &str) {
     match self.dbh.exec(sql) {
       Ok(true) => (),
-      Ok(false) => fail!("exec: " + self.dbh.get_errmsg()),
+      Ok(false) => fail!("exec: {}", self.dbh.get_errmsg()),
       Err(msg) => fail!(format!("exec: {}, {}\nIn sql: '{}'\n",
                                 msg.to_str(), self.dbh.get_errmsg(), sql))
     }
@@ -206,8 +206,8 @@ impl <'db> HashIndex<'db> {
 
     let result_opt = self.select1(format!(
       "SELECT id, height, payload, blob_ref FROM hash_index WHERE hash=x'{}'",
-      hash.bytes.to_hex()
-    ));
+      hash.bytes.as_slice().to_hex()
+    ).as_slice());
     result_opt.map(|result| {
       let payload = result.get_blob(2);
       QueueEntry{id: result.get_int(0) as i64,
@@ -287,6 +287,7 @@ impl <'db> HashIndex<'db> {
     let insert_stm = self.dbh.prepare(
       "INSERT INTO hash_index (id, hash, height, payload, blob_ref) VALUES (?, ?, ?, ?, ?)",
       &None).unwrap();
+
     loop {
       match self.queue.pop_min_if_complete() {
         None => break,
@@ -294,19 +295,20 @@ impl <'db> HashIndex<'db> {
           assert_eq!(id, queue_entry.id);
 
           let child_refs_opt = queue_entry.payload.clone();
-          let payload = child_refs_opt.unwrap_or_else(|| bytes!().into_owned());
+          let payload = child_refs_opt.unwrap_or_else(|| b"".into_owned());
           let level = queue_entry.level;
           let persistent_ref = queue_entry.persistent_ref.expect("hash was comitted");
 
           assert_eq!(SQLITE_OK, insert_stm.bind_param(1, &Integer64(id)));
-          assert_eq!(SQLITE_OK, insert_stm.bind_param(2, &Blob(Vec::from_slice(hash_bytes.clone()))));
+          assert_eq!(SQLITE_OK, insert_stm.bind_param(2, &Blob(hash_bytes.clone())));
           assert_eq!(SQLITE_OK, insert_stm.bind_param(3, &Integer64(level)));
-          assert_eq!(SQLITE_OK, insert_stm.bind_param(4, &Blob(Vec::from_slice(payload))));
-          assert_eq!(SQLITE_OK, insert_stm.bind_param(5, &Blob(Vec::from_slice(persistent_ref))));
+          assert_eq!(SQLITE_OK, insert_stm.bind_param(4, &Blob(payload)));
+          assert_eq!(SQLITE_OK, insert_stm.bind_param(5, &Blob(persistent_ref)));
 
-          assert_eq!(insert_stm.step(), SQLITE_DONE);
+          assert_eq!(SQLITE_DONE, insert_stm.step());
 
-          insert_stm.clear_bindings();
+          assert_eq!(SQLITE_OK, insert_stm.clear_bindings());
+          assert_eq!(SQLITE_OK, insert_stm.reset());
 
           self.callbacks.allow_flush_of(hash_bytes);
         },
@@ -314,7 +316,7 @@ impl <'db> HashIndex<'db> {
     }
   }
 
-  fn commit(&mut self, hash: &Hash, blob_ref: &~[u8]) {
+  fn commit(&mut self, hash: &Hash, blob_ref: &Vec<u8>) {
     // Update persistent reference for ready hash
     let queue_entry = self.locate(hash).expect("hash was committed");
     self.queue.update_value(&hash.bytes,

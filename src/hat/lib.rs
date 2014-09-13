@@ -16,8 +16,6 @@
 #![crate_type="lib"]
 #![license = "ALv2"]
 
-
-// #![warn(missing_doc)]
 #![warn(non_uppercase_statics)]
 #![warn(non_camel_case_types)]
 #![warn(managed_heap_memory)]
@@ -27,6 +25,7 @@
 
 // Standard Rust imports
 extern crate collections;
+extern crate debug;
 extern crate libc;
 extern crate rand;
 extern crate serialize;

@@ -17,7 +17,6 @@
 extern crate libc;
 extern crate sync;
 
-use std::io::stdio::{println};
 use std::os::{last_os_error};
 use std::io::{TypeDirectory};
 use std::io::fs::{lstat};
@@ -34,14 +33,14 @@ pub struct DirIterator {
 }
 
 impl DirIterator {
-  pub fn new(path: Path) -> Result<DirIterator, ~str> {
+  pub fn new(path: Path) -> Result<DirIterator, String> {
     let fd = path.with_c_str(|c_str| unsafe { dirent::opendir(c_str) });
 
     if fd as int > 0 { Ok(DirIterator{fd:fd}) }
     else { Err(last_os_error()) }
   }
 
-  fn read(&mut self) -> ~str {
+  fn read(&mut self) -> String {
     extern {
       fn rust_dirent_t_size() -> c_int;
       fn rust_list_dir_val(ptr: *mut dirent_t) -> *c_char;
@@ -58,7 +57,7 @@ impl DirIterator {
 
     if retval == 0 && !entry_ptr.is_null() {
       let cstr = unsafe { CString::new(rust_list_dir_val(entry_ptr), false) };
-      cstr.as_str().expect("Path not UTF8.").clone().into_owned()
+      cstr.as_str().expect("Path not UTF8.").clone().into_string()
     } else { "".to_owned() }
 
   }
@@ -73,8 +72,8 @@ impl Drop for DirIterator {
   }
 }
 
-impl Iterator<~str> for DirIterator {
-  fn next(&mut self) -> Option<~str> {
+impl Iterator<String> for DirIterator {
+  fn next(&mut self) -> Option<String> {
     let name = self.read();
     if name.len() == 0 { None }
     else { Some(name) }
@@ -96,7 +95,7 @@ pub fn iterateRecursively<P: Send + Clone, W: PathHandler<P> + Send + Clone>
   let in_progress = sync::Arc::new(sync::Mutex::new(0));
   let done = sync::Arc::new(sync::Mutex::new(0));
 
-  for _ in range(0, threads) {
+  for _ in range(0u, threads) {
     let t_in_progress = in_progress.clone();
     let t_queue = queue.clone();
     let t_done = done.clone();
@@ -130,7 +129,7 @@ pub fn iterateRecursively<P: Send + Clone, W: PathHandler<P> + Send + Clone>
             if res.is_ok() {
               let mut it = res.unwrap();
               for file in it {
-                if file != ".".into_owned() && file != "..".into_owned() {
+                if file != ".".into_string() && file != "..".into_string() {
                   let rel_path = Path::new(file);
                   root.push(rel_path);
                   let dir_opt = t_worker.handlePath(payload.clone(), root.clone());
@@ -179,7 +178,7 @@ impl Clone for PrintPathHandler {
 impl PathHandler<()> for PrintPathHandler {
   fn handlePath(&mut self, _: (), path: Path) -> Option<()> {
     let filename_opt = path.filename_str();
-    println(format!("{}", path.display()));
+    println!("{}", path.display());
     match filename_opt {
       Some(".") | Some("..") | None => None,
       Some(_) =>

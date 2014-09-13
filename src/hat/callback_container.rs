@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use collections::{HashMap};
+use std::collections::hashmap::{HashMap};
 use std::hash::{Hash};
 
 
@@ -22,7 +22,7 @@ pub struct CallbackContainer<K> {
 }
 
 
-impl <K: Hash + TotalEq> CallbackContainer<K> {
+impl <K: Hash + Eq> CallbackContainer<K> {
 
   pub fn new() -> CallbackContainer<K> {
     CallbackContainer{callbacks: HashMap::new(),

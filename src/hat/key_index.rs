@@ -27,10 +27,11 @@ use serialize::hex::{ToHex};
 
 
 pub trait KeyEntry<KE> {
-  fn id(&self) -> Option<~[u8]>;
-  fn parentId(&self) -> Option<~[u8]>;
+  fn id(&self) -> Option<Vec<u8>>;
+  fn parentId(&self) -> Option<Vec<u8>>;
 
-  fn name(&self) -> ~[u8];
+  fn name(&self) -> Vec<u8>;
+  fn size(&self) -> Option<u64>;
 
   fn created(&self) -> Option<u64>;
   fn modified(&self) -> Option<u64>;
@@ -40,7 +41,7 @@ pub trait KeyEntry<KE> {
   fn userId(&self) -> Option<u64>;
   fn groupId(&self) -> Option<u64>;
 
-  fn withId(&self, ~[u8]) -> KE;
+  fn withId(&self, Vec<u8>) -> KE;
 }
 
 pub type KeyIndexProcess<KE> = Process<Msg<KE>, Reply, KeyIndex>;
@@ -57,28 +58,29 @@ pub enum Msg<KeyEntryT> {
 
   /// Update the `payload` and `persistent_ref` of an entry.
   /// Returns `UpdateOK`.
-  UpdateDataHash(KeyEntryT, Option<~[u8]>, Option<~[u8]>),
+  UpdateDataHash(KeyEntryT, Option<Vec<u8>>, Option<Vec<u8>>),
 
   /// List a directory (aka. `level`) in the index.
   /// Returns `ListResult` with all the entries under the given parent.
-  ListDir(Option<~[u8]>),
-  ListDirCallback(Option<~[u8]>, fn(Option<(~[u8], ~[u8], u64, u64, u64, ~[u8], ~[u8])>)),
+  ListDir(Option<Vec<u8>>),
+  ListDirCallback(Option<Vec<u8>>,
+                  fn(Option<(Vec<u8>, Vec<u8>, u64, u64, u64, Vec<u8>, Vec<u8>)>)),
 
   /// Flush this key index.
   Flush,
 }
 
 pub enum Reply {
-  Id(~[u8]),
+  Id(Vec<u8>),
   NotFound,
   UpdateOK,
-  ListResult(Vec<(~[u8], ~[u8], u64, u64, u64, ~[u8], ~[u8])>),
+  ListResult(Vec<(Vec<u8>, Vec<u8>, u64, u64, u64, Vec<u8>, Vec<u8>)>),
   FlushOK,
 }
 
 
 pub struct KeyIndex {
-  path: ~str,
+  path: String,
   dbh: Database,
   flush_timer: PeriodicTimer,
 }
@@ -87,8 +89,8 @@ pub struct KeyCursor<'a> {
   cursor: Cursor<'a>,
 }
 
-impl<'a> Iterator<(~[u8], ~[u8], u64, u64, u64, ~[u8], ~[u8])> for KeyCursor<'a> {
-  fn next(&mut self) -> Option<(~[u8], ~[u8], u64, u64, u64, ~[u8], ~[u8])> {
+impl<'a> Iterator<(Vec<u8>, Vec<u8>, u64, u64, u64, Vec<u8>, Vec<u8>)> for KeyCursor<'a> {
+  fn next(&mut self) -> Option<(Vec<u8>, Vec<u8>, u64, u64, u64, Vec<u8>, Vec<u8>)> {
     match self.cursor.step() {
       SQLITE_ROW => {
         let id = self.cursor.get_blob(0);
@@ -111,8 +113,8 @@ impl<'a> Iterator<(~[u8], ~[u8], u64, u64, u64, ~[u8], ~[u8])> for KeyCursor<'a>
 }
 
 impl KeyIndex {
-  pub fn new(path: ~str) -> KeyIndex {
-    let mut ki = match open(path) {
+  pub fn new(path: String) -> KeyIndex {
+    let mut ki = match open(path.as_slice()) {
       Ok(dbh) => {
         KeyIndex{path: path,
                  dbh: dbh,
@@ -132,9 +134,9 @@ impl KeyIndex {
                             );");
 
     if cfg!(test) {
-      ki.execOrDie("CREATE UNIQUE INDEX IF NOT EXISTS " +
-                   "KeyIndex_UniqueParentName " +
-                   "ON key_index(parent, name)");
+      ki.execOrDie("CREATE UNIQUE INDEX IF NOT EXISTS
+                    KeyIndex_UniqueParentName
+                    ON key_index(parent, name)");
     }
 
     ki.execOrDie("BEGIN");
@@ -149,17 +151,15 @@ impl KeyIndex {
   fn execOrDie(&mut self, sql: &str) {
     match self.dbh.exec(sql) {
       Ok(true) => (),
-      Ok(false) => fail!("exec: " + self.dbh.get_errmsg()),
-      Err(msg) => fail!(format!("exec: {}, {}",
-                                msg.to_str(), self.dbh.get_errmsg()))
+      Ok(false) => fail!("exec: {}", self.dbh.get_errmsg()),
+      Err(msg) => fail!("exec: {}, {}", msg.to_str(), self.dbh.get_errmsg()),
     }
   }
 
   fn prepareOrDie<'a>(&'a mut self, sql: &str) -> Cursor<'a> {
     match self.dbh.prepare(sql, &None) {
       Ok(s)  => s,
-      Err(x) => fail!(format!("sqlite error: {} ({:?})",
-                              self.dbh.get_errmsg(), x)),
+      Err(x) => fail!("sqlite error: {} ({:?})", self.dbh.get_errmsg(), x),
     }
   }
 
@@ -195,21 +195,21 @@ impl <A: KeyEntry<A>> MsgHandler<Msg<A>, Reply> for KeyIndex {
     match msg {
 
       Insert(entry) => {
-        let parent = entry.parentId().unwrap_or(bytes!().into_owned());
+        let parent = entry.parentId().unwrap_or(b"".into_owned());
         let id = entry.id().unwrap_or_else(|| randombytes(16));
 
         self.execOrDie(format!(
           "INSERT OR REPLACE INTO key_index (id, parent, name, created, accessed)
            VALUES (x'{:s}', x'{:s}', x'{:s}', {:u}, {:u})",
-          id.to_hex(), parent.to_hex(), entry.name().to_hex(),
+          id.as_slice().to_hex(), parent.as_slice().to_hex(), entry.name().as_slice().to_hex(),
           entry.created().unwrap_or(0),
-          entry.accessed().unwrap_or(0)));
+          entry.accessed().unwrap_or(0)).as_slice());
 
         return reply(Id(id));
       },
 
       LookupExact(entry) => {
-        let parent = entry.parentId().unwrap_or(bytes!().into_owned());
+        let parent = entry.parentId().unwrap_or(b"".into_owned());
         let cursor = match entry.id() {
           Some(id) => {
             self.prepareOrDie(format!(
@@ -217,10 +217,10 @@ impl <A: KeyEntry<A>> MsgHandler<Msg<A>, Reply> for KeyIndex {
                 WHERE parent=x'{:s}' AND id=x'{:s}'
                 AND created={:u} AND modified={:u} AND accessed={:u}
                 LIMIT 1",
-              parent.to_hex(), id.to_hex(),
+              parent.as_slice().to_hex(), id.as_slice().to_hex(),
               entry.created().unwrap_or(0),
               entry.modified().unwrap_or(0),
-              entry.accessed().unwrap_or(0)))
+              entry.accessed().unwrap_or(0)).as_slice())
           },
           None => {
             self.prepareOrDie(format!(
@@ -228,10 +228,10 @@ impl <A: KeyEntry<A>> MsgHandler<Msg<A>, Reply> for KeyIndex {
                 WHERE parent=x'{:s}' AND name=x'{:s}'
                 AND created={:u} AND modified={:u} AND accessed={:u}
                 LIMIT 1",
-              parent.to_hex(), entry.name().to_hex(),
+              parent.as_slice().to_hex(), entry.name().as_slice().to_hex(),
               entry.created().unwrap_or(0),
               entry.modified().unwrap_or(0),
-              entry.accessed().unwrap_or(0)))
+              entry.accessed().unwrap_or(0)).as_slice())
           }
         };
         if cursor.step() == SQLITE_ROW {
@@ -244,7 +244,7 @@ impl <A: KeyEntry<A>> MsgHandler<Msg<A>, Reply> for KeyIndex {
       },
 
       UpdateDataHash(entry, hash_opt, persistent_ref_opt) => {
-        let parent = entry.parentId().unwrap_or(bytes!().into_owned());
+        let parent = entry.parentId().unwrap_or(b"".into_owned());
 
         assert!(hash_opt.is_some() == persistent_ref_opt.is_some());
 
@@ -255,15 +255,18 @@ impl <A: KeyEntry<A>> MsgHandler<Msg<A>, Reply> for KeyIndex {
                 "UPDATE key_index SET hash=x'{:s}', persistent_ref=x'{:s}'
                                                   , modified={:u}
                   WHERE parent=x'{:s}' AND id=x'{:s}' AND IFNULL(modified,0)<={:u}",
-                hash_opt.unwrap().to_hex(), persistent_ref_opt.unwrap().to_hex(),
-                modified, parent.to_hex(), entry.id().unwrap().to_hex(), modified));
+                hash_opt.unwrap().as_slice().to_hex(),
+                persistent_ref_opt.unwrap().as_slice().to_hex(),
+                modified, parent.as_slice().to_hex(), entry.id().unwrap().as_slice().to_hex(),
+                modified).as_slice());
             },
             None => {
               self.execOrDie(format!(
                 "UPDATE key_index SET hash=x'{:s}', persistent_ref=x'{:s}'
                  WHERE parent=x'{:s}' AND id=x'{:s}'",
-                hash_opt.unwrap().to_hex(), persistent_ref_opt.unwrap().to_hex(),
-                parent.to_hex(), entry.id().unwrap().to_hex()));
+                hash_opt.unwrap().as_slice().to_hex(),
+                persistent_ref_opt.unwrap().as_slice().to_hex(),
+                parent.as_slice().to_hex(), entry.id().unwrap().as_slice().to_hex()).as_slice());
             }
           }
         } else {
@@ -273,13 +276,14 @@ impl <A: KeyEntry<A>> MsgHandler<Msg<A>, Reply> for KeyIndex {
                 "UPDATE key_index SET hash=NULL, persistent_ref=NULL
                                                , modified={:u}
                   WHERE parent=x'{:s}' AND id=x'{:s}' AND IFNULL(modified, 0)<={:u}",
-                modified, parent.to_hex(), entry.id().unwrap().to_hex(), modified));
+                modified, parent.as_slice().to_hex(), entry.id().unwrap().as_slice().to_hex(),
+                modified).as_slice());
             },
             None => {
               self.execOrDie(format!(
                 "UPDATE key_index SET hash=NULL, persistent_ref=NULL
                  WHERE parent=x'{:s}' AND id=x'{:s}'",
-                parent.to_hex(), entry.id().unwrap().to_hex()));
+                parent.as_slice().to_hex(), entry.id().unwrap().as_slice().to_hex()).as_slice());
             }
           }
         }
@@ -295,12 +299,12 @@ impl <A: KeyEntry<A>> MsgHandler<Msg<A>, Reply> for KeyIndex {
 
       ListDir(parent) => {
         let mut listing = Vec::new();
-        let parent = parent.unwrap_or(bytes!().into_owned());
+        let parent = parent.unwrap_or(b"".into_owned());
 
         let cursor = self.prepareOrDie(format!(
            "SELECT id, name, created, modified, accessed, hash, persistent_ref
             FROM key_index
-            WHERE parent=x'{:s}'", parent.to_hex()));
+            WHERE parent=x'{:s}'", parent.as_slice().to_hex()).as_slice());
 
         // TODO(jos): replace get_int with something that understands uint64
         while cursor.step() == SQLITE_ROW {
@@ -323,7 +327,7 @@ impl <A: KeyEntry<A>> MsgHandler<Msg<A>, Reply> for KeyIndex {
       },
 
       ListDirCallback(parent, callback) => {
-        let parent = parent.unwrap_or(bytes!().into_owned());
+        let parent = parent.unwrap_or(b"".into_owned());
 
         let outer_ki = self.clone();
 
@@ -332,7 +336,7 @@ impl <A: KeyEntry<A>> MsgHandler<Msg<A>, Reply> for KeyIndex {
           let mut cursor = ki.prepareOrDieCursor(format!(
             "SELECT id, name, created, modified, accessed, hash, persistent_ref
              FROM key_index
-             WHERE parent=x'{:s}'", parent.to_hex()));
+             WHERE parent=x'{:s}'", parent.as_slice().to_hex()).as_slice());
 
           // TODO(jos): replace get_int with something that understands uint64
           for item in cursor {
@@ -351,19 +355,23 @@ mod tests {
   use super::*;
 
   struct TestEntry {
-    id: Option<~[u8]>,
-    parent: Option<~[u8]>,
-    name: ~[u8],
+    id: Option<Vec<u8>>,
+    parent: Option<Vec<u8>>,
+    name: Vec<u8>,
   }
   impl KeyEntry<TestEntry> for TestEntry {
-    fn id(&self) -> Option<~[u8]> {
+    fn id(&self) -> Option<Vec<u8>> {
       None
     }
-    fn parentId(&self) -> Option<~[u8]>{
+    fn parentId(&self) -> Option<Vec<u8>>{
       self.parent.clone()
     }
-    fn name(&self) -> ~[u8] {
+    fn name(&self) -> Vec<u8> {
       self.name.clone()
+    }
+
+    fn size(&self) -> Option<u64> {
+      None
     }
 
     fn created(&self) -> Option<u64> {
@@ -385,7 +393,7 @@ mod tests {
     fn groupId(&self) -> Option<u64> {
       None
     }
-    fn withId(&self, id: ~[u8]) -> TestEntry {
+    fn withId(&self, id: Vec<u8>) -> TestEntry {
       TestEntry{id:Some(id),
                 parent: self.parentId(),
                 name: self.name()}

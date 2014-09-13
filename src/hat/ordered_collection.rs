@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use collections::{TreeMap};
+use std::collections::treemap::{TreeMap};
 use std::num::{Bounded};
 
 
@@ -20,7 +20,7 @@ pub struct OrderedCollection<K, V> {
   map: TreeMap<K, V>
 }
 
-impl <K: Clone + TotalOrd + Bounded, V: Clone> OrderedCollection<K, V> {
+impl <K: Clone + Ord + Bounded, V: Clone> OrderedCollection<K, V> {
 
   pub fn new() -> OrderedCollection<K, V> {
     OrderedCollection{map: TreeMap::new()}

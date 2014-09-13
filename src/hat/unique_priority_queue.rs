@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use collections::{HashMap};
+use std::collections::hashmap::{HashMap};
 use std::num::{Bounded};
 use std::hash::{Hash};
 use std::fmt::{Show};
@@ -32,7 +32,7 @@ pub struct UniquePriorityQueue<P, K, V> {
   key_to_priority: HashMap<K, P>,
 }
 
-impl <P: Show + Clone + TotalOrd + Bounded, K: Show + TotalEq + Hash + Clone, V: Clone> UniquePriorityQueue<P, K, V> {
+impl <P: Show + Clone + Ord + Bounded, K: Show + Eq + Hash + Clone, V: Clone> UniquePriorityQueue<P, K, V> {
 
   pub fn new() -> UniquePriorityQueue<P, K, V> {
     UniquePriorityQueue{priority: OrderedCollection::new(),
@@ -96,7 +96,7 @@ impl <P: Show + Clone + TotalOrd + Bounded, K: Show + TotalEq + Hash + Clone, V:
 
 }
 
-impl<P: Clone + TotalOrd + Bounded, K: TotalEq + Hash + Clone, V: Clone> Container for
+impl<P: Clone + Ord + Bounded, K: Eq + Hash + Clone, V: Clone> Collection for
   UniquePriorityQueue<P, K, V>
 {
   fn len(&self) -> uint {
@@ -110,8 +110,8 @@ impl<P: Clone + TotalOrd + Bounded, K: TotalEq + Hash + Clone, V: Clone> Contain
 mod tests {
   use super::*;
 
-  use collections::{HashMap};
-  use rand::{task_rng};
+  use std::collections::hashmap::{HashMap};
+  use std::rand::{task_rng};
 
   use quickcheck::{Config, Testable, gen};
   use quickcheck::{quickcheck_config};

@@ -16,8 +16,8 @@ dep-quickcheck: quickcheck/src/*.rs
 dep-sodiumoxide: sodiumoxide/src/sodiumoxide/*.rs
 	${RUST} --crate-type lib -O sodiumoxide/src/sodiumoxide/lib.rs && mv libsodiumoxide*.rlib sodiumoxide/
 
-dep-rustsqlite: rustsqlite/src/sqlite3/*.rs
-	${RUST} --crate-type lib -O rustsqlite/src/sqlite3/lib.rs && mv libsqlite*.rlib rustsqlite/
+dep-rustsqlite: rustsqlite/src/*.rs
+	${RUST} --crate-type lib -O rustsqlite/src/sqlite3.rs && mv libsqlite*.rlib rustsqlite/
 
 deps: dep-quickcheck dep-sodiumoxide dep-rustsqlite
 

@@ -16,7 +16,7 @@
 
 use sodiumoxide::randombytes::{randombytes};
 
-use collections::{HashMap};
+use std::collections::hashmap::{HashMap};
 use serialize::hex::{ToHex};
 
 use process::{Process, MsgHandler};
@@ -31,7 +31,7 @@ pub type BlobIndexProcess = Process<Msg, Reply, BlobIndex>;
 
 #[deriving(Clone, Show)]
 pub struct BlobDesc {
-  pub name: ~[u8],
+  pub name: Vec<u8>,
   pub id: i64,
 }
 
@@ -57,14 +57,14 @@ pub enum Reply {
 pub struct BlobIndex {
   dbh: Database,
   next_id: i64,
-  reserved: HashMap<~[u8], BlobDesc>,
+  reserved: HashMap<Vec<u8>, BlobDesc>,
 }
 
 
 impl BlobIndex {
 
-  pub fn new(path: ~str) -> BlobIndex {
-    let mut hi = match open(path) {
+  pub fn new(path: String) -> BlobIndex {
+    let mut hi = match open(path.as_slice()) {
       Ok(dbh) => BlobIndex{
         dbh: dbh,
         next_id: -1,
@@ -101,7 +101,7 @@ impl BlobIndex {
   fn execOrDie(&self, sql: &str) {
     match self.dbh.exec(sql) {
       Ok(true) => (),
-      Ok(false) => fail!("exec: " + self.dbh.get_errmsg()),
+      Ok(false) => fail!("exec: {}", self.dbh.get_errmsg()),
       Err(msg) => fail!(format!("exec: {}, {}\nIn sql: '{}'\n",
                                 msg.to_str(), self.dbh.get_errmsg(), sql))
     }
@@ -143,7 +143,7 @@ impl BlobIndex {
     assert!(self.reserved.find(&blob.name).is_some(), "blob was not reserved!");
     self.execOrDie(format!(
       "INSERT INTO blob_index (id, name, tag) VALUES ({}, x'{}', {})",
-      blob.id, blob.name.to_hex(), 1));
+      blob.id, blob.name.as_slice().to_hex(), 1u).as_slice());
     self.new_transaction();
   }
 
@@ -153,7 +153,7 @@ impl BlobIndex {
 
   fn commitBlob(&mut self, blob: &BlobDesc) {
     assert!(self.reserved.find(&blob.name).is_some(), "blob was not reserved!");
-    self.execOrDie(format!("UPDATE blob_index SET tag=0 WHERE id={}", blob.id));
+    self.execOrDie(format!("UPDATE blob_index SET tag=0 WHERE id={}", blob.id).as_slice());
     self.new_transaction();
   }
 }

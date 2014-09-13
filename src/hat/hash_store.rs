@@ -32,7 +32,7 @@ pub enum Msg {
   /// `Insert(Hash, level, opt_payload, data)`: Ensure that a data-chunk is present in the index.
   /// If the `Hash` is already present in the index, it is not reinserted.
   /// Returns `InsertOK` with the persistent reference.
-  Insert(hash_index::Hash, i64, Option<~[u8]>, ~[u8]),
+  Insert(hash_index::Hash, i64, Option<Vec<u8>>, Vec<u8>),
 
   /// Check whether a `Hash` is present in the index.
   /// Returns `HashKnown` or `HashNotKnown`.
@@ -56,23 +56,23 @@ pub enum Msg {
 
   /// Locate the data-chunk belonging to a persistent reference.
   /// Returns `Chunk`.
-  FetchChunkFromPersistentRef(~[u8]),
+  FetchChunkFromPersistentRef(Vec<u8>),
 
   /// Flush this hash store along with its dependencies.
   /// Returns `FlushOK`.
   Flush,
 }
 
-#[deriving(Eq, Show)]
+#[deriving(Eq, PartialEq, Show)]
 pub enum Reply {
-  InsertOK(~[u8]),
-  Payload(Option<~[u8]>),
-  PersistentRef(~[u8]),
+  InsertOK(Vec<u8>),
+  Payload(Option<Vec<u8>>),
+  PersistentRef(Vec<u8>),
   HashKnown,
   HashNotKnown,
   CallbackRegistered,
 
-  Chunk(~[u8]),
+  Chunk(Vec<u8>),
 
   Retry,
   FlushOK,
@@ -104,7 +104,7 @@ impl <'db, B: Send + blob_store::BlobStoreBackend> HashStore<'db, B> {
     self.hash_index.sendReply(hash_index::Flush);
   }
 
-  fn fetchChunkFromHash(&mut self, hash: hash_index::Hash) -> ~[u8] {
+  fn fetchChunkFromHash(&mut self, hash: hash_index::Hash) -> Vec<u8> {
     assert!(hash.bytes.len() > 0);
     match self.hash_index.sendReply(hash_index::FetchPersistentRef(hash)) {
       hash_index::PersistentRef(chunk_ref_bytes) => {
@@ -115,7 +115,7 @@ impl <'db, B: Send + blob_store::BlobStoreBackend> HashStore<'db, B> {
     }
   }
 
-  fn fetchChunkFromPersistentRef(&mut self, chunk_ref: BlobID) -> ~[u8] {
+  fn fetchChunkFromPersistentRef(&mut self, chunk_ref: BlobID) -> Vec<u8> {
     match self.blob_store.sendReply(blob_store::Retrieve(chunk_ref)) {
       blob_store::RetrieveOK(chunk) => chunk,
       _ => fail!("Could not retrieve chunk from blob store."),
@@ -224,7 +224,7 @@ impl <'db, B: Send + blob_store::BlobStoreBackend> MsgHandler<Msg, Reply> for Ha
 #[cfg(test)]
 mod tests {
   use super::*;
-  use rand::task_rng;
+  use std::rand::{task_rng};
   use quickcheck::{Config, Testable, gen};
   use quickcheck::{quickcheck_config};
   use process::{Process};
