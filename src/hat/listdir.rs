@@ -48,10 +48,9 @@ impl DirIterator {
 
     let size = unsafe { rust_dirent_t_size() };
     let mut buf = Vec::<u8>::with_capacity(size as uint);
-    let buf_ptr = buf.as_mut_slice().as_mut_ptr() as *mut dirent_t;
+    let buf_ptr = buf.as_mut_ptr() as *mut dirent_t;
 
-    let retval = unsafe {
-      dirent::readdir_r(self.fd, buf_ptr, &mut entry_ptr) };
+    let retval = unsafe { dirent::readdir_r(self.fd, buf_ptr, &mut entry_ptr) };
 
     if retval == 0 && !entry_ptr.is_null() {
       let cstr = unsafe { CString::new(rust_list_dir_val(entry_ptr), false) };
