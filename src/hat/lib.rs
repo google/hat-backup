@@ -24,12 +24,9 @@
 #![feature(globs)]
 
 // Standard Rust imports
-extern crate collections;
 extern crate debug;
 extern crate libc;
-extern crate rand;
 extern crate serialize;
-extern crate sync;
 extern crate test;
 extern crate time;
 

@@ -20,7 +20,7 @@
 use serialize::{json, Encodable, Decodable};
 use serialize::json::{Json, ToJson};
 
-use collections::treemap::{TreeMap};
+use std::collections::treemap::{TreeMap};
 use hash_index::{Hash};
 use std::vec::{Vec};
 use std::{str};
@@ -315,7 +315,7 @@ mod tests {
   use super::*;
   use test::{Bencher};
 
-  use sync::{Arc, Mutex};
+  use std::sync::{Arc, Mutex};
 
   use std;
   use hash_index::{Hash};

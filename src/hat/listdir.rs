@@ -14,9 +14,7 @@
 
 //! Helpers for reading directory structures from the local filesystem.
 
-extern crate libc;
-extern crate sync;
-
+use std::sync;
 use std::os::{last_os_error};
 use std::io::{TypeDirectory};
 use std::io::fs::{lstat};

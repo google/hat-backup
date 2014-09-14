@@ -14,11 +14,6 @@
 
 //! High level Hat API
 
-extern crate std;
-extern crate sync;
-extern crate time;
-
-
 use process::{Process};
 
 use blob_index::{BlobIndex, BlobIndexProcess};
@@ -35,9 +30,14 @@ use key_store;
 
 use listdir;
 
+use std::io;
 use std::io::{Reader, IoResult, UserDir,
               TypeDirectory, TypeSymlink, TypeFile, FileStat};
 use std::io::fs::{lstat, File, mkdir_recursive};
+use std::sync;
+
+use time;
+
 
 
 pub struct Hat<'db, B> {
@@ -117,7 +117,7 @@ struct FileEntry {
 
 impl FileEntry {
   fn new(full_path: Path,
-         parent: Option<Vec<u8>>) -> Result<FileEntry, std::io::IoError> {
+         parent: Option<Vec<u8>>) -> Result<FileEntry, io::IoError> {
     let filename_opt = full_path.filename();
     if filename_opt.is_some() {
       lstat(&full_path).map(|st| {
@@ -128,10 +128,9 @@ impl FileEntry {
           full_path: full_path.clone()}
       })
     }
-    else { Err(std::io::IoError{kind: std::io::OtherIoError,
-                                desc: "Could not parse filename.",
-                                detail: None
-                               }) }
+    else { Err(io::IoError{kind: io::OtherIoError,
+                           desc: "Could not parse filename.",
+                           detail: None }) }
   }
 
   fn fileIterator(&self) -> IoResult<FileIterator> {

@@ -19,7 +19,7 @@
 //! currently that the `process` has a bounded input-channel and a standard implementation of a
 //! synchronous `sendReply()`.
 
-use sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex};
 
 /// A long-living `thread` is promoted to a standard `process`.
 ///

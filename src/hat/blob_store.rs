@@ -14,7 +14,7 @@
 
 //! Combines data chunks into larger blobs to be stored externally.
 
-use sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex};
 
 use serialize::{json, Encodable, Decodable};
 use serialize::hex::{ToHex};
@@ -329,8 +329,8 @@ pub mod tests {
 
   use process::{Process};
 
-  use sync::{Arc, Mutex};
-  use collections::treemap::{TreeMap};
+  use std::sync::{Arc, Mutex};
+  use std::collections::treemap::{TreeMap};
 
   #[deriving(Clone)]
   pub struct MemoryBackend {
