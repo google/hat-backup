@@ -215,7 +215,15 @@ impl <'db, KE: KeyEntry<KE> + Clone + Send, IT: Iterator<Vec<u8>> + Send,
               }).last();
 
               // Check that we read the whole file:
-              org_entry.size().map(|size| assert_eq!(size, bytes_read));
+              org_entry.size().map(|size| {
+                if size > bytes_read {
+                  println!("Warning: File grew while reading it: {} (wanted {}, got {})",
+                           org_entry.name(), size, bytes_read) }
+                else if size > bytes_read {
+                  println!(
+                    "Warning: Could not read whole file (or it shrank): {} (wanted {}, got {})",
+                    org_entry.name(), size, bytes_read) }
+              });
 
               // Get top tree hash:
               let (hash, persistent_ref) = tree.hash();
