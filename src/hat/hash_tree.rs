@@ -108,8 +108,14 @@ impl <B: HashTreeBackend + Clone> SimpleHashTreeWriter<B> {
                          levels: Vec::new()}
   }
 
-  fn top_level(&self) -> uint {
-    self.levels.len() - 1
+  fn top_level(&self) -> Option<uint> {
+    self.levels.len().checked_sub(&1)
+  }
+
+  fn grow_to(&mut self, level: uint) {
+    while self.top_level() < Some(level) {
+      self.levels.push(Vec::new());
+    }
   }
 
   /// Append data-block to hash-tree.
@@ -119,39 +125,35 @@ impl <B: HashTreeBackend + Clone> SimpleHashTreeWriter<B> {
   /// blocks when reading; if needed, accummulation of data must be handled by the `backend`).
   pub fn append(&mut self, chunk: Vec<u8>) {
     let hash = Hash::new(chunk.as_slice());
-    self.append_at_level(0, hash, chunk, None);
+    self.append_at(0, hash, chunk, None);
   }
 
-  fn append_at_level(&mut self, level: uint, hash: Hash, data: Vec<u8>,
-                     metadata: Option<Vec<u8>>) {
+  fn append_at(&mut self, level: uint, hash: Hash, data: Vec<u8>, metadata: Option<Vec<u8>>) {
     let persistent_ref = self.backend.insert_chunk(hash.clone(), level as i64, metadata, data);
     let hash_ref = HashRef::new(hash.bytes.into_owned(), persistent_ref);
-    self.append_hashref_at_level(level, hash_ref);
+    self.append_hashref_at(level, hash_ref);
   }
 
-  fn append_hashref_at_level(&mut self, level: uint, hashref: HashRef) {
+  fn append_hashref_at(&mut self, level: uint, hashref: HashRef) {
     assert!(self.levels.len() >= level);
-    if self.levels.len() == level {
-      self.levels.push(Vec::new());
-    }
+    self.grow_to(level);
 
-    let is_full = {
-      let level_v = self.levels.get_mut(level);
-      level_v.push(hashref);
-      level_v.len() == self.order
+    let new_level_len = {
+      let level = self.levels.get_mut(level);
+      level.push(hashref);
+      level.len()
     };
 
-    if is_full {
+    if new_level_len == self.order {
       self.collapse_level(level);
     }
   }
 
   fn collapse_level(&mut self, level: uint) {
-    assert!(self.levels.len() > level);
-
     // Extract-replace level with a new empty level
+    assert!(self.levels.len() > level);
     self.levels.push(Vec::new());
-    let level_v = self.levels.swap_remove(level).unwrap();
+    let level_v = self.levels.swap_remove(level).expect("len() > level");
 
     // All data from this level (hashes and references):
     let data = hash_refs_to_bytes(&level_v);
@@ -160,13 +162,13 @@ impl <B: HashTreeBackend + Clone> SimpleHashTreeWriter<B> {
     let metadata_bytes = {
       let mut metadata = Vec::new();
       for hashref in level_v.move_iter() {
-        metadata.push_all(hashref.hash.as_slice());
+        metadata.push_all_move(hashref.hash);
       }
-      metadata.as_slice().into_owned()
+      metadata
     };
 
     let hash = Hash::new(metadata_bytes.as_slice());
-    self.append_at_level(level + 1, hash, data, Some(metadata_bytes));
+    self.append_at(level + 1, hash, data, Some(metadata_bytes));
   }
 
   /// Retrieve the hash and backend persistent reference that identified this tree.
@@ -179,23 +181,25 @@ impl <B: HashTreeBackend + Clone> SimpleHashTreeWriter<B> {
     if self.levels.len() == 0 {
       self.append(b"".into_owned());
     }
+
     // Locate first level that isn't empty (has data to collapse)
-    let first_non_empty_level = self.levels.iter().take_while(|level| level.len() == 0).count();
+    let first_non_empty_level_idx = self.levels.iter().take_while(|level| level.len() == 0).count();
+
     // Unless only root has data, collapse all levels up to top level (which is handled next)
-    range(first_non_empty_level, self.top_level()).map(|l| self.collapse_level(l)).last();
+    let top_level = self.top_level().expect("levels.len() > 0");
+    range(first_non_empty_level_idx, top_level).map(|l| self.collapse_level(l)).last();
+
     // Collapse top level if possible
-    let top_level = self.top_level();
+    let top_level = self.top_level().expect("levels.len() > 0");
     if self.levels.get(top_level).len() > 1 {
       self.collapse_level(top_level);
     }
+
     // After this point, only root exists and root has exactly one entry:
     assert_eq!(self.levels.last().map(|x| x.len()), Some(1));
+    let hashref = self.levels.last().and_then(|x| x.last()).expect("asserted");
 
-    match self.levels.last().and_then(|x| x.last()) {
-      Some(hashref) => (Hash{bytes:hashref.hash.clone()},
-                        hashref.persistent_ref.clone()),
-      None => fail!("Collapsed hash tree is missing its root node."),
-    }
+    (Hash{bytes:hashref.hash.clone()}, hashref.persistent_ref.clone())
   }
 }
 
@@ -228,7 +232,6 @@ pub struct SimpleHashTreeReader<B> {
 /// We wrap the output of `SimpleHashTreeReader::new(...)` in a `ReaderResult` to fast-path the
 /// single-block case (alternatively we could build a one-block iterator).
 pub enum ReaderResult<B> {
-
   NoData,
 
   /// The tree consists of just a single node and its data-chunk is given here.
@@ -262,24 +265,20 @@ impl <B: HashTreeBackend + Clone> SimpleHashTreeReader<B> {
 
   fn extract(&mut self) -> Option<Vec<u8>> {
     while self.stack.len() > 0 {
-      let child_opt = self.stack.mut_last().and_then(
-        |&(_, ref mut childs)| childs.shift());
+      let child_opt = self.stack.mut_last().and_then(|&(_, ref mut childs)| childs.shift());
 
       match child_opt {
-        Some(child_hash) => {
-          let data = match self.backend.fetch_chunk(
-            Hash{bytes: child_hash.hash.clone()})
-          {
+        Some(child) => {
+          let hash = Hash{bytes: child.hash.clone()};
+          let data = match self.backend.fetch_chunk(hash) {
             None => fail!("Invalid hash ref."),
             Some(data) => data,
           };
 
           match hash_refs_from_bytes(data.as_slice()) {
-            None => {
-              return Some(data)
-            },
+            None => return Some(data),
             Some(new_childs) => {
-              self.stack.push((child_hash, new_childs));
+              self.stack.push((child, new_childs));
             }
           }
         },
