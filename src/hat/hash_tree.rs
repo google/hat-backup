@@ -118,20 +118,15 @@ impl <B: HashTreeBackend + Clone> SimpleHashTreeWriter<B> {
   /// same order, and split at the same boundaries (i.e. pushing 1-bytes blocks will give 1-byte
   /// blocks when reading; if needed, accummulation of data must be handled by the `backend`).
   pub fn append(&mut self, chunk: Vec<u8>) {
-    self.append_at_level(0, chunk, None);
+    let hash = Hash::new(chunk.as_slice());
+    self.append_at_level(0, hash, chunk, None);
   }
 
-  fn append_at_level(&mut self, level: uint, data: Vec<u8>,
+  fn append_at_level(&mut self, level: uint, hash: Hash, data: Vec<u8>,
                      metadata: Option<Vec<u8>>) {
-    let hash = match metadata {
-      Some(ref x) => Hash::new(x.as_slice()),
-      None => Hash::new(data.as_slice()),
-    };
-    let persistent_ref = self.backend.insert_chunk(
-      hash.clone(), level as i64, metadata, data);
-
-    self.append_hashref_at_level(
-      level, HashRef::new(hash.bytes.into_owned(), persistent_ref));
+    let persistent_ref = self.backend.insert_chunk(hash.clone(), level as i64, metadata, data);
+    let hash_ref = HashRef::new(hash.bytes.into_owned(), persistent_ref);
+    self.append_hashref_at_level(level, hash_ref);
   }
 
   fn append_hashref_at_level(&mut self, level: uint, hashref: HashRef) {
@@ -170,7 +165,8 @@ impl <B: HashTreeBackend + Clone> SimpleHashTreeWriter<B> {
       metadata.as_slice().into_owned()
     };
 
-    self.append_at_level(level + 1, data, Some(metadata_bytes));
+    let hash = Hash::new(metadata_bytes.as_slice());
+    self.append_at_level(level + 1, hash, data, Some(metadata_bytes));
   }
 
   /// Retrieve the hash and backend persistent reference that identified this tree.
