@@ -224,7 +224,7 @@ impl <B: HashTreeBackend + Clone> SimpleHashTreeWriter<B> {
 /// ```
 pub struct SimpleHashTreeReader<B> {
   backend: B,
-  stack: Vec<(HashRef, Vec<HashRef>)>,
+  stack: Vec<HashRef>,
 }
 
 /// Wrapper for the result of `SimpleHashTreeReader::new()`.
@@ -256,37 +256,29 @@ impl <B: HashTreeBackend + Clone> SimpleHashTreeReader<B> {
 
     match hash_refs_from_bytes(data.as_slice()) {
       None => SingleBlock(data), // There's no tree top, just a data block
-      Some(childs) => Tree(SimpleHashTreeReader{
-        stack: vec!((HashRef{hash: root_hash.bytes, persistent_ref: root_ref},
-                     childs)),
-        backend: backend}),
+      Some(childs) => {
+        let mut childs = childs;
+        childs.reverse();
+        Tree(SimpleHashTreeReader{stack: childs, backend: backend})
+      },
     }
   }
 
   fn extract(&mut self) -> Option<Vec<u8>> {
     while self.stack.len() > 0 {
-      let child_opt = self.stack.mut_last().and_then(|&(_, ref mut childs)| childs.shift());
+      let child = self.stack.pop().expect("len() > 0");
 
-      match child_opt {
-        Some(child) => {
-          let hash = Hash{bytes: child.hash.clone()};
-          let data = match self.backend.fetch_chunk(hash) {
-            None => fail!("Invalid hash ref."),
-            Some(data) => data,
-          };
+      let hash = Hash{bytes: child.hash.clone()};
+      let data = self.backend.fetch_chunk(hash).expect("Invalid hash ref");
 
-          match hash_refs_from_bytes(data.as_slice()) {
-            None => return Some(data),
-            Some(new_childs) => {
-              self.stack.push((child, new_childs));
-            }
-          }
-        },
-        None => {
-          // This node is done, move to parent
-          self.stack.pop();
+      match hash_refs_from_bytes(data.as_slice()) {
+        None => return Some(data),
+        Some(new_childs) => {
+          let mut new_childs = new_childs;
+          new_childs.reverse();
+          self.stack.push_all_move(new_childs);
         }
-      };
+      }
     }
 
     None
