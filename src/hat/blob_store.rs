@@ -55,6 +55,13 @@ impl FileBackend {
     FileBackend{root: root, read_cache: Arc::new(Mutex::new(LruCache::new(10)))}
   }
 
+  fn guarded_cache_get(&self, name: &Vec<u8>) -> Option<Result<Vec<u8>, String>> {
+    self.read_cache.lock().get(name).map(|v| v.clone())
+  }
+
+  fn guarded_cache_put(&mut self, name: Vec<u8>, result: Result<Vec<u8>, String>) {
+    self.read_cache.lock().put(name, result);
+  }
 }
 
 impl BlobStoreBackend for FileBackend {
@@ -76,10 +83,8 @@ impl BlobStoreBackend for FileBackend {
 
   fn retrieve(&mut self, name: &[u8]) -> Result<Vec<u8>, String> {
     // Check for key in cache:
-    let value_opt = {
-      let mut guarded_cache = self.read_cache.lock();
-      guarded_cache.get(&name.clone().into_owned()).map(|v| v.clone())
-    };
+    let name = name.clone().into_owned();
+    let value_opt = self.guarded_cache_get(&name);
     match value_opt {
       Some(result) => return result.clone(),
       None => (),
@@ -87,7 +92,7 @@ impl BlobStoreBackend for FileBackend {
 
     // Read key:
     let path = { let mut p = self.root.clone();
-                 p.push(name.to_hex());
+                 p.push(name.as_slice().to_hex());
                  p };
 
     let mut fd = File::open(&path).unwrap();
@@ -96,10 +101,7 @@ impl BlobStoreBackend for FileBackend {
       Ok(data.as_slice().into_owned()) }).or_else(|e| Err(e.to_str()));
 
     // Update cache to contain key:
-    {
-      let mut guarded_cache = self.read_cache.lock();
-      guarded_cache.put(name.clone().to_owned(), res.clone());
-    }
+    self.guarded_cache_put(name, res.clone());
 
     return res;
   }
@@ -341,32 +343,30 @@ pub mod tests {
     pub fn new() -> MemoryBackend {
       MemoryBackend{files: Arc::new(Mutex::new(TreeMap::new()))}
     }
+
+    fn guarded_insert(&mut self, key: Vec<u8>, value: Vec<u8>) -> Result<(), String>{
+      let mut guarded_files = self.files.lock();
+      if guarded_files.contains_key(&key) {
+        return Err(format!("Key already exists: '{}'", key));
+      }
+      guarded_files.insert(key, value);
+      Ok(())
+    }
+
+    fn guarded_retrieve(&mut self, key: &[u8]) -> Result<Vec<u8>, String> {
+      let value_opt = self.files.lock().find(&key.into_owned()).map(|v| v.clone());
+      value_opt.map(|v| Ok(v)).unwrap_or_else(|| Err(format!("Unknown key: '{}'", key)))
+    }
   }
 
   impl BlobStoreBackend for MemoryBackend {
 
     fn store(&mut self, name: &[u8], data: &[u8]) -> Result<(), String> {
-      let key = name.to_owned();
-
-      {
-        let mut guarded_files = self.files.lock();
-        if guarded_files.contains_key(&key) {
-          return Err(format!("Key already exists: '{}'", name));
-        }
-        guarded_files.insert(key, data.into_owned());
-      }
-
-      return Ok(());
+      self.guarded_insert(name.to_owned(), data.clone().into_owned())
     }
 
     fn retrieve(&mut self, name: &[u8]) -> Result<Vec<u8>, String> {
-      let key = name.to_owned();
-
-      let value_opt = {
-        let mut guarded_files = self.files.lock();
-        guarded_files.find(&key).map(|v| v.clone())
-      };
-      return value_opt.map(|v| Ok(v)).unwrap_or_else(|| Err(format!("Unknown key: '{}'", name)));
+      self.guarded_retrieve(name)
     }
   }
 
