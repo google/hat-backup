@@ -164,7 +164,7 @@ pub enum Reply {
 pub struct BlobStore<B> {
   backend: B,
 
-  blob_index: Box<BlobIndexProcess>,
+  blob_index: BlobIndexProcess,
   blob_desc: blob_index::BlobDesc,
 
   buffer_data: Vec<(BlobID, Vec<u8>, proc(BlobID):Send -> ())>,
@@ -181,7 +181,7 @@ fn empty_blob_desc() -> blob_index::BlobDesc {
 
 impl <B: BlobStoreBackend> BlobStore<B> {
 
-  pub fn new(index: Box<BlobIndexProcess>, backend: B,
+  pub fn new(index: BlobIndexProcess, backend: B,
              max_blob_size: uint) -> BlobStore<B> {
     let mut bs = BlobStore{
       backend: backend,
@@ -401,7 +401,7 @@ pub mod tests {
       let mut backend = MemoryBackend::new();
 
       let local_backend = backend.clone();
-      let bsP : Box<BlobStoreProcess<MemoryBackend>> =
+      let bsP : BlobStoreProcess<MemoryBackend> =
         Process::new(proc() { BlobStore::newForTesting(local_backend, 1024) });
 
       let mut ids = Vec::new();
@@ -445,7 +445,7 @@ pub mod tests {
       let mut backend = MemoryBackend::new();
 
       let local_backend = backend.clone();
-      let bsP: Box<BlobStoreProcess<MemoryBackend>> = Process::new(proc() {
+      let bsP: BlobStoreProcess<MemoryBackend> = Process::new(proc() {
         BlobStore::newForTesting(local_backend, 1024) });
 
       let mut ids = Vec::new();

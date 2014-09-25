@@ -79,14 +79,13 @@ pub enum Reply {
 }
 
 pub struct HashStore<'db, B> {
-  hash_index: Box<HashIndexProcess<'db>>,
-  blob_store: Box<BlobStoreProcess<B>>,
+  hash_index: HashIndexProcess<'db>,
+  blob_store: BlobStoreProcess<B>,
 }
 
 impl <'db, B: Send + blob_store::BlobStoreBackend> HashStore<'db, B> {
 
-  pub fn new(hash_index: Box<HashIndexProcess>, blob_store: Box<BlobStoreProcess<B>>)
-             -> HashStore<B> {
+  pub fn new(hash_index: HashIndexProcess, blob_store: BlobStoreProcess<B>) -> HashStore<B> {
     HashStore{hash_index: hash_index,
               blob_store: blob_store}
   }

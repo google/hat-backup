@@ -42,8 +42,8 @@ use time;
 
 pub struct Hat<'db, B> {
   repository_root: Path,
-  blob_index: Box<BlobIndexProcess>,
-  hash_index: Box<HashIndexProcess<'db>>,
+  blob_index: BlobIndexProcess,
+  hash_index: HashIndexProcess<'db>,
 
   backend: B,
   max_blob_size: uint,
@@ -231,11 +231,11 @@ struct InsertPathHandler<'db, B> {
   last_print: sync::Arc<sync::Mutex<time::Timespec>>,
   my_last_print: time::Timespec,
 
-  key_store: Box<KeyStoreProcess<'db, FileEntry, FileIterator, B>>,
+  key_store: KeyStoreProcess<'db, FileEntry, FileIterator, B>,
 }
 
 impl <'db, B> InsertPathHandler<'db, B> {
-  pub fn new(key_store: Box<KeyStoreProcess<'db, FileEntry, FileIterator, B>>)
+  pub fn new(key_store: KeyStoreProcess<'db, FileEntry, FileIterator, B>)
              -> InsertPathHandler<'db, B> {
     InsertPathHandler{
       count: sync::Arc::new(sync::Mutex::new(0)),
@@ -305,7 +305,7 @@ impl <'db, B: BlobStoreBackend + Clone> listdir::PathHandler<Option<Vec<u8>>>
 
 struct Family<'db, B> {
   name: String,
-  key_store: Box<KeyStoreProcess<'db, FileEntry, FileIterator, B>>,
+  key_store: KeyStoreProcess<'db, FileEntry, FileIterator, B>,
 }
 
 impl <'db, B: BlobStoreBackend + Clone> Family<'db, B> {

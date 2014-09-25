@@ -60,15 +60,14 @@ pub enum Reply<'db, B> {
 }
 
 pub struct KeyStore<'db, KE, IT, B> {
-  index: Box<KeyIndexProcess<KE>>,
-  hash_store: Box<HashStoreProcess<'db, B>>,
+  index: KeyIndexProcess<KE>,
+  hash_store: HashStoreProcess<'db, B>,
 }
 
 // Implementations
 impl <'db, KE: KeyEntry<KE> + Send, IT: Iterator<Vec<u8>>, B: BlobStoreBackend + Send>
   KeyStore<'db, KE, IT, B> {
-  pub fn new(index: Box<KeyIndexProcess<KE>>, hash_store: Box<HashStoreProcess<B>>)
-             -> KeyStore<KE, IT, B> {
+  pub fn new(index: KeyIndexProcess<KE>, hash_store: HashStoreProcess<B>) -> KeyStore<KE, IT, B> {
     KeyStore{index: index,
              hash_store: hash_store}
   }
@@ -88,11 +87,11 @@ impl <'db, KE: KeyEntry<KE> + Send, IT: Iterator<Vec<u8>>, B: BlobStoreBackend +
 
 #[deriving(Clone)]
 pub struct HashStoreBackend<'db, B> {
-  hash_store: Box<HashStoreProcess<'db, B>>,
+  hash_store: HashStoreProcess<'db, B>,
 }
 
 impl <'db, B> HashStoreBackend<'db, B> {
-  fn new(hash_store: Box<Process<hash_store::Msg, hash_store::Reply, HashStore<B>>>)
+  fn new(hash_store: Process<hash_store::Msg, hash_store::Reply, HashStore<B>>)
   -> HashStoreBackend<B> {
     HashStoreBackend{hash_store:hash_store}
   }
@@ -414,7 +413,7 @@ mod tests {
                filelist: create_files(root_id, size)}
   }
 
-  fn insert_fs(fs: &FileSystem, ksP: Box<KeyStoreProcess<KeyEntryStub, KeyEntryStub, MemoryBackend>>) {
+  fn insert_fs(fs: &FileSystem, ksP: KeyStoreProcess<KeyEntryStub, KeyEntryStub, MemoryBackend>) {
 
     let local_file = fs.file.clone();
     ksP.sendReply(Insert(fs.file.clone(),
@@ -427,7 +426,7 @@ mod tests {
   }
 
   fn verify_filesystem(fs: &FileSystem,
-                       ksP: Box<KeyStoreProcess<KeyEntryStub, KeyEntryStub, MemoryBackend>>) -> uint {
+                       ksP: KeyStoreProcess<KeyEntryStub, KeyEntryStub, MemoryBackend>) -> uint {
 
     let listing = match ksP.sendReply(ListDir(fs.file.id())) {
       ListResult(ls) => ls,
@@ -515,7 +514,7 @@ mod tests {
   #[bench]
   fn insert_1_key_x_128K_zeros(bench: &mut Bencher) {
     let backend = DevNullBackend;
-    let ksP : Box<KeyStoreProcess<KeyEntryStub, KeyEntryStub, DevNullBackend>>
+    let ksP : KeyStoreProcess<KeyEntryStub, KeyEntryStub, DevNullBackend>
       = Process::new(proc() { KeyStore::newForTesting(backend) });
 
     let bytes = Vec::from_elem(128*1024, 0u8);
@@ -538,7 +537,7 @@ mod tests {
   #[bench]
   fn insert_1_key_x_128K_unique(bench: &mut Bencher) {
     let backend = DevNullBackend;
-    let ksP : Box<KeyStoreProcess<KeyEntryStub, KeyEntryStub, DevNullBackend>>
+    let ksP : KeyStoreProcess<KeyEntryStub, KeyEntryStub, DevNullBackend>
       = Process::new(proc() { KeyStore::newForTesting(backend) });
 
     let bytes = Vec::from_elem(128*1024, 0u8);
@@ -570,7 +569,7 @@ mod tests {
   #[bench]
   fn insert_1_key_x_16_x_128K_zeros(bench: &mut Bencher) {
     let backend = DevNullBackend;
-    let ksP : Box<KeyStoreProcess<KeyEntryStub, KeyEntryStub, DevNullBackend>>
+    let ksP : KeyStoreProcess<KeyEntryStub, KeyEntryStub, DevNullBackend>
       = Process::new(proc() { KeyStore::newForTesting(backend) });
 
     bench.iter(|| {
@@ -596,7 +595,7 @@ mod tests {
   #[bench]
   fn insert_1_key_x_16_x_128K_unique(bench: &mut Bencher) {
     let backend = DevNullBackend;
-    let ksP : Box<KeyStoreProcess<KeyEntryStub, KeyEntryStub, DevNullBackend>>
+    let ksP : KeyStoreProcess<KeyEntryStub, KeyEntryStub, DevNullBackend>
       = Process::new(proc() { KeyStore::newForTesting(backend) });
 
     let bytes = Vec::from_elem(128*1024, 0u8);

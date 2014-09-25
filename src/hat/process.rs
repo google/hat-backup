@@ -76,10 +76,10 @@ impl <Msg:Send, Reply:Send, Handler: MsgHandler<Msg, Reply>> Process<Msg, Reply,
 {
 
   /// Create and start a new process using `handler`.
-  pub fn new(handler_proc: proc():Send -> Handler) -> Box<Process<Msg, Reply, Handler>> {
+  pub fn new(handler_proc: proc():Send -> Handler) -> Process<Msg, Reply, Handler> {
 
     let (sender, receiver) = channel();
-    let p = box Process{
+    let p = Process{
       sender: sender,
       ticket_count: Arc::new(Mutex::new(10)),
     };
