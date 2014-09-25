@@ -73,15 +73,15 @@ impl <'db, KE: KeyEntry<KE> + Send, IT: Iterator<Vec<u8>>, B: BlobStoreBackend +
   }
 
   #[cfg(test)]
-  pub fn newForTesting(backend: B) -> KeyStore<KE, IT, B> {
-    let kiP = Process::new(proc() { KeyIndex::newForTesting() });
-    let hsP = Process::new(proc() { HashStore::newForTesting(backend) });
+  pub fn new_for_testing(backend: B) -> KeyStore<KE, IT, B> {
+    let kiP = Process::new(proc() { KeyIndex::new_for_testing() });
+    let hsP = Process::new(proc() { HashStore::new_for_testing(backend) });
     KeyStore{index: kiP, hash_store: hsP}
   }
 
   pub fn flush(&mut self) {
-    self.hash_store.sendReply(hash_store::Flush);
-    self.index.sendReply(key_index::Flush);
+    self.hash_store.send_reply(hash_store::Flush);
+    self.index.send_reply(key_index::Flush);
   }
 }
 
@@ -102,7 +102,7 @@ impl <'db, B: BlobStoreBackend + Clone> HashTreeBackend for HashStoreBackend<'db
   fn fetch_chunk(&mut self, hash: hash_index::Hash) -> Option<Vec<u8>> {
     assert!(hash.bytes.len() > 0);
 
-    match self.hash_store.sendReply(hash_store::FetchChunkFromHash(hash)) {
+    match self.hash_store.send_reply(hash_store::FetchChunkFromHash(hash)) {
       hash_store::Chunk(bytes) => Some(bytes),
       _ => None,
     }
@@ -112,7 +112,7 @@ impl <'db, B: BlobStoreBackend + Clone> HashTreeBackend for HashStoreBackend<'db
     assert!(hash.bytes.len() > 0);
 
     loop {
-      match self.hash_store.sendReply(
+      match self.hash_store.send_reply(
         hash_store::FetchPersistentRef(hash.clone())
       )
       {
@@ -125,7 +125,7 @@ impl <'db, B: BlobStoreBackend + Clone> HashTreeBackend for HashStoreBackend<'db
   }
 
   fn fetch_payload(&mut self, hash: hash_index::Hash) -> Option<Vec<u8>> {
-    match self.hash_store.sendReply(hash_store::FetchPayload(hash.clone()))
+    match self.hash_store.send_reply(hash_store::FetchPayload(hash.clone()))
     {
       hash_store::Payload(p) => { return p }, // done
       hash_store::HashNotKnown => { return None }, // done
@@ -136,7 +136,7 @@ impl <'db, B: BlobStoreBackend + Clone> HashTreeBackend for HashStoreBackend<'db
   fn insert_chunk(&mut self, hash: hash_index::Hash,
                   level: i64, payload: Option<Vec<u8>>,
                   chunk: Vec<u8>) -> Vec<u8> {
-    match self.hash_store.sendReply(
+    match self.hash_store.send_reply(
       hash_store::Insert(hash, level, payload, chunk))
     {
       hash_store::InsertOK(blob_ref) => blob_ref,
@@ -157,7 +157,7 @@ impl <'db, KE: KeyEntry<KE> + Clone + Send, IT: Iterator<Vec<u8>> + Send,
       },
 
       ListDir(parent) => {
-        match self.index.sendReply(key_index::ListDir(parent)) {
+        match self.index.send_reply(key_index::ListDir(parent)) {
           key_index::ListResult(entries) => {
             // TODO(jos): Rewrite this tuple hell
             let mut my_entries = Vec::with_capacity(entries.len());
@@ -182,14 +182,14 @@ impl <'db, KE: KeyEntry<KE> + Clone + Send, IT: Iterator<Vec<u8>> + Send,
       },
 
       Insert(org_entry, chunk_it_opt) => {
-        match self.index.sendReply(key_index::LookupExact(org_entry.clone())) {
+        match self.index.send_reply(key_index::LookupExact(org_entry.clone())) {
 
           key_index::Id(entryId) => {
             return reply(Id(entryId));
           },
 
           _ => {
-            let id = match self.index.sendReply(key_index::Insert(org_entry.clone()))
+            let id = match self.index.send_reply(key_index::Insert(org_entry.clone()))
             {
               key_index::Id(entryId) => entryId,
               _ => fail!("No ID returned from key index Insert()."),
@@ -228,11 +228,11 @@ impl <'db, KE: KeyEntry<KE> + Clone + Send, IT: Iterator<Vec<u8>> + Send,
               let (hash, persistent_ref) = tree.hash();
 
               let local_index = self.index.clone();
-              self.hash_store.sendReply(
+              self.hash_store.send_reply(
                 hash_store::CallAfterHashIsComitted(
                   hash.clone(),
                   proc() {
-                    local_index.sendReply(key_index::UpdateDataHash(org_entry.withId(id),
+                    local_index.send_reply(key_index::UpdateDataHash(org_entry.with_id(id),
                                                                     Some(hash.bytes.clone()),
                                                                     Some(persistent_ref)));
                   }
@@ -240,7 +240,7 @@ impl <'db, KE: KeyEntry<KE> + Clone + Send, IT: Iterator<Vec<u8>> + Send,
               );
             } else {
               // No data is associated with this entry
-              self.index.sendReply(
+              self.index.send_reply(
                 key_index::UpdateDataHash(org_entry, None, None));
             }
           }
@@ -315,7 +315,7 @@ mod tests {
       Some(self.id.clone())
     }
 
-    fn parentId(&self) -> Option<Vec<u8>> {
+    fn parent_id(&self) -> Option<Vec<u8>> {
       self.parent_id.clone()
     }
 
@@ -343,15 +343,15 @@ mod tests {
       self.modified
     }
 
-    fn userId(&self) -> Option<u64> {
+    fn user_id(&self) -> Option<u64> {
       None
     }
 
-    fn groupId(&self) -> Option<u64> {
+    fn group_id(&self) -> Option<u64> {
       None
     }
 
-    fn withId(&self, id: Vec<u8>) -> KeyEntryStub {
+    fn with_id(&self, id: Vec<u8>) -> KeyEntryStub {
       assert_eq!(self.id, id);
       self.clone()
     }
@@ -416,7 +416,7 @@ mod tests {
   fn insert_fs(fs: &FileSystem, ksP: KeyStoreProcess<KeyEntryStub, KeyEntryStub, MemoryBackend>) {
 
     let local_file = fs.file.clone();
-    ksP.sendReply(Insert(fs.file.clone(),
+    ksP.send_reply(Insert(fs.file.clone(),
                          if fs.file.data.is_some() {
                            Some(proc() { Some(local_file) }) } else { None }));
 
@@ -428,7 +428,7 @@ mod tests {
   fn verify_filesystem(fs: &FileSystem,
                        ksP: KeyStoreProcess<KeyEntryStub, KeyEntryStub, MemoryBackend>) -> uint {
 
-    let listing = match ksP.sendReply(ListDir(fs.file.id())) {
+    let listing = match ksP.send_reply(ListDir(fs.file.id())) {
       ListResult(ls) => ls,
       _ => fail!("Unexpected result from key store."),
     };
@@ -493,11 +493,11 @@ mod tests {
       let fs = rng_filesystem(size as uint);
 
       let backend = MemoryBackend::new();
-      let ksP = Process::new(proc() { KeyStore::newForTesting(backend) });
+      let ksP = Process::new(proc() { KeyStore::new_for_testing(backend) });
 
       insert_fs(&fs, ksP.clone());
 
-      match ksP.sendReply(Flush) {
+      match ksP.send_reply(Flush) {
         FlushOK => (),
         _ => fail!("Unexpected result from key store."),
       }
@@ -512,10 +512,10 @@ mod tests {
 
 
   #[bench]
-  fn insert_1_key_x_128K_zeros(bench: &mut Bencher) {
+  fn insert_1_key_x_128000_zeros(bench: &mut Bencher) {
     let backend = DevNullBackend;
     let ksP : KeyStoreProcess<KeyEntryStub, KeyEntryStub, DevNullBackend>
-      = Process::new(proc() { KeyStore::newForTesting(backend) });
+      = Process::new(proc() { KeyStore::new_for_testing(backend) });
 
     let bytes = Vec::from_elem(128*1024, 0u8);
 
@@ -525,7 +525,7 @@ mod tests {
 
       let entry = KeyEntryStub::new(None, format!("{}", i).as_bytes().into_owned(),
                                     Some(vec![bytes.clone()]), None);
-      ksP.sendReply(Insert(entry.clone(), Some(proc() { Some(entry) })));
+      ksP.send_reply(Insert(entry.clone(), Some(proc() { Some(entry) })));
 
     });
 
@@ -535,10 +535,10 @@ mod tests {
 
 
   #[bench]
-  fn insert_1_key_x_128K_unique(bench: &mut Bencher) {
+  fn insert_1_key_x_128000_unique(bench: &mut Bencher) {
     let backend = DevNullBackend;
     let ksP : KeyStoreProcess<KeyEntryStub, KeyEntryStub, DevNullBackend>
-      = Process::new(proc() { KeyStore::newForTesting(backend) });
+      = Process::new(proc() { KeyStore::new_for_testing(backend) });
 
     let bytes = Vec::from_elem(128*1024, 0u8);
 
@@ -557,7 +557,7 @@ mod tests {
 
       let entry = KeyEntryStub::new(None, format!("{}", i).as_bytes().into_owned(),
                                     Some(vec!(my_bytes)), None);
-      ksP.sendReply(Insert(entry.clone(), Some(proc() { Some(entry) })));
+      ksP.send_reply(Insert(entry.clone(), Some(proc() { Some(entry) })));
 
     });
 
@@ -567,10 +567,10 @@ mod tests {
 
 
   #[bench]
-  fn insert_1_key_x_16_x_128K_zeros(bench: &mut Bencher) {
+  fn insert_1_key_x_16_x_128000_zeros(bench: &mut Bencher) {
     let backend = DevNullBackend;
     let ksP : KeyStoreProcess<KeyEntryStub, KeyEntryStub, DevNullBackend>
-      = Process::new(proc() { KeyStore::newForTesting(backend) });
+      = Process::new(proc() { KeyStore::new_for_testing(backend) });
 
     bench.iter(|| {
       let bytes = Vec::from_elem(128*1024, 0u8);
@@ -579,9 +579,9 @@ mod tests {
                                     Some(Vec::from_elem(16, bytes)),
                                     None);
 
-      ksP.sendReply(Insert(entry.clone(), Some(proc() { Some(entry) })));
+      ksP.send_reply(Insert(entry.clone(), Some(proc() { Some(entry) })));
 
-      match ksP.sendReply(Flush) {
+      match ksP.send_reply(Flush) {
         FlushOK => (),
         _ => fail!("Unexpected result from key store."),
       }
@@ -593,10 +593,10 @@ mod tests {
 
 
   #[bench]
-  fn insert_1_key_x_16_x_128K_unique(bench: &mut Bencher) {
+  fn insert_1_key_x_16_x_128000_unique(bench: &mut Bencher) {
     let backend = DevNullBackend;
     let ksP : KeyStoreProcess<KeyEntryStub, KeyEntryStub, DevNullBackend>
-      = Process::new(proc() { KeyStore::newForTesting(backend) });
+      = Process::new(proc() { KeyStore::new_for_testing(backend) });
 
     let bytes = Vec::from_elem(128*1024, 0u8);
     let mut i = 0;
@@ -622,9 +622,9 @@ mod tests {
                                     })),
                                     None);
 
-      ksP.sendReply(Insert(entry.clone(), Some(proc() { Some(entry) })));
+      ksP.send_reply(Insert(entry.clone(), Some(proc() { Some(entry) })));
 
-      match ksP.sendReply(Flush) {
+      match ksP.send_reply(Flush) {
         FlushOK => (),
         _ => fail!("Unexpected result from key store."),
       }

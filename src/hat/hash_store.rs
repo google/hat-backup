@@ -91,31 +91,31 @@ impl <'db, B: Send + blob_store::BlobStoreBackend> HashStore<'db, B> {
   }
 
   #[cfg(test)]
-  pub fn newForTesting(backend: B) -> HashStore<B> {
-    let hiP = Process::new(proc() { hash_index::HashIndex::newForTesting() });
-    let bsP = Process::new(proc() { blob_store::BlobStore::newForTesting(backend, 1024) });
+  pub fn new_for_testing(backend: B) -> HashStore<B> {
+    let hiP = Process::new(proc() { hash_index::HashIndex::new_for_testing() });
+    let bsP = Process::new(proc() { blob_store::BlobStore::new_for_testing(backend, 1024) });
     HashStore{hash_index: hiP,
               blob_store: bsP}
   }
 
   pub fn flush(&mut self) {
-    self.blob_store.sendReply(blob_store::Flush);
-    self.hash_index.sendReply(hash_index::Flush);
+    self.blob_store.send_reply(blob_store::Flush);
+    self.hash_index.send_reply(hash_index::Flush);
   }
 
-  fn fetchChunkFromHash(&mut self, hash: hash_index::Hash) -> Vec<u8> {
+  fn fetch_chunk_from_hash(&mut self, hash: hash_index::Hash) -> Vec<u8> {
     assert!(hash.bytes.len() > 0);
-    match self.hash_index.sendReply(hash_index::FetchPersistentRef(hash)) {
+    match self.hash_index.send_reply(hash_index::FetchPersistentRef(hash)) {
       hash_index::PersistentRef(chunk_ref_bytes) => {
         let chunk_ref = BlobID::from_bytes(chunk_ref_bytes);
-        self.fetchChunkFromPersistentRef(chunk_ref)
+        self.fetch_chunk_from_persistent_ref(chunk_ref)
       },
       _ => fail!("Could not find hash in hash index."),
     }
   }
 
-  fn fetchChunkFromPersistentRef(&mut self, chunk_ref: BlobID) -> Vec<u8> {
-    match self.blob_store.sendReply(blob_store::Retrieve(chunk_ref)) {
+  fn fetch_chunk_from_persistent_ref(&mut self, chunk_ref: BlobID) -> Vec<u8> {
+    match self.blob_store.send_reply(blob_store::Retrieve(chunk_ref)) {
       blob_store::RetrieveOK(chunk) => chunk,
       _ => fail!("Could not retrieve chunk from blob store."),
     }
@@ -129,7 +129,7 @@ impl <'db, B: Send + blob_store::BlobStoreBackend> MsgHandler<Msg, Reply> for Ha
     match msg {
 
       HashExists(hash) => {
-        return reply(match self.hash_index.sendReply(
+        return reply(match self.hash_index.send_reply(
           hash_index::HashExists(hash)) {
           hash_index::HashKnown    => HashKnown,
           hash_index::HashNotKnown => HashNotKnown,
@@ -138,7 +138,7 @@ impl <'db, B: Send + blob_store::BlobStoreBackend> MsgHandler<Msg, Reply> for Ha
       },
 
       FetchPayload(hash) => {
-        return reply(match self.hash_index.sendReply(hash_index::FetchPayload(hash)) {
+        return reply(match self.hash_index.send_reply(hash_index::FetchPayload(hash)) {
           hash_index::Payload(p) => Payload(p),
           hash_index::HashNotKnown => HashNotKnown,
           _ => fail!("Unexpected answer from hash index."),
@@ -147,7 +147,7 @@ impl <'db, B: Send + blob_store::BlobStoreBackend> MsgHandler<Msg, Reply> for Ha
 
       FetchPersistentRef(hash) => {
         assert!(hash.bytes.len() > 0);
-        return reply(match self.hash_index.sendReply(
+        return reply(match self.hash_index.send_reply(
           hash_index::FetchPersistentRef(hash)) {
           hash_index::PersistentRef(r) => PersistentRef(r),
           hash_index::HashNotKnown => HashNotKnown,
@@ -157,7 +157,7 @@ impl <'db, B: Send + blob_store::BlobStoreBackend> MsgHandler<Msg, Reply> for Ha
       },
 
       CallAfterHashIsComitted(hash, callback) => {
-        self.hash_index.sendReply(
+        self.hash_index.send_reply(
           hash_index::CallAfterHashIsComitted(hash, callback));
         return reply(CallbackRegistered);
       },
@@ -168,11 +168,11 @@ impl <'db, B: Send + blob_store::BlobStoreBackend> MsgHandler<Msg, Reply> for Ha
         let mut hash_entry = HashEntry{hash:hash.clone(),
                                        level:level, payload:payload,
                                        persistent_ref: None};
-        match self.hash_index.sendReply(hash_index::Reserve(hash_entry.clone())) {
+        match self.hash_index.send_reply(hash_index::Reserve(hash_entry.clone())) {
           hash_index::HashKnown => {
             // Someone came before us; we'll piggyback on their result.
             loop {
-              match self.hash_index.sendReply(hash_index::FetchPersistentRef(hash.clone())) {
+              match self.hash_index.send_reply(hash_index::FetchPersistentRef(hash.clone())) {
                 hash_index::PersistentRef(r) => return reply(InsertOK(r)),
                 hash_index::Retry => (),  // The owner of this data-chunk is still processing.
                 _ => fail!("Unexpected answer from hash index."),
@@ -182,14 +182,14 @@ impl <'db, B: Send + blob_store::BlobStoreBackend> MsgHandler<Msg, Reply> for Ha
           hash_index::ReserveOK => {
             // This data-chunk is ours to process.
             let local_hash_index = self.hash_index.clone();
-            match self.blob_store.sendReply(
+            match self.blob_store.send_reply(
               Store(persistent_bytes, proc(blobid) {
-                local_hash_index.sendReply(Commit(hash, blobid.as_bytes().into_owned()));
+                local_hash_index.send_reply(Commit(hash, blobid.as_bytes().into_owned()));
               }))
             {
               StoreOK(blob_ref) => {
                 hash_entry.persistent_ref = Some(blob_ref.as_bytes());
-                self.hash_index.sendReply(hash_index::UpdateReserved(hash_entry));
+                self.hash_index.send_reply(hash_index::UpdateReserved(hash_entry));
                 return reply(InsertOK(blob_ref.as_bytes()))
               },
               _ => fail!("Unexpected reply from BlobStore."),
@@ -201,12 +201,12 @@ impl <'db, B: Send + blob_store::BlobStoreBackend> MsgHandler<Msg, Reply> for Ha
 
       FetchChunkFromHash(hash) => {
         assert!(hash.bytes.len() > 0);
-        return reply(Chunk(self.fetchChunkFromHash(hash)));
+        return reply(Chunk(self.fetch_chunk_from_hash(hash)));
       },
 
       FetchChunkFromPersistentRef(persistent_ref) => {
         let chunk_ref = BlobID::from_bytes(persistent_ref);
-        return reply(Chunk(self.fetchChunkFromPersistentRef(chunk_ref)));
+        return reply(Chunk(self.fetch_chunk_from_persistent_ref(chunk_ref)));
       },
 
       Flush => {
@@ -247,10 +247,10 @@ mod tests {
   fn hash_store_identity() {
     fn prop(chunks: Vec<Vec<u8>>) -> bool {
       let backend = MemoryBackend::new();
-      let hsP = Process::new(proc() { HashStore::newForTesting(backend) });
+      let hsP = Process::new(proc() { HashStore::new_for_testing(backend) });
 
       for chunk in chunks.iter() {
-        match hsP.sendReply(
+        match hsP.send_reply(
           Insert(Hash::new(chunk.as_slice()), 0, None, chunk.as_slice().into_owned()))
         {
           InsertOK(_chunk_ref) => (),
@@ -258,10 +258,10 @@ mod tests {
         }
       }
 
-      assert_eq!(hsP.sendReply(Flush), FlushOK);
+      assert_eq!(hsP.send_reply(Flush), FlushOK);
 
       for chunk in chunks.iter() {
-        match hsP.sendReply(FetchChunkFromHash(Hash::new(chunk.as_slice()))) {
+        match hsP.send_reply(FetchChunkFromHash(Hash::new(chunk.as_slice()))) {
           Chunk(found_chunk) => assert_eq!(chunk.as_slice().into_owned(), found_chunk),
           _ => fail!("Could not find chunk."),
         }

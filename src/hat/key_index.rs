@@ -28,7 +28,7 @@ use serialize::hex::{ToHex};
 
 pub trait KeyEntry<KE> {
   fn id(&self) -> Option<Vec<u8>>;
-  fn parentId(&self) -> Option<Vec<u8>>;
+  fn parent_id(&self) -> Option<Vec<u8>>;
 
   fn name(&self) -> Vec<u8>;
   fn size(&self) -> Option<u64>;
@@ -38,10 +38,10 @@ pub trait KeyEntry<KE> {
   fn accessed(&self) -> Option<u64>;
 
   fn permissions(&self) -> Option<u64>;
-  fn userId(&self) -> Option<u64>;
-  fn groupId(&self) -> Option<u64>;
+  fn user_id(&self) -> Option<u64>;
+  fn group_id(&self) -> Option<u64>;
 
-  fn withId(&self, Vec<u8>) -> KE;
+  fn with_id(&self, Vec<u8>) -> KE;
 }
 
 pub type KeyIndexProcess<KE> = Process<Msg<KE>, Reply, KeyIndex>;
@@ -122,7 +122,7 @@ impl KeyIndex {
       },
       Err(err) => fail!(err.to_str()),
     };
-    ki.execOrDie("CREATE TABLE IF NOT EXISTS
+    ki.exec_or_die("CREATE TABLE IF NOT EXISTS
                   key_index (id     BLOB PRIMARY KEY,
                              parent BLOB,
                              name   BLOB,
@@ -134,21 +134,21 @@ impl KeyIndex {
                             );");
 
     if cfg!(test) {
-      ki.execOrDie("CREATE UNIQUE INDEX IF NOT EXISTS
+      ki.exec_or_die("CREATE UNIQUE INDEX IF NOT EXISTS
                     KeyIndex_UniqueParentName
                     ON key_index(parent, name)");
     }
 
-    ki.execOrDie("BEGIN");
+    ki.exec_or_die("BEGIN");
     ki
   }
 
   #[cfg(test)]
-  pub fn newForTesting() -> KeyIndex {
+  pub fn new_for_testing() -> KeyIndex {
     KeyIndex::new(":memory:".to_owned())
   }
 
-  fn execOrDie(&mut self, sql: &str) {
+  fn exec_or_die(&mut self, sql: &str) {
     match self.dbh.exec(sql) {
       Ok(true) => (),
       Ok(false) => fail!("exec: {}", self.dbh.get_errmsg()),
@@ -156,25 +156,25 @@ impl KeyIndex {
     }
   }
 
-  fn prepareOrDie<'a>(&'a mut self, sql: &str) -> Cursor<'a> {
+  fn prepare_or_die<'a>(&'a mut self, sql: &str) -> Cursor<'a> {
     match self.dbh.prepare(sql, &None) {
       Ok(s)  => s,
       Err(x) => fail!("sqlite error: {} ({:?})", self.dbh.get_errmsg(), x),
     }
   }
 
-  fn prepareOrDieCursor<'a>(&'a mut self, sql: &str) -> KeyCursor<'a> {
-    KeyCursor{cursor: self.prepareOrDie(sql)}
+  fn prepare_or_die_cursor<'a>(&'a mut self, sql: &str) -> KeyCursor<'a> {
+    KeyCursor{cursor: self.prepare_or_die(sql)}
   }
 
-  pub fn maybeFlush(&mut self) {
+  pub fn maybe_flush(&mut self) {
     if self.flush_timer.did_fire() {
       self.flush();
     }
   }
 
   pub fn flush(&mut self) {
-    self.execOrDie("COMMIT; BEGIN");
+    self.exec_or_die("COMMIT; BEGIN");
   }
 }
 
@@ -186,7 +186,7 @@ impl Clone for KeyIndex {
 
 impl Drop for KeyIndex {
   fn drop(&mut self) {
-    self.execOrDie("COMMIT");
+    self.exec_or_die("COMMIT");
   }
 }
 
@@ -195,10 +195,10 @@ impl <A: KeyEntry<A>> MsgHandler<Msg<A>, Reply> for KeyIndex {
     match msg {
 
       Insert(entry) => {
-        let parent = entry.parentId().unwrap_or(b"".into_owned());
+        let parent = entry.parent_id().unwrap_or(b"".into_owned());
         let id = entry.id().unwrap_or_else(|| randombytes(16));
 
-        self.execOrDie(format!(
+        self.exec_or_die(format!(
           "INSERT OR REPLACE INTO key_index (id, parent, name, created, accessed)
            VALUES (x'{:s}', x'{:s}', x'{:s}', {:u}, {:u})",
           id.as_slice().to_hex(), parent.as_slice().to_hex(), entry.name().as_slice().to_hex(),
@@ -209,10 +209,10 @@ impl <A: KeyEntry<A>> MsgHandler<Msg<A>, Reply> for KeyIndex {
       },
 
       LookupExact(entry) => {
-        let parent = entry.parentId().unwrap_or(b"".into_owned());
+        let parent = entry.parent_id().unwrap_or(b"".into_owned());
         let cursor = match entry.id() {
           Some(id) => {
-            self.prepareOrDie(format!(
+            self.prepare_or_die(format!(
               "SELECT id FROM key_index
                 WHERE parent=x'{:s}' AND id=x'{:s}'
                 AND created={:u} AND modified={:u} AND accessed={:u}
@@ -223,7 +223,7 @@ impl <A: KeyEntry<A>> MsgHandler<Msg<A>, Reply> for KeyIndex {
               entry.accessed().unwrap_or(0)).as_slice())
           },
           None => {
-            self.prepareOrDie(format!(
+            self.prepare_or_die(format!(
               "SELECT id FROM key_index
                 WHERE parent=x'{:s}' AND name=x'{:s}'
                 AND created={:u} AND modified={:u} AND accessed={:u}
@@ -244,14 +244,14 @@ impl <A: KeyEntry<A>> MsgHandler<Msg<A>, Reply> for KeyIndex {
       },
 
       UpdateDataHash(entry, hash_opt, persistent_ref_opt) => {
-        let parent = entry.parentId().unwrap_or(b"".into_owned());
+        let parent = entry.parent_id().unwrap_or(b"".into_owned());
 
         assert!(hash_opt.is_some() == persistent_ref_opt.is_some());
 
         if hash_opt.is_some() && persistent_ref_opt.is_some() {
           match entry.modified() {
             Some(modified) => {
-              self.execOrDie(format!(
+              self.exec_or_die(format!(
                 "UPDATE key_index SET hash=x'{:s}', persistent_ref=x'{:s}'
                                                   , modified={:u}
                   WHERE parent=x'{:s}' AND id=x'{:s}' AND IFNULL(modified,0)<={:u}",
@@ -261,7 +261,7 @@ impl <A: KeyEntry<A>> MsgHandler<Msg<A>, Reply> for KeyIndex {
                 modified).as_slice());
             },
             None => {
-              self.execOrDie(format!(
+              self.exec_or_die(format!(
                 "UPDATE key_index SET hash=x'{:s}', persistent_ref=x'{:s}'
                  WHERE parent=x'{:s}' AND id=x'{:s}'",
                 hash_opt.unwrap().as_slice().to_hex(),
@@ -272,7 +272,7 @@ impl <A: KeyEntry<A>> MsgHandler<Msg<A>, Reply> for KeyIndex {
         } else {
           match entry.modified() {
             Some(modified) => {
-              self.execOrDie(format!(
+              self.exec_or_die(format!(
                 "UPDATE key_index SET hash=NULL, persistent_ref=NULL
                                                , modified={:u}
                   WHERE parent=x'{:s}' AND id=x'{:s}' AND IFNULL(modified, 0)<={:u}",
@@ -280,7 +280,7 @@ impl <A: KeyEntry<A>> MsgHandler<Msg<A>, Reply> for KeyIndex {
                 modified).as_slice());
             },
             None => {
-              self.execOrDie(format!(
+              self.exec_or_die(format!(
                 "UPDATE key_index SET hash=NULL, persistent_ref=NULL
                  WHERE parent=x'{:s}' AND id=x'{:s}'",
                 parent.as_slice().to_hex(), entry.id().unwrap().as_slice().to_hex()).as_slice());
@@ -288,7 +288,7 @@ impl <A: KeyEntry<A>> MsgHandler<Msg<A>, Reply> for KeyIndex {
           }
         }
 
-        self.maybeFlush();
+        self.maybe_flush();
         return reply(UpdateOK);
       },
 
@@ -301,7 +301,7 @@ impl <A: KeyEntry<A>> MsgHandler<Msg<A>, Reply> for KeyIndex {
         let mut listing = Vec::new();
         let parent = parent.unwrap_or(b"".into_owned());
 
-        let cursor = self.prepareOrDie(format!(
+        let cursor = self.prepare_or_die(format!(
            "SELECT id, name, created, modified, accessed, hash, persistent_ref
             FROM key_index
             WHERE parent=x'{:s}'", parent.as_slice().to_hex()).as_slice());
@@ -333,7 +333,7 @@ impl <A: KeyEntry<A>> MsgHandler<Msg<A>, Reply> for KeyIndex {
 
         spawn(proc() {
           let mut ki = outer_ki.clone();
-          let mut cursor = ki.prepareOrDieCursor(format!(
+          let mut cursor = ki.prepare_or_die_cursor(format!(
             "SELECT id, name, created, modified, accessed, hash, persistent_ref
              FROM key_index
              WHERE parent=x'{:s}'", parent.as_slice().to_hex()).as_slice());
@@ -363,7 +363,7 @@ mod tests {
     fn id(&self) -> Option<Vec<u8>> {
       None
     }
-    fn parentId(&self) -> Option<Vec<u8>>{
+    fn parent_id(&self) -> Option<Vec<u8>>{
       self.parent.clone()
     }
     fn name(&self) -> Vec<u8> {
@@ -387,15 +387,15 @@ mod tests {
     fn permissions(&self) -> Option<u64> {
       None
     }
-    fn userId(&self) -> Option<u64> {
+    fn user_id(&self) -> Option<u64> {
       None
     }
-    fn groupId(&self) -> Option<u64> {
+    fn group_id(&self) -> Option<u64> {
       None
     }
-    fn withId(&self, id: Vec<u8>) -> TestEntry {
+    fn with_id(&self, id: Vec<u8>) -> TestEntry {
       TestEntry{id:Some(id),
-                parent: self.parentId(),
+                parent: self.parent_id(),
                 name: self.name()}
     }
   }

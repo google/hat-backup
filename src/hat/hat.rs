@@ -64,7 +64,7 @@ fn hash_index_name(root: &Path) -> String {
 }
 
 impl <'db, B: BlobStoreBackend + Clone + Send> Hat<'db, B> {
-  pub fn openRepository(repository_root: &Path, backend: B, max_blob_size: uint)
+  pub fn open_repository(repository_root: &Path, backend: B, max_blob_size: uint)
                         -> Option<Hat<'db, B>> {
     repository_root.as_str().map(|_| {
       let blob_index_path = blob_index_name(repository_root);
@@ -80,7 +80,7 @@ impl <'db, B: BlobStoreBackend + Clone + Send> Hat<'db, B> {
     })
   }
 
-  pub fn openFamily(&self, name: String) -> Option<Family<'db, B>> {
+  pub fn open_family(&self, name: String) -> Option<Family<'db, B>> {
     // We setup a standard pipeline of processes:
     // KeyStore -> KeyIndex
     //          -> HashStore -> HashIndex
@@ -109,7 +109,7 @@ impl <'db, B: BlobStoreBackend + Clone + Send> Hat<'db, B> {
 struct FileEntry {
   name: Vec<u8>,
 
-  parentId: Option<Vec<u8>>,
+  parent_id: Option<Vec<u8>>,
 
   stat: FileStat,
   full_path: Path,
@@ -123,7 +123,7 @@ impl FileEntry {
       lstat(&full_path).map(|st| {
         FileEntry{
           name: filename_opt.unwrap().into_owned(),
-          parentId: parent.clone(),
+          parent_id: parent.clone(),
           stat: st,
           full_path: full_path.clone()}
       })
@@ -133,19 +133,19 @@ impl FileEntry {
                            detail: None }) }
   }
 
-  fn fileIterator(&self) -> IoResult<FileIterator> {
+  fn file_iterator(&self) -> IoResult<FileIterator> {
     FileIterator::new(&self.full_path)
   }
 
-  fn isDirectory(&self) -> bool { self.stat.kind == TypeDirectory }
-  fn isSymlink(&self) -> bool { self.stat.kind == TypeSymlink }
-  fn isFile(&self) -> bool { self.stat.kind == TypeFile }
+  fn is_directory(&self) -> bool { self.stat.kind == TypeDirectory }
+  fn is_symlink(&self) -> bool { self.stat.kind == TypeSymlink }
+  fn is_file(&self) -> bool { self.stat.kind == TypeFile }
 }
 
 impl Clone for FileEntry {
   fn clone(&self) -> FileEntry {
     FileEntry{
-      name:self.name.clone(), parentId:self.parentId.clone(),
+      name:self.name.clone(), parent_id:self.parent_id.clone(),
       stat: FileStat{
         size: self.stat.size,
         kind: self.stat.kind,
@@ -168,8 +168,8 @@ impl KeyEntry<FileEntry> for FileEntry {
                  self.stat.unstable.device,
                  self.stat.unstable.inode).as_bytes().into_owned())
   }
-  fn parentId(&self) -> Option<Vec<u8>> {
-    self.parentId.clone()
+  fn parent_id(&self) -> Option<Vec<u8>> {
+    self.parent_id.clone()
   }
 
   fn size(&self) -> Option<u64> {
@@ -189,13 +189,13 @@ impl KeyEntry<FileEntry> for FileEntry {
   fn permissions(&self) -> Option<u64> {
     None
   }
-  fn userId(&self) -> Option<u64> {
+  fn user_id(&self) -> Option<u64> {
     None
   }
-  fn groupId(&self) -> Option<u64> {
+  fn group_id(&self) -> Option<u64> {
     None
   }
-  fn withId(&self, id: Vec<u8>) -> FileEntry {
+  fn with_id(&self, id: Vec<u8>) -> FileEntry {
     assert_eq!(Some(id), self.id());
     self.clone()
   }
@@ -248,7 +248,7 @@ impl <'db, B> InsertPathHandler<'db, B> {
 
 impl <'db, B: BlobStoreBackend + Clone> listdir::PathHandler<Option<Vec<u8>>>
   for InsertPathHandler<'db, B> {
-  fn handlePath(&mut self, parent: Option<Vec<u8>>, path: Path) -> Option<Option<Vec<u8>>> {
+  fn handle_path(&mut self, parent: Option<Vec<u8>>, path: Path) -> Option<Option<Vec<u8>>> {
     let mut count = {
       let mut guarded_count = self.count.lock();
       *guarded_count += 1;
@@ -271,27 +271,27 @@ impl <'db, B: BlobStoreBackend + Clone> listdir::PathHandler<Option<Vec<u8>>>
         println!("Skipping '{}': {}", path.display(), e.to_str());
       },
       Ok(fileEntry) => {
-        if fileEntry.isSymlink() {
+        if fileEntry.is_symlink() {
           return None;
         }
-        let isDirectory = fileEntry.isDirectory();
+        let is_directory = fileEntry.is_directory();
         let local_root = path.clone();
         let local_fileEntry = fileEntry.clone();
         let create_file_it = proc() {
-          match local_fileEntry.fileIterator() {
+          match local_fileEntry.file_iterator() {
             Err(e) => {println!("Skipping '{}': {}", local_root.display(), e.to_str());
                        None},
             Ok(it) => { Some(it) }
           }
         };
-        let create_file_it_opt = if isDirectory { None }
+        let create_file_it_opt = if is_directory { None }
                                  else { Some(create_file_it) };
 
-        match self.key_store.sendReply(
+        match self.key_store.send_reply(
           key_store::Insert(fileEntry, create_file_it_opt))
         {
           key_store::Id(id) => {
-            if isDirectory { return Some(Some(id)) }
+            if is_directory { return Some(Some(id)) }
           },
           _ => fail!("Unexpected reply from key store."),
         }
@@ -310,16 +310,16 @@ struct Family<'db, B> {
 
 impl <'db, B: BlobStoreBackend + Clone> Family<'db, B> {
 
-  pub fn snapshotDir(&self, dir: Path) {
+  pub fn snapshot_dir(&self, dir: Path) {
     let mut handler = InsertPathHandler::new(self.key_store.clone());
-    listdir::iterateRecursively((Path::new(dir.clone()), None), &mut handler);
+    listdir::iterate_recursively((Path::new(dir.clone()), None), &mut handler);
   }
 
   pub fn flush(&self) {
-    self.key_store.sendReply(key_store::Flush);
+    self.key_store.send_reply(key_store::Flush);
   }
 
-  pub fn checkoutInDir(&self, output_dir: &mut Path, dir_id: Option<Vec<u8>>) {
+  pub fn checkout_in_dir(&self, output_dir: &mut Path, dir_id: Option<Vec<u8>>) {
 
     fn put_chunks<B: hash_tree::HashTreeBackend + Clone>(
       fd: &mut File, tree: hash_tree::ReaderResult<B>)
@@ -341,7 +341,7 @@ impl <'db, B: BlobStoreBackend + Clone> Family<'db, B> {
     // create output_dir
     mkdir_recursive(output_dir, UserDir).unwrap();
 
-    let listing = match self.key_store.sendReply(key_store::ListDir(dir_id)) {
+    let listing = match self.key_store.send_reply(key_store::ListDir(dir_id)) {
       key_store::ListResult(ls) => ls,
       _ => fail!("Unexpected result from key store."),
     };
@@ -352,7 +352,7 @@ impl <'db, B: BlobStoreBackend + Clone> Family<'db, B> {
 
       if hash.len() == 0 {
         // This is a directory, recurse!
-        self.checkoutInDir(output_dir, Some(id));
+        self.checkout_in_dir(output_dir, Some(id));
       } else {
         // This is a file, write it
         let mut fd = File::create(output_dir).unwrap();

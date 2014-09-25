@@ -17,7 +17,7 @@
 //! Basic wrapper around threads to provide some standard API. All long-living Hat threads run
 //! as a `process`. The main difference between a normal Rust `thread` and a Hat `process` is
 //! currently that the `process` has a bounded input-channel and a standard implementation of a
-//! synchronous `sendReply()`.
+//! synchronous `send_reply()`.
 
 use std::sync::{Arc, Mutex};
 
@@ -41,16 +41,16 @@ use std::sync::{Arc, Mutex};
 ///
 /// fn main() {
 ///   let p = Process::new(MyHandler::new());
-///   let pong = p.sendReply(Ping);
+///   let pong = p.send_reply(Ping);
 /// }
 /// ```
 ///
-/// The handler must always call `reply()` to release any call to `sendReply()`. It is allowed to
+/// The handler must always call `reply()` to release any call to `send_reply()`. It is allowed to
 /// call `reply()` "early" - before all work has been done - but calling `reply()` is usually the
 /// last thing a handler does. The idiom `return reply(...)` is a simple way of guaranteeing this.
 ///
 /// A handler is allowed to call `reply()` **exactly** once. Not calling it or calling it multiple
-/// times will likely cause runtime failure when using `sendReply()`.
+/// times will likely cause runtime failure when using `send_reply()`.
 
 pub struct Process<Msg, Reply, Handler>
 {
@@ -115,7 +115,7 @@ impl <Msg:Send, Reply:Send, Handler: MsgHandler<Msg, Reply>> Process<Msg, Reply,
     });
   }
 
-  fn takeTicket(&self) {
+  fn take_ticket(&self) {
     let mut guarded_tickets = self.ticket_count.lock();
     while *guarded_tickets <= 0 {
       // release lock while waiting for change
@@ -128,15 +128,15 @@ impl <Msg:Send, Reply:Send, Handler: MsgHandler<Msg, Reply>> Process<Msg, Reply,
   ///
   /// Will block if the bounded input-channel is full, but otherwise return immediately.
   pub fn send(&self, msg: Msg) {
-    self.takeTicket();
+    self.take_ticket();
     self.sender.send((msg, None));
   }
 
   /// Synchronous send.
   ///
   /// Will always wait for a reply from the receiving `process`.
-  pub fn sendReply(&self, msg: Msg) -> Reply {
-    self.takeTicket();
+  pub fn send_reply(&self, msg: Msg) -> Reply {
+    self.take_ticket();
     let (sender, receiver) = channel();
     self.sender.send((msg, Some(sender)));
     return receiver.recv();

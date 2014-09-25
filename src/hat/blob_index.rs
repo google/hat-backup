@@ -77,28 +77,28 @@ impl BlobIndex {
   }
 
   #[cfg(test)]
-  pub fn newForTesting() -> BlobIndex {
+  pub fn new_for_testing() -> BlobIndex {
     BlobIndex::new(":memory:".to_owned())
   }
 
   fn initialize(&mut self) {
-    self.execOrDie("CREATE TABLE IF NOT EXISTS
+    self.exec_or_die("CREATE TABLE IF NOT EXISTS
                     blob_index (id        INTEGER PRIMARY KEY,
                                 name      BLOB,
                                 tag       INT)");
-    self.execOrDie("CREATE UNIQUE INDEX IF NOT EXISTS
+    self.exec_or_die("CREATE UNIQUE INDEX IF NOT EXISTS
                     BlobIndex_UniqueName ON blob_index(name)");
-    self.execOrDie("BEGIN");
+    self.exec_or_die("BEGIN");
 
     self.refresh_next_id();
   }
 
-  fn newBlobDesc(&mut self) -> BlobDesc {
+  fn new_blob_desc(&mut self) -> BlobDesc {
     BlobDesc{name: randombytes(24),
              id: self.next_id()}
   }
 
-  fn execOrDie(&self, sql: &str) {
+  fn exec_or_die(&self, sql: &str) {
     match self.dbh.exec(sql) {
       Ok(true) => (),
       Ok(false) => fail!("exec: {}", self.dbh.get_errmsg()),
@@ -107,7 +107,7 @@ impl BlobIndex {
     }
   }
 
-  fn prepareOrDie<'a>(&'a self, sql: &str) -> Cursor<'a> {
+  fn prepare_or_die<'a>(&'a self, sql: &str) -> Cursor<'a> {
     match self.dbh.prepare(sql, &None) {
       Ok(s)  => s,
       Err(x) => fail!(format!("sqlite error: {} ({:?})",
@@ -116,7 +116,7 @@ impl BlobIndex {
   }
 
   fn select1<'a>(&'a self, sql: &str) -> Option<Cursor<'a>> {
-    let cursor = self.prepareOrDie(sql);
+    let cursor = self.prepare_or_die(sql);
     if cursor.step() == SQLITE_ROW {
       Some(cursor)
     } else { None }
@@ -134,33 +134,33 @@ impl BlobIndex {
   }
 
   fn reserve(&mut self) -> BlobDesc {
-    let blob = self.newBlobDesc();
+    let blob = self.new_blob_desc();
     self.reserved.insert(blob.name.clone(), blob.clone());
     blob
   }
 
   fn in_air(&mut self, blob: &BlobDesc) {
     assert!(self.reserved.find(&blob.name).is_some(), "blob was not reserved!");
-    self.execOrDie(format!(
+    self.exec_or_die(format!(
       "INSERT INTO blob_index (id, name, tag) VALUES ({}, x'{}', {})",
       blob.id, blob.name.as_slice().to_hex(), 1u).as_slice());
     self.new_transaction();
   }
 
   fn new_transaction(&mut self) {
-    self.execOrDie("COMMIT; BEGIN");
+    self.exec_or_die("COMMIT; BEGIN");
   }
 
-  fn commitBlob(&mut self, blob: &BlobDesc) {
+  fn commit_blob(&mut self, blob: &BlobDesc) {
     assert!(self.reserved.find(&blob.name).is_some(), "blob was not reserved!");
-    self.execOrDie(format!("UPDATE blob_index SET tag=0 WHERE id={}", blob.id).as_slice());
+    self.exec_or_die(format!("UPDATE blob_index SET tag=0 WHERE id={}", blob.id).as_slice());
     self.new_transaction();
   }
 }
 
 impl Drop for BlobIndex {
   fn drop(&mut self) {
-    self.execOrDie("COMMIT");
+    self.exec_or_die("COMMIT");
   }
 }
 
@@ -175,7 +175,7 @@ impl MsgHandler<Msg, Reply> for BlobIndex {
         return reply(CommitOK);
       },
       CommitDone(blob) => {
-        self.commitBlob(&blob);
+        self.commit_blob(&blob);
         return reply(CommitOK);
       }
     }

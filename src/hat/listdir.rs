@@ -79,11 +79,11 @@ impl Iterator<String> for DirIterator {
 
 
 pub trait PathHandler<D> {
-  fn handlePath(&mut self, D, Path) -> Option<D>;
+  fn handle_path(&mut self, D, Path) -> Option<D>;
 }
 
 
-pub fn iterateRecursively<P: Send + Clone, W: PathHandler<P> + Send + Clone>
+pub fn iterate_recursively<P: Send + Clone, W: PathHandler<P> + Send + Clone>
   (root: (Path, P), worker: &mut W)
 {
   let threads = 10;
@@ -129,7 +129,7 @@ pub fn iterateRecursively<P: Send + Clone, W: PathHandler<P> + Send + Clone>
                 if file != ".".into_string() && file != "..".into_string() {
                   let rel_path = Path::new(file);
                   root.push(rel_path);
-                  let dir_opt = t_worker.handlePath(payload.clone(), root.clone());
+                  let dir_opt = t_worker.handle_path(payload.clone(), root.clone());
                   if dir_opt.is_some() {
                     let mut guarded_queue = t_queue.lock();
                     guarded_queue.push((root.clone(), dir_opt.unwrap()));
@@ -173,7 +173,7 @@ impl Clone for PrintPathHandler {
 }
 
 impl PathHandler<()> for PrintPathHandler {
-  fn handlePath(&mut self, _: (), path: Path) -> Option<()> {
+  fn handle_path(&mut self, _: (), path: Path) -> Option<()> {
     let filename_opt = path.filename_str();
     println!("{}", path.display());
     match filename_opt {

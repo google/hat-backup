@@ -517,7 +517,7 @@ mod tests {
 
 
   #[bench]
-  fn append_unknown_16x128KB(bench: &mut Bencher) {
+  fn append_unknown_16x128_kb(bench: &mut Bencher) {
     let mut bytes = Vec::from_elem(128*1024, 0u8);
 
     bench.iter(|| {
@@ -533,7 +533,7 @@ mod tests {
   }
 
   #[bench]
-  fn append_known_16x128KB(bench: &mut Bencher) {
+  fn append_known_16x128_kb(bench: &mut Bencher) {
     let bytes = Vec::from_elem(128*1024, 0u8);
 
     bench.iter(|| {

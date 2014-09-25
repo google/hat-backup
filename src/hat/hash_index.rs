@@ -157,29 +157,29 @@ impl <'db> HashIndex<'db> {
       },
       Err(err) => fail!(err.to_str()),
     };
-    hi.execOrDie("CREATE TABLE IF NOT EXISTS
+    hi.exec_or_die("CREATE TABLE IF NOT EXISTS
                   hash_index (id        INTEGER PRIMARY KEY,
                               hash      BLOB,
                               height    INTEGER,
                               payload   BLOB,
                               blob_ref  BLOB)");
 
-    hi.execOrDie("CREATE UNIQUE INDEX IF NOT EXISTS
+    hi.exec_or_die("CREATE UNIQUE INDEX IF NOT EXISTS
                   HashIndex_UniqueHash
                   ON hash_index(hash)");
 
-    hi.execOrDie("BEGIN");
+    hi.exec_or_die("BEGIN");
 
     hi.refresh_id_counter();
     hi
   }
 
   #[cfg(test)]
-  pub fn newForTesting() -> HashIndex {
+  pub fn new_for_testing() -> HashIndex {
     HashIndex::new(":memory:".to_owned())
   }
 
-  fn execOrDie(&self, sql: &str) {
+  fn exec_or_die(&self, sql: &str) {
     match self.dbh.exec(sql) {
       Ok(true) => (),
       Ok(false) => fail!("exec: {}", self.dbh.get_errmsg()),
@@ -188,7 +188,7 @@ impl <'db> HashIndex<'db> {
     }
   }
 
-  fn prepareOrDie<'a>(&'a self, sql: &str) -> Cursor<'a> {
+  fn prepare_or_die<'a>(&'a self, sql: &str) -> Cursor<'a> {
     match self.dbh.prepare(sql, &None) {
       Ok(s)  => s,
       Err(x) => fail!(format!("sqlite error: {} ({:?})",
@@ -197,7 +197,7 @@ impl <'db> HashIndex<'db> {
   }
 
   fn select1<'a>(&'a self, sql: &str) -> Option<Cursor<'a>> {
-    let cursor = self.prepareOrDie(sql);
+    let cursor = self.prepare_or_die(sql);
     if cursor.step() == SQLITE_ROW { Some(cursor) } else { None }
   }
 
@@ -233,7 +233,7 @@ impl <'db> HashIndex<'db> {
   }
 
   fn reserve(&mut self, hash_entry: HashEntry) -> i64 {
-    self.maybeFlush();
+    self.maybe_flush();
 
     let HashEntry{hash, level, payload, persistent_ref} = hash_entry;
     assert!(hash.bytes.len() > 0);
@@ -326,10 +326,10 @@ impl <'db> HashIndex<'db> {
 
     self.insert_completed_in_order();
 
-    self.maybeFlush();
+    self.maybe_flush();
   }
 
-  fn maybeFlush(&mut self) {
+  fn maybe_flush(&mut self) {
     if self.flush_timer.did_fire() {
       self.flush();
     }
@@ -337,7 +337,7 @@ impl <'db> HashIndex<'db> {
 
   fn flush(&mut self) {
     // Callbacks assume their data is safe, so commit before calling them
-    self.execOrDie("COMMIT; BEGIN");
+    self.exec_or_die("COMMIT; BEGIN");
 
     // Run ready callbacks
     self.callbacks.flush();
@@ -351,7 +351,7 @@ impl <'db> Drop for HashIndex<'db> {
     assert_eq!(self.callbacks.len(), 0);
 
     assert_eq!(self.queue.len(), 0);
-    self.execOrDie("COMMIT");
+    self.exec_or_die("COMMIT");
   }
 }
 

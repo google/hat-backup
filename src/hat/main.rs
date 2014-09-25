@@ -105,14 +105,14 @@ fn main() {
 
     {
       let backend = blob_store::FileBackend::new(blob_dir());
-      let hat_opt = hat::Hat::openRepository(
+      let hat_opt = hat::Hat::open_repository(
         &Path::new("repo"), backend, MAX_BLOB_SIZE);
       let hat = hat_opt.expect(format!("Could not open repository in {}.", path).as_slice());
 
-      let family_opt = hat.openFamily(name.clone());
+      let family_opt = hat.open_family(name.clone());
       let family = family_opt.expect(format!("Could not open family '{}'", name).as_slice());
 
-      family.snapshotDir(Path::new(path.clone()));
+      family.snapshot_dir(Path::new(path.clone()));
       family.flush();
     }
 
@@ -124,14 +124,14 @@ fn main() {
     let path = args.get(3);
 
     let backend = blob_store::FileBackend::new(blob_dir());
-    let hat_opt = hat::Hat::openRepository(
+    let hat_opt = hat::Hat::open_repository(
       &Path::new("repo"), backend, MAX_BLOB_SIZE);
     let hat = hat_opt.expect(format!("Could not open repository in {}.", path).as_slice());
 
-    let family_opt = hat.openFamily(name.clone());
+    let family_opt = hat.open_family(name.clone());
     let family = family_opt.expect(format!("Could not open family '{}'", name).as_slice());
 
-    family.checkoutInDir(&mut Path::new(path.clone()), None);
+    family.checkout_in_dir(&mut Path::new(path.clone()), None);
     return;
   }
 
