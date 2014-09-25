@@ -55,7 +55,7 @@ impl DirIterator {
     if retval == 0 && !entry_ptr.is_null() {
       let cstr = unsafe { CString::new(rust_list_dir_val(entry_ptr), false) };
       cstr.as_str().expect("Path not UTF8.").clone().into_string()
-    } else { "".to_owned() }
+    } else { "".to_string() }
 
   }
 

@@ -78,7 +78,7 @@ impl BlobIndex {
 
   #[cfg(test)]
   pub fn new_for_testing() -> BlobIndex {
-    BlobIndex::new(":memory:".to_owned())
+    BlobIndex::new(":memory:".to_string())
   }
 
   fn initialize(&mut self) {

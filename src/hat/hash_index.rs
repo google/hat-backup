@@ -176,7 +176,7 @@ impl <'db> HashIndex<'db> {
 
   #[cfg(test)]
   pub fn new_for_testing() -> HashIndex {
-    HashIndex::new(":memory:".to_owned())
+    HashIndex::new(":memory:".to_string())
   }
 
   fn exec_or_die(&self, sql: &str) {

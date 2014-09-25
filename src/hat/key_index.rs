@@ -145,7 +145,7 @@ impl KeyIndex {
 
   #[cfg(test)]
   pub fn new_for_testing() -> KeyIndex {
-    KeyIndex::new(":memory:".to_owned())
+    KeyIndex::new(":memory:".to_string())
   }
 
   fn exec_or_die(&mut self, sql: &str) {
