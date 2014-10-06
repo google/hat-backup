@@ -130,7 +130,7 @@ impl <B: HashTreeBackend + Clone> SimpleHashTreeWriter<B> {
 
   fn append_at(&mut self, level: uint, hash: Hash, data: Vec<u8>, metadata: Option<Vec<u8>>) {
     let persistent_ref = self.backend.insert_chunk(hash.clone(), level as i64, metadata, data);
-    let hash_ref = HashRef::new(hash.bytes.into_owned(), persistent_ref);
+    let hash_ref = HashRef::new(hash.bytes, persistent_ref);
     self.append_hashref_at(level, hash_ref);
   }
 

@@ -456,7 +456,7 @@ pub mod tests {
         }
         assert_eq!(bsP.send_reply(Flush), FlushOK);
         let &(ref id, chunk) = ids.last().unwrap();
-        assert_eq!(bsP.send_reply(Retrieve(id.clone())), RetrieveOK(chunk.clone().into_owned()));
+        assert_eq!(bsP.send_reply(Retrieve(id.clone())), RetrieveOK(chunk.clone()));
       }
 
       // Non-empty chunks must be in the backend now:

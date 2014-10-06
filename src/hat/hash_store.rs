@@ -184,7 +184,7 @@ impl <'db, B: Send + blob_store::BlobStoreBackend> MsgHandler<Msg, Reply> for Ha
             let local_hash_index = self.hash_index.clone();
             match self.blob_store.send_reply(
               Store(persistent_bytes, proc(blobid) {
-                local_hash_index.send_reply(Commit(hash, blobid.as_bytes().into_owned()));
+                local_hash_index.send_reply(Commit(hash, blobid.as_bytes()));
               }))
             {
               StoreOK(blob_ref) => {
