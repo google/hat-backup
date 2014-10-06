@@ -575,7 +575,7 @@ mod tests {
     bench.iter(|| {
       let bytes = Vec::from_elem(128*1024, 0u8);
       let entry = KeyEntryStub::new(None,
-                                    vec![1u8, 2, 3].as_slice().into_owned(),
+                                    vec![1u8, 2, 3].into_owned(),
                                     Some(Vec::from_elem(16, bytes)),
                                     None);
 
@@ -614,7 +614,7 @@ mod tests {
       let my_bytes = my_bytes;
 
       let entry = KeyEntryStub::new(None,
-                                    vec![1u8, 2, 3].as_slice().into_owned(),
+                                    vec![1u8, 2, 3].into_owned(),
                                     Some(Vec::from_fn(16, |i| {
                                       let mut local_bytes = my_bytes.clone();
                                       local_bytes.as_mut_slice()[3] = i as u8;

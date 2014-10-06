@@ -101,11 +101,11 @@ impl<'a> Iterator<(Vec<u8>, Vec<u8>, u64, u64, u64, Vec<u8>, Vec<u8>)> for KeyCu
         let hash = self.cursor.get_blob(5);
         let persistent_ref = self.cursor.get_blob(6);
 
-        Some((id.as_slice().into_owned(),
-              name.as_slice().into_owned(),
+        Some((id.into_owned(),
+              name.into_owned(),
               created as u64, modified as u64, accessed as u64,
-              hash.as_slice().into_owned(),
-              persistent_ref.as_slice().into_owned()))
+              hash.into_owned(),
+              persistent_ref.into_owned()))
       },
       _ => None,
     }
@@ -235,7 +235,7 @@ impl <A: KeyEntry<A>> MsgHandler<Msg<A>, Reply> for KeyIndex {
           }
         };
         if cursor.step() == SQLITE_ROW {
-          let res = Id(cursor.get_blob(0).as_slice().into_owned());
+          let res = Id(cursor.get_blob(0).into_owned());
           assert!(cursor.step() == SQLITE_DONE);
           return reply(res);
             } else {
@@ -316,11 +316,11 @@ impl <A: KeyEntry<A>> MsgHandler<Msg<A>, Reply> for KeyIndex {
           let hash = cursor.get_blob(5);
           let persistent_ref = cursor.get_blob(6);
 
-          listing.push((id.as_slice().into_owned(),
-                        name.as_slice().into_owned(),
+          listing.push((id.into_owned(),
+                        name.into_owned(),
                         created as u64, modified as u64, accessed as u64,
-                        hash.as_slice().into_owned(),
-                        persistent_ref.as_slice().into_owned()));
+                        hash.into_owned(),
+                        persistent_ref.into_owned()));
         }
 
         return reply(ListResult(listing));

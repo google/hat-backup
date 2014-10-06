@@ -213,8 +213,8 @@ impl <'db> HashIndex<'db> {
       QueueEntry{id: result.get_int(0) as i64,
                  level: result.get_int(1) as i64,
                  payload: if payload.len() == 0 { None }
-                          else {Some(payload.as_slice().into_owned()) },
-                 persistent_ref: Some(result.get_blob(3).as_slice().into_owned())
+                          else {Some(payload.into_owned()) },
+                 persistent_ref: Some(result.get_blob(3).into_owned())
       } })
   }
 

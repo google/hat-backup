@@ -98,7 +98,7 @@ impl BlobStoreBackend for FileBackend {
     let mut fd = File::open(&path).unwrap();
 
     let res = fd.read_to_end().and_then(|data| {
-      Ok(data.as_slice().into_owned()) }).or_else(|e| Err(e.to_str()));
+      Ok(data.into_owned()) }).or_else(|e| Err(e.to_str()));
 
     // Update cache to contain key:
     self.guarded_cache_put(name, res.clone());
@@ -293,7 +293,7 @@ impl <B: BlobStoreBackend> MsgHandler<Msg, Reply> for BlobStore<B> {
                         end: new_size};
 
         self.buffer_data_len = new_size;
-        self.buffer_data.push((id.clone(), blob.as_slice().into_owned(), cb));
+        self.buffer_data.push((id.clone(), blob.into_owned(), cb));
 
         // To avoid unnecessary blocking, we reply with the ID *before* possibly flushing.
         reply(StoreOK(id));
@@ -304,11 +304,11 @@ impl <B: BlobStoreBackend> MsgHandler<Msg, Reply> for BlobStore<B> {
 
       Retrieve(id) => {
         if id.begin == 0 && id.end == 0 {
-          return reply(RetrieveOK(vec![].as_slice().into_owned()));
+          return reply(RetrieveOK(vec![].into_owned()));
         }
         let blob = self.backend_read(id.name.as_slice());
         let chunk = blob.slice(id.begin, id.end);
-        return reply(RetrieveOK(chunk.as_slice().into_owned()));
+        return reply(RetrieveOK(chunk.into_owned()));
       },
 
       Flush => {
@@ -486,7 +486,7 @@ pub mod tests {
   #[test]
   fn blobid_identity() {
     fn prop(name: Vec<u8>, begin: uint, end: uint) -> bool {
-      let blob_id = BlobID{name: name.as_slice().into_owned(),
+      let blob_id = BlobID{name: name.into_owned(),
                            begin: begin, end: end};
       BlobID::from_bytes(blob_id.as_bytes()) == blob_id
     }
