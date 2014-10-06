@@ -220,7 +220,7 @@ impl <'db> HashIndex<'db> {
 
   fn locate(&self, hash: &Hash) -> Option<QueueEntry> {
     let result_opt = self.queue.find_value_of_key(&hash.bytes);
-    result_opt.map(|x| x.clone()).or_else(|| self.index_locate(hash))
+    result_opt.map(|x| x).or_else(|| self.index_locate(hash))
   }
 
   fn refresh_id_counter(&mut self) {
@@ -294,7 +294,7 @@ impl <'db> HashIndex<'db> {
         Some((id, hash_bytes, queue_entry)) => {
           assert_eq!(id, queue_entry.id);
 
-          let child_refs_opt = queue_entry.payload.clone();
+          let child_refs_opt = queue_entry.payload;
           let payload = child_refs_opt.unwrap_or_else(|| b"".into_owned());
           let level = queue_entry.level;
           let persistent_ref = queue_entry.persistent_ref.expect("hash was comitted");

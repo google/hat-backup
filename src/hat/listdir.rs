@@ -54,7 +54,7 @@ impl DirIterator {
 
     if retval == 0 && !entry_ptr.is_null() {
       let cstr = unsafe { CString::new(rust_list_dir_val(entry_ptr), false) };
-      cstr.as_str().expect("Path not UTF8.").clone().into_string()
+      cstr.as_str().expect("Path not UTF8.").into_string()
     } else { "".to_string() }
 
   }
@@ -99,7 +99,7 @@ pub fn iterate_recursively<P: Send + Clone, W: PathHandler<P> + Send + Clone>
     let t_worker_imm = worker.clone();
 
     spawn(proc() {
-      let mut t_worker = t_worker_imm.clone();
+      let mut t_worker = t_worker_imm;
 
       loop {
         let mut next = None;

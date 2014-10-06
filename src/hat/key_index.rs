@@ -332,7 +332,7 @@ impl <A: KeyEntry<A>> MsgHandler<Msg<A>, Reply> for KeyIndex {
         let outer_ki = self.clone();
 
         spawn(proc() {
-          let mut ki = outer_ki.clone();
+          let mut ki = outer_ki;
           let mut cursor = ki.prepare_or_die_cursor(format!(
             "SELECT id, name, created, modified, accessed, hash, persistent_ref
              FROM key_index

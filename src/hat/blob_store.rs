@@ -83,10 +83,10 @@ impl BlobStoreBackend for FileBackend {
 
   fn retrieve(&mut self, name: &[u8]) -> Result<Vec<u8>, String> {
     // Check for key in cache:
-    let name = name.clone().into_owned();
+    let name = name.into_owned();
     let value_opt = self.guarded_cache_get(&name);
     match value_opt {
-      Some(result) => return result.clone(),
+      Some(result) => return result,
       None => (),
     }
 
@@ -362,7 +362,7 @@ pub mod tests {
   impl BlobStoreBackend for MemoryBackend {
 
     fn store(&mut self, name: &[u8], data: &[u8]) -> Result<(), String> {
-      self.guarded_insert(name.to_owned(), data.clone().into_owned())
+      self.guarded_insert(name.to_owned(), data.into_owned())
     }
 
     fn retrieve(&mut self, name: &[u8]) -> Result<Vec<u8>, String> {

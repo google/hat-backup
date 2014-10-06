@@ -268,7 +268,7 @@ impl <B: HashTreeBackend + Clone> SimpleHashTreeReader<B> {
     while self.stack.len() > 0 {
       let child = self.stack.pop().expect("len() > 0");
 
-      let hash = Hash{bytes: child.hash.clone()};
+      let hash = Hash{bytes: child.hash};
       let data = self.backend.fetch_chunk(hash).expect("Invalid hash ref");
 
       match hash_refs_from_bytes(data.as_slice()) {
@@ -358,7 +358,7 @@ mod tests {
     fn fetch_persistent_ref(&mut self, hash:Hash) -> Option<Vec<u8>> {
       let mut guarded_chunks = self.chunks.lock();
       if guarded_chunks.contains_key(&hash.bytes) {
-        Some(hash.bytes.clone())
+        Some(hash.bytes)
       } else {
         None
       }

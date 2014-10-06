@@ -125,7 +125,7 @@ impl <'db, B: BlobStoreBackend + Clone> HashTreeBackend for HashStoreBackend<'db
   }
 
   fn fetch_payload(&mut self, hash: hash_index::Hash) -> Option<Vec<u8>> {
-    match self.hash_store.send_reply(hash_store::FetchPayload(hash.clone()))
+    match self.hash_store.send_reply(hash_store::FetchPayload(hash))
     {
       hash_store::Payload(p) => { return p }, // done
       hash_store::HashNotKnown => { return None }, // done
@@ -233,7 +233,7 @@ impl <'db, KE: KeyEntry<KE> + Clone + Send, IT: Iterator<Vec<u8>> + Send,
                   hash.clone(),
                   proc() {
                     local_index.send_reply(key_index::UpdateDataHash(org_entry.with_id(id),
-                                                                    Some(hash.bytes.clone()),
+                                                                    Some(hash.bytes),
                                                                     Some(persistent_ref)));
                   }
                 )

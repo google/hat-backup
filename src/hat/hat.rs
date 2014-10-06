@@ -275,7 +275,7 @@ impl <'db, B: BlobStoreBackend + Clone> listdir::PathHandler<Option<Vec<u8>>>
           return None;
         }
         let is_directory = fileEntry.is_directory();
-        let local_root = path.clone();
+        let local_root = path;
         let local_fileEntry = fileEntry.clone();
         let create_file_it = proc() {
           match local_fileEntry.file_iterator() {
