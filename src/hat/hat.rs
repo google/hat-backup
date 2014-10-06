@@ -249,7 +249,7 @@ impl <'db, B> InsertPathHandler<'db, B> {
 impl <'db, B: BlobStoreBackend + Clone> listdir::PathHandler<Option<Vec<u8>>>
   for InsertPathHandler<'db, B> {
   fn handle_path(&mut self, parent: Option<Vec<u8>>, path: Path) -> Option<Option<Vec<u8>>> {
-    let mut count = {
+    let count = {
       let mut guarded_count = self.count.lock();
       *guarded_count += 1;
       *guarded_count
@@ -303,6 +303,14 @@ impl <'db, B: BlobStoreBackend + Clone> listdir::PathHandler<Option<Vec<u8>>>
 }
 
 
+fn try_a_few_times_then_fail(f: || -> bool, msg: &str) {
+  for i in range(1u, 5) {
+    if f() { return }
+  }
+  fail!(msg.to_string());
+}
+
+
 struct Family<'db, B> {
   name: String,
   key_store: KeyStoreProcess<'db, FileEntry, FileIterator, B>,
@@ -327,14 +335,15 @@ impl <'db, B: BlobStoreBackend + Clone> Family<'db, B> {
       let mut it = match tree {
         hash_tree::NoData => fail!("Trying to read data where none exist."),
         hash_tree::SingleBlock(chunk) => {
-          fd.write(chunk.as_slice()).unwrap();
+          try_a_few_times_then_fail(|| fd.write(chunk.as_slice()).is_ok(),
+                                    "Could not write chunk.");
           return;
         },
         hash_tree::Tree(it) => it,
       };
       // We have a tree
       for chunk in it {
-        fd.write(chunk.as_slice()).unwrap();
+        try_a_few_times_then_fail(|| fd.write(chunk.as_slice()).is_ok(), "Could not write chunk.");
       }
     }
 
@@ -357,7 +366,7 @@ impl <'db, B: BlobStoreBackend + Clone> Family<'db, B> {
         // This is a file, write it
         let mut fd = File::create(output_dir).unwrap();
         put_chunks(&mut fd, data_res);
-        fd.flush();
+        try_a_few_times_then_fail(|| fd.flush().is_ok(), "Could not flush file.")
       }
 
       output_dir.pop();
