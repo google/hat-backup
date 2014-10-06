@@ -548,7 +548,7 @@ mod tests {
 
       let mut my_bytes = bytes.clone();
       {
-        let mut mut_view = my_bytes.as_mut_slice();
+        let mut_view = my_bytes.as_mut_slice();
         mut_view[0] = i as u8;
         mut_view[1] = (i / 256) as u8;
         mut_view[2] = (i / 65536) as u8;

@@ -103,16 +103,15 @@ pub fn iterate_recursively<P: Send + Clone, W: PathHandler<P> + Send + Clone>
 
       loop {
         let mut next = None;
-        let mut task_count = 0;
-        {
+        let task_count = {
           let mut guarded_tasks = t_in_progress.lock();
           let mut guarded_queue = t_queue.lock();
           if guarded_queue.len() > 0 {
             next = guarded_queue.pop();
             *guarded_tasks += 1;
           }
-          task_count = *guarded_tasks;
-        }
+          *guarded_tasks
+        };
 
         match next {
           None => {
