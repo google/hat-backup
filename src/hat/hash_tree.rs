@@ -83,7 +83,7 @@ fn hash_refs_from_bytes(bytes: &[u8]) -> Option<Vec<HashRef>> {
 ///
 /// The hash-tree is "created" as append-only and is streamed from first to last data-block. The
 ///
-/// ```rust
+/// ```rust,ignore
 /// let mut tree = SimpleHashTreeWriter::new(order, backend);
 /// for data_chunk in chunk_iterator {
 ///   tree.append(data_chunk);
@@ -208,7 +208,7 @@ impl <B: HashTreeBackend + Clone> SimpleHashTreeWriter<B> {
 /// blocks are read in the same order as they were written. The reader implement a `Vec<u8>` iterator
 /// used for extracting the tree blocks.
 ///
-/// ```rust
+/// ```rust,ignore
 /// let tree_it = match SimpleHashTreeReader::new(backend, top_hash, top_persisitent_ref) {
 ///     SingleBlock(block) => return println!("{}", block),
 ///     Tree(it) => it,

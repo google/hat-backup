@@ -24,9 +24,9 @@
 /// To create a new `process`, simply define a `Msg` type, a `Reply` type and a state struct
 /// that implements the `MsgHandler` trait. You can then create a new process with:
 ///
-/// ```rust
-/// enum Msg {Ping, Foo};
-/// enum Reply {Pong, Bar};
+/// ```rust,ignore
+/// enum Msg {Ping, Foo}
+/// enum Reply {Pong, Bar}
 ///
 /// struct MyHandler {
 ///   fn handle(&mut self, msg: Msg, reply: |Reply|) {
