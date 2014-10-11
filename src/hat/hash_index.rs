@@ -14,6 +14,7 @@
 
 //! Local state for known hashes and their external location (blob reference).
 
+use std::time::duration::{Duration};
 use serialize::hex::{ToHex};
 
 use callback_container::{CallbackContainer};
@@ -31,7 +32,7 @@ use periodic_timer::{PeriodicTimer};
 use sodiumoxide::crypto::hash::{sha512};
 
 
-pub type HashIndexProcess<'db> = Process<Msg, Reply, HashIndex<'db>>;
+pub type HashIndexProcess = Process<Msg, Reply, HashIndex>;
 
 
 /// A wrapper around Hash digests.
@@ -44,7 +45,7 @@ impl Hash {
   /// Computes `hash(text)` and stores this digest as the `bytes` field in a new `Hash` structure.
   pub fn new(text: &[u8]) -> Hash {
     let sha512::Digest(digest_bytes) = sha512::hash(text);
-    Hash{bytes: digest_bytes.slice(0, sha512::HASHBYTES).into_owned()}
+    Hash{bytes: digest_bytes.slice(0, sha512::HASHBYTES).into_vec()}
   }
 }
 
@@ -109,7 +110,7 @@ pub enum Msg {
 pub enum Reply {
   HashKnown,
   HashNotKnown,
-  HashEntry(HashEntry),
+  Entry(HashEntry),
 
   Payload(Option<Vec<u8>>),
   PersistentRef(Vec<u8>),
@@ -130,7 +131,7 @@ struct QueueEntry {
   persistent_ref: Option<Vec<u8>>,
 }
 
-pub struct HashIndex<'db> {
+pub struct HashIndex {
   dbh: Database,
 
   id_counter: CumulativeCounter<i64>,
@@ -143,19 +144,19 @@ pub struct HashIndex<'db> {
 
 }
 
-impl <'db> HashIndex<'db> {
+impl HashIndex {
 
-  pub fn new(path: String) -> HashIndex<'db> {
+  pub fn new(path: String) -> HashIndex {
     let mut hi = match open(path.as_slice()) {
       Ok(dbh) => {
         HashIndex{dbh: dbh,
                   id_counter: CumulativeCounter::new(0i64),
                   queue: UniquePriorityQueue::new(),
                   callbacks: CallbackContainer::new(),
-                  flush_timer: PeriodicTimer::new(10 * 1000),
+                  flush_timer: PeriodicTimer::new(Duration::seconds(10)),
         }
       },
-      Err(err) => fail!(err.to_str()),
+      Err(err) => fail!(err.to_string()),
     };
     hi.exec_or_die("CREATE TABLE IF NOT EXISTS
                   hash_index (id        INTEGER PRIMARY KEY,
@@ -179,12 +180,12 @@ impl <'db> HashIndex<'db> {
     HashIndex::new(":memory:".to_string())
   }
 
-  fn exec_or_die(&self, sql: &str) {
+  fn exec_or_die(&mut self, sql: &str) {
     match self.dbh.exec(sql) {
       Ok(true) => (),
       Ok(false) => fail!("exec: {}", self.dbh.get_errmsg()),
       Err(msg) => fail!(format!("exec: {}, {}\nIn sql: '{}'\n",
-                                msg.to_str(), self.dbh.get_errmsg(), sql))
+                                msg.to_string(), self.dbh.get_errmsg(), sql))
     }
   }
 
@@ -196,12 +197,12 @@ impl <'db> HashIndex<'db> {
     }
   }
 
-  fn select1<'a>(&'a self, sql: &str) -> Option<Cursor<'a>> {
-    let cursor = self.prepare_or_die(sql);
+  fn select1<'a>(&'a mut self, sql: &str) -> Option<Cursor<'a>> {
+    let mut cursor = self.prepare_or_die(sql);
     if cursor.step() == SQLITE_ROW { Some(cursor) } else { None }
   }
 
-  fn index_locate(&self, hash: &Hash) -> Option<QueueEntry> {
+  fn index_locate(&mut self, hash: &Hash) -> Option<QueueEntry> {
     assert!(hash.bytes.len() > 0);
 
     let result_opt = self.select1(format!(
@@ -209,22 +210,25 @@ impl <'db> HashIndex<'db> {
       hash.bytes.as_slice().to_hex()
     ).as_slice());
     result_opt.map(|result| {
-      let payload = result.get_blob(2);
-      QueueEntry{id: result.get_int(0) as i64,
-                 level: result.get_int(1) as i64,
+      let mut result = result;
+      let id = result.get_int(0) as i64;
+      let level = result.get_int(1) as i64;
+      let payload = result.get_blob(2).unwrap_or([]).into_vec();
+      let persistent_ref = result.get_blob(3).unwrap_or([]).into_vec();
+      QueueEntry{id: id, level: level,
                  payload: if payload.len() == 0 { None }
-                          else {Some(payload.into_owned()) },
-                 persistent_ref: Some(result.get_blob(3).into_owned())
+                          else {Some(payload) },
+                 persistent_ref: Some(persistent_ref)
       } })
   }
 
-  fn locate(&self, hash: &Hash) -> Option<QueueEntry> {
+  fn locate(&mut self, hash: &Hash) -> Option<QueueEntry> {
     let result_opt = self.queue.find_value_of_key(&hash.bytes);
     result_opt.map(|x| x).or_else(|| self.index_locate(hash))
   }
 
   fn refresh_id_counter(&mut self) {
-    let id = self.select1("SELECT MAX(id) FROM hash_index").unwrap().get_int(0);
+    let id = self.select1("SELECT MAX(id) FROM hash_index").expect("id").get_int(0);
     self.id_counter = CumulativeCounter::new(id as i64);
   }
 
@@ -284,7 +288,7 @@ impl <'db> HashIndex<'db> {
   }
 
   fn insert_completed_in_order(&mut self) {
-    let insert_stm = self.dbh.prepare(
+    let mut insert_stm = self.dbh.prepare(
       "INSERT INTO hash_index (id, hash, height, payload, blob_ref) VALUES (?, ?, ?, ?, ?)",
       &None).unwrap();
 
@@ -295,7 +299,7 @@ impl <'db> HashIndex<'db> {
           assert_eq!(id, queue_entry.id);
 
           let child_refs_opt = queue_entry.payload;
-          let payload = child_refs_opt.unwrap_or_else(|| b"".into_owned());
+          let payload = child_refs_opt.unwrap_or_else(|| b"".into_vec());
           let level = queue_entry.level;
           let persistent_ref = queue_entry.persistent_ref.expect("hash was comitted");
 
@@ -344,19 +348,20 @@ impl <'db> HashIndex<'db> {
   }
 }
 
-impl <'db> Drop for HashIndex<'db> {
-  fn drop(&mut self) {
-    self.flush();
+// #[unsafe_desctructor]
+// impl  Drop for HashIndex {
+//   fn drop(&mut self) {
+//     self.flush();
 
-    assert_eq!(self.callbacks.len(), 0);
+//     assert_eq!(self.callbacks.len(), 0);
 
-    assert_eq!(self.queue.len(), 0);
-    self.exec_or_die("COMMIT");
-  }
-}
+//     assert_eq!(self.queue.len(), 0);
+//     self.exec_or_die("COMMIT");
+//   }
+// }
 
 
-impl <'db> MsgHandler<Msg, Reply> for HashIndex<'db> {
+impl MsgHandler<Msg, Reply> for HashIndex {
   fn handle(&mut self, msg: Msg, reply: |Reply|) {
     match msg {
 
@@ -380,7 +385,7 @@ impl <'db> MsgHandler<Msg, Reply> for HashIndex<'db> {
         assert!(hash.bytes.len() > 0);
         return reply(match self.locate(&hash) {
           Some(ref queue_entry) if queue_entry.persistent_ref.is_none() => Retry,
-          Some(queue_entry) => PersistentRef(queue_entry.persistent_ref.unwrap()),
+          Some(queue_entry) => PersistentRef(queue_entry.persistent_ref.expect("persistent_ref")),
           None => HashNotKnown,
         });
       },

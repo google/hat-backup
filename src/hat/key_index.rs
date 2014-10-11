@@ -14,6 +14,8 @@
 
 //! Local state for keys in the snapshot in progress (the "index").
 
+use std::time::duration::{Duration};
+
 use periodic_timer::{PeriodicTimer};
 use sodiumoxide::randombytes::{randombytes};
 use process::{Process, MsgHandler};
@@ -63,8 +65,6 @@ pub enum Msg<KeyEntryT> {
   /// List a directory (aka. `level`) in the index.
   /// Returns `ListResult` with all the entries under the given parent.
   ListDir(Option<Vec<u8>>),
-  ListDirCallback(Option<Vec<u8>>,
-                  fn(Option<(Vec<u8>, Vec<u8>, u64, u64, u64, Vec<u8>, Vec<u8>)>)),
 
   /// Flush this key index.
   Flush,
@@ -85,32 +85,6 @@ pub struct KeyIndex {
   flush_timer: PeriodicTimer,
 }
 
-pub struct KeyCursor<'a> {
-  cursor: Cursor<'a>,
-}
-
-impl<'a> Iterator<(Vec<u8>, Vec<u8>, u64, u64, u64, Vec<u8>, Vec<u8>)> for KeyCursor<'a> {
-  fn next(&mut self) -> Option<(Vec<u8>, Vec<u8>, u64, u64, u64, Vec<u8>, Vec<u8>)> {
-    match self.cursor.step() {
-      SQLITE_ROW => {
-        let id = self.cursor.get_blob(0);
-        let name = self.cursor.get_blob(1);
-        let created = self.cursor.get_int(2);
-        let modified = self.cursor.get_int(3);
-        let accessed = self.cursor.get_int(4);
-        let hash = self.cursor.get_blob(5);
-        let persistent_ref = self.cursor.get_blob(6);
-
-        Some((id.into_owned(),
-              name.into_owned(),
-              created as u64, modified as u64, accessed as u64,
-              hash.into_owned(),
-              persistent_ref.into_owned()))
-      },
-      _ => None,
-    }
-  }
-}
 
 impl KeyIndex {
   pub fn new(path: String) -> KeyIndex {
@@ -118,9 +92,9 @@ impl KeyIndex {
       Ok(dbh) => {
         KeyIndex{path: path,
                  dbh: dbh,
-                 flush_timer: PeriodicTimer::new(5 * 1000)}
+                 flush_timer: PeriodicTimer::new(Duration::seconds(5))}
       },
-      Err(err) => fail!(err.to_str()),
+      Err(err) => fail!(err.to_string()),
     };
     ki.exec_or_die("CREATE TABLE IF NOT EXISTS
                   key_index (id     BLOB PRIMARY KEY,
@@ -152,7 +126,7 @@ impl KeyIndex {
     match self.dbh.exec(sql) {
       Ok(true) => (),
       Ok(false) => fail!("exec: {}", self.dbh.get_errmsg()),
-      Err(msg) => fail!("exec: {}, {}", msg.to_str(), self.dbh.get_errmsg()),
+      Err(msg) => fail!("exec: {}, {}", msg.to_string(), self.dbh.get_errmsg()),
     }
   }
 
@@ -161,10 +135,6 @@ impl KeyIndex {
       Ok(s)  => s,
       Err(x) => fail!("sqlite error: {} ({:?})", self.dbh.get_errmsg(), x),
     }
-  }
-
-  fn prepare_or_die_cursor<'a>(&'a mut self, sql: &str) -> KeyCursor<'a> {
-    KeyCursor{cursor: self.prepare_or_die(sql)}
   }
 
   pub fn maybe_flush(&mut self) {
@@ -195,7 +165,7 @@ impl <A: KeyEntry<A>> MsgHandler<Msg<A>, Reply> for KeyIndex {
     match msg {
 
       Insert(entry) => {
-        let parent = entry.parent_id().unwrap_or(b"".into_owned());
+        let parent = entry.parent_id().unwrap_or(b"".into_vec());
         let id = entry.id().unwrap_or_else(|| randombytes(16));
 
         self.exec_or_die(format!(
@@ -209,8 +179,8 @@ impl <A: KeyEntry<A>> MsgHandler<Msg<A>, Reply> for KeyIndex {
       },
 
       LookupExact(entry) => {
-        let parent = entry.parent_id().unwrap_or(b"".into_owned());
-        let cursor = match entry.id() {
+        let parent = entry.parent_id().unwrap_or(b"".into_vec());
+        let mut cursor = match entry.id() {
           Some(id) => {
             self.prepare_or_die(format!(
               "SELECT id FROM key_index
@@ -235,7 +205,7 @@ impl <A: KeyEntry<A>> MsgHandler<Msg<A>, Reply> for KeyIndex {
           }
         };
         if cursor.step() == SQLITE_ROW {
-          let res = Id(cursor.get_blob(0).into_owned());
+          let res = Id(cursor.get_blob(0).expect("id").into_vec());
           assert!(cursor.step() == SQLITE_DONE);
           return reply(res);
             } else {
@@ -244,7 +214,7 @@ impl <A: KeyEntry<A>> MsgHandler<Msg<A>, Reply> for KeyIndex {
       },
 
       UpdateDataHash(entry, hash_opt, persistent_ref_opt) => {
-        let parent = entry.parent_id().unwrap_or(b"".into_owned());
+        let parent = entry.parent_id().unwrap_or(b"".into_vec());
 
         assert!(hash_opt.is_some() == persistent_ref_opt.is_some());
 
@@ -299,51 +269,29 @@ impl <A: KeyEntry<A>> MsgHandler<Msg<A>, Reply> for KeyIndex {
 
       ListDir(parent) => {
         let mut listing = Vec::new();
-        let parent = parent.unwrap_or(b"".into_owned());
+        let parent = parent.unwrap_or(b"".into_vec());
 
-        let cursor = self.prepare_or_die(format!(
+        let mut cursor = self.prepare_or_die(format!(
            "SELECT id, name, created, modified, accessed, hash, persistent_ref
             FROM key_index
             WHERE parent=x'{:s}'", parent.as_slice().to_hex()).as_slice());
 
         // TODO(jos): replace get_int with something that understands uint64
         while cursor.step() == SQLITE_ROW {
-          let id = cursor.get_blob(0);
-          let name = cursor.get_blob(1);
+          let id = cursor.get_blob(0).expect("id").into_vec();
+          let name = cursor.get_blob(1).expect("name").into_vec();
           let created = cursor.get_int(2);
           let modified = cursor.get_int(3);
           let accessed = cursor.get_int(4);
-          let hash = cursor.get_blob(5);
-          let persistent_ref = cursor.get_blob(6);
+          let hash = cursor.get_blob(5).unwrap_or([]).into_vec();
+          let persistent_ref = cursor.get_blob(6).unwrap_or([]).into_vec();
 
-          listing.push((id.into_owned(),
-                        name.into_owned(),
+          listing.push((id, name,
                         created as u64, modified as u64, accessed as u64,
-                        hash.into_owned(),
-                        persistent_ref.into_owned()));
+                        hash, persistent_ref));
         }
 
         return reply(ListResult(listing));
-      },
-
-      ListDirCallback(parent, callback) => {
-        let parent = parent.unwrap_or(b"".into_owned());
-
-        let outer_ki = self.clone();
-
-        spawn(proc() {
-          let mut ki = outer_ki;
-          let mut cursor = ki.prepare_or_die_cursor(format!(
-            "SELECT id, name, created, modified, accessed, hash, persistent_ref
-             FROM key_index
-             WHERE parent=x'{:s}'", parent.as_slice().to_hex()).as_slice());
-
-          // TODO(jos): replace get_int with something that understands uint64
-          for item in cursor {
-            callback(Some(item));
-          }
-          callback(None);
-        });
       },
     }
   }

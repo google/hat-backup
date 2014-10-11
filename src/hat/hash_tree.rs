@@ -39,7 +39,7 @@ impl HashRef {
 
 impl ToJson for HashRef {
   fn to_json(&self) -> Json {
-    let mut m = box TreeMap::new();
+    let mut m = TreeMap::new();
     m.insert("hash".to_string(), self.hash.to_json());
     m.insert("persistent_ref".to_string(), self.persistent_ref.to_json());
     json::Object(m).to_json()
@@ -68,7 +68,7 @@ pub trait HashTreeBackend {
 
 
 fn hash_refs_to_bytes(refs: &Vec<HashRef>) -> Vec<u8> {
-  vec_to_json(refs).to_str().as_bytes().into_owned()
+  vec_to_json(refs).to_string().as_bytes().into_vec()
 }
 
 fn hash_refs_from_bytes(bytes: &[u8]) -> Option<Vec<HashRef>> {
@@ -84,8 +84,6 @@ fn hash_refs_from_bytes(bytes: &[u8]) -> Option<Vec<HashRef>> {
 /// The hash-tree is "created" as append-only and is streamed from first to last data-block. The
 ///
 /// ```rust
-/// use hash_tree::SimpleHashTreeWriter;
-///
 /// let mut tree = SimpleHashTreeWriter::new(order, backend);
 /// for data_chunk in chunk_iterator {
 ///   tree.append(data_chunk);
@@ -161,8 +159,8 @@ impl <B: HashTreeBackend + Clone> SimpleHashTreeWriter<B> {
     // The hashes for this level is stored as metadata for future use:
     let metadata_bytes = {
       let mut metadata = Vec::new();
-      for hashref in level_v.move_iter() {
-        metadata.push_all_move(hashref.hash);
+      for hashref in level_v.into_iter() {
+        metadata.extend(hashref.hash.into_iter());
       }
       metadata
     };
@@ -179,7 +177,7 @@ impl <B: HashTreeBackend + Clone> SimpleHashTreeWriter<B> {
   pub fn hash(&mut self) -> (Hash, Vec<u8>) {
     // Empty hash tree is equivalent to hash tree of one empty block:
     if self.levels.len() == 0 {
-      self.append(b"".into_owned());
+      self.append(b"".into_vec());
     }
 
     // Locate first level that isn't empty (has data to collapse)
@@ -211,15 +209,13 @@ impl <B: HashTreeBackend + Clone> SimpleHashTreeWriter<B> {
 /// used for extracting the tree blocks.
 ///
 /// ```rust
-/// use hash_tree::SimpleHashTreeReader;
-///
 /// let tree_it = match SimpleHashTreeReader::new(backend, top_hash, top_persisitent_ref) {
-///     SingleBlock(block) => return println!(block),
+///     SingleBlock(block) => return println!("{}", block),
 ///     Tree(it) => it,
 /// };
 ///
 /// for data_chunk in tree_it {
-///     println!(data_chunk);
+///     println!("{}", data_chunk);
 /// }
 /// ```
 pub struct SimpleHashTreeReader<B> {
@@ -276,7 +272,7 @@ impl <B: HashTreeBackend + Clone> SimpleHashTreeReader<B> {
         Some(new_childs) => {
           let mut new_childs = new_childs;
           new_childs.reverse();
-          self.stack.push_all_move(new_childs);
+          self.stack.extend(new_childs.into_iter());
         }
       }
     }
@@ -383,7 +379,7 @@ mod tests {
       let mut ht = SimpleHashTreeWriter::new(4, backend.clone());
 
       for _ in range(0, chunks_count) {
-        ht.append(b"a".into_owned());
+        ht.append(b"a".into_vec());
       }
 
       let (hash, hash_ref) = ht.hash();
@@ -392,10 +388,10 @@ mod tests {
         NoData => fail!("No data."),
         SingleBlock(found_chunk) => {
           if chunks_count == 0 {
-            assert_eq!(found_chunk, b"".into_owned());
+            assert_eq!(found_chunk, b"".into_vec());
           } else {
             assert_eq!(chunks_count, 1);
-            assert_eq!(found_chunk, b"a".into_owned());
+            assert_eq!(found_chunk, b"a".into_vec());
           }
           return true;
         },
@@ -405,7 +401,7 @@ mod tests {
       // We have a tree, let's investigate!
       let mut actual_count = 0;
       for chunk in tree_it {
-        assert_eq!(chunk, b"a".into_owned());
+        assert_eq!(chunk, b"a".into_vec());
         actual_count += 1;
       }
       assert_eq!(chunks_count, actual_count);
@@ -417,7 +413,7 @@ mod tests {
 
   #[test]
   fn identity_empty() {
-    let block = b"".into_owned();
+    let block = b"".into_vec();
 
     let backend = MemoryBackend::new();
     let mut ht = SimpleHashTreeWriter::new(4, backend.clone());
@@ -435,7 +431,7 @@ mod tests {
 
   #[test]
   fn identity_append1() {
-    let block = b"foobar".into_owned();
+    let block = b"foobar".into_vec();
 
     let backend = MemoryBackend::new();
     let mut ht = SimpleHashTreeWriter::new(4, backend.clone());

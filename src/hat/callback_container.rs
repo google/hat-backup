@@ -36,7 +36,7 @@ impl <K: Hash + Eq> CallbackContainer<K> {
   }
 
   pub fn allow_flush_of(&mut self, k: K) {
-    self.ready.push_all_move(self.callbacks.pop(&k).unwrap_or(vec!()));
+    self.ready.extend(self.callbacks.pop(&k).unwrap_or(vec!()).into_iter());
   }
 
   pub fn flush(&mut self) {

@@ -71,19 +71,19 @@ impl BlobStoreBackend for FileBackend {
     path.push(name.to_hex());
 
     let mut file = match File::create(&path) {
-      Err(e) => return Err(e.to_str()),
+      Err(e) => return Err(e.to_string()),
       Ok(f) => f,
     };
 
     match file.write(data) {
-      Err(e) => Err(e.to_str()),
+      Err(e) => Err(e.to_string()),
       Ok(()) => Ok(()),
     }
   }
 
   fn retrieve(&mut self, name: &[u8]) -> Result<Vec<u8>, String> {
     // Check for key in cache:
-    let name = name.into_owned();
+    let name = name.into_vec();
     let value_opt = self.guarded_cache_get(&name);
     match value_opt {
       Some(result) => return result,
@@ -98,7 +98,7 @@ impl BlobStoreBackend for FileBackend {
     let mut fd = File::open(&path).unwrap();
 
     let res = fd.read_to_end().and_then(|data| {
-      Ok(data.into_owned()) }).or_else(|e| Err(e.to_str()));
+      Ok(data.into_vec()) }).or_else(|e| Err(e.to_string()));
 
     // Update cache to contain key:
     self.guarded_cache_put(name, res.clone());
@@ -125,14 +125,14 @@ impl BlobID {
   }
 
   pub fn as_bytes(&self) -> Vec<u8> {
-    self.to_json().to_str().as_bytes().into_owned()
+    self.to_json().to_string().as_bytes().into_vec()
   }
 
 }
 
 impl ToJson for BlobID {
   fn to_json(&self) -> Json {
-    let mut m = box TreeMap::new();
+    let mut m = TreeMap::new();
     m.insert("name".to_string(), self.name.to_json());
     m.insert("begin".to_string(), self.begin.to_json());
     m.insert("end".to_string(), self.end.to_json());
@@ -175,7 +175,7 @@ pub struct BlobStore<B> {
 
 
 fn empty_blob_desc() -> blob_index::BlobDesc {
-  blob_index::BlobDesc{name: b"".into_owned(), id: 0}
+  blob_index::BlobDesc{name: b"".into_vec(), id: 0}
 }
 
 
@@ -293,7 +293,7 @@ impl <B: BlobStoreBackend> MsgHandler<Msg, Reply> for BlobStore<B> {
                         end: new_size};
 
         self.buffer_data_len = new_size;
-        self.buffer_data.push((id.clone(), blob.into_owned(), cb));
+        self.buffer_data.push((id.clone(), blob.into_vec(), cb));
 
         // To avoid unnecessary blocking, we reply with the ID *before* possibly flushing.
         reply(StoreOK(id));
@@ -304,11 +304,11 @@ impl <B: BlobStoreBackend> MsgHandler<Msg, Reply> for BlobStore<B> {
 
       Retrieve(id) => {
         if id.begin == 0 && id.end == 0 {
-          return reply(RetrieveOK(vec![].into_owned()));
+          return reply(RetrieveOK(vec![].into_vec()));
         }
         let blob = self.backend_read(id.name.as_slice());
         let chunk = blob.slice(id.begin, id.end);
-        return reply(RetrieveOK(chunk.into_owned()));
+        return reply(RetrieveOK(chunk.into_vec()));
       },
 
       Flush => {
@@ -354,7 +354,7 @@ pub mod tests {
     }
 
     fn guarded_retrieve(&mut self, key: &[u8]) -> Result<Vec<u8>, String> {
-      let value_opt = self.files.lock().find(&key.into_owned()).map(|v| v.clone());
+      let value_opt = self.files.lock().find(&key.into_vec()).map(|v| v.clone());
       value_opt.map(|v| Ok(v)).unwrap_or_else(|| Err(format!("Unknown key: '{}'", key)))
     }
   }
@@ -362,7 +362,7 @@ pub mod tests {
   impl BlobStoreBackend for MemoryBackend {
 
     fn store(&mut self, name: &[u8], data: &[u8]) -> Result<(), String> {
-      self.guarded_insert(name.to_owned(), data.into_owned())
+      self.guarded_insert(name.to_owned(), data.into_vec())
     }
 
     fn retrieve(&mut self, name: &[u8]) -> Result<Vec<u8>, String> {
@@ -406,7 +406,7 @@ pub mod tests {
 
       let mut ids = Vec::new();
       for chunk in chunks.iter() {
-        match bsP.send_reply(Store(chunk.as_slice().into_owned(), proc(_){})) {
+        match bsP.send_reply(Store(chunk.as_slice().into_vec(), proc(_){})) {
           StoreOK(id) => { ids.push((id, chunk)); },
           _ => fail!("Unexpected reply from blob store."),
         }
@@ -428,7 +428,7 @@ pub mod tests {
       for &(ref id, chunk) in ids.iter() {
         match bsP.send_reply(Retrieve(id.clone())) {
           RetrieveOK(found_chunk) => assert_eq!(found_chunk,
-                                                chunk.as_slice().into_owned()),
+                                                chunk.as_slice().into_vec()),
           _ => fail!("Unexpected reply from blob store."),
         }
       }
@@ -450,7 +450,7 @@ pub mod tests {
 
       let mut ids = Vec::new();
       for chunk in chunks.iter() {
-        match bsP.send_reply(Store(chunk.as_slice().into_owned(), proc(_){})) {
+        match bsP.send_reply(Store(chunk.as_slice().into_vec(), proc(_){})) {
           StoreOK(id) => { ids.push((id, chunk)); },
           _ => fail!("Unexpected reply from blob store."),
         }
@@ -473,7 +473,7 @@ pub mod tests {
       for &(ref id, chunk) in ids.iter() {
         match bsP.send_reply(Retrieve(id.clone())) {
           RetrieveOK(found_chunk) => assert_eq!(found_chunk,
-                                                chunk.as_slice().into_owned()),
+                                                chunk.as_slice().into_vec()),
           _ => fail!("Unexpected reply from blob store."),
         }
       }
@@ -486,7 +486,7 @@ pub mod tests {
   #[test]
   fn blobid_identity() {
     fn prop(name: Vec<u8>, begin: uint, end: uint) -> bool {
-      let blob_id = BlobID{name: name.into_owned(),
+      let blob_id = BlobID{name: name.into_vec(),
                            begin: begin, end: end};
       BlobID::from_bytes(blob_id.as_bytes()) == blob_id
     }

@@ -32,7 +32,7 @@ use hash_store::{HashStore};
 use key_index::{KeyIndex};
 
 
-pub type KeyStoreProcess<'db, KE, IT, B> = Process<Msg<KE, IT>, Reply<'db, B>, KeyStore<'db, KE, IT, B>>;
+pub type KeyStoreProcess<KE, IT, B> = Process<Msg<KE, IT>, Reply<B>, KeyStore<KE, IT, B>>;
 
 // Public structs
 pub enum Msg<KE, IT> {
@@ -52,21 +52,21 @@ pub enum Msg<KE, IT> {
   Flush,
 }
 
-pub enum Reply<'db, B> {
+pub enum Reply<B> {
   Id(Vec<u8>),
   ListResult(Vec<(Vec<u8>, Vec<u8>, u64, u64, u64, Vec<u8>, Vec<u8>,
-                  ReaderResult<HashStoreBackend<'db, B>>)>),
+                  ReaderResult<HashStoreBackend<B>>)>),
   FlushOK,
 }
 
-pub struct KeyStore<'db, KE, IT, B> {
+pub struct KeyStore<KE, IT, B> {
   index: KeyIndexProcess<KE>,
-  hash_store: HashStoreProcess<'db, B>,
+  hash_store: HashStoreProcess<B>,
 }
 
 // Implementations
-impl <'db, KE: KeyEntry<KE> + Send, IT: Iterator<Vec<u8>>, B: BlobStoreBackend + Send>
-  KeyStore<'db, KE, IT, B> {
+impl <KE: KeyEntry<KE> + Send, IT: Iterator<Vec<u8>>, B: BlobStoreBackend + Send>
+  KeyStore<KE, IT, B> {
   pub fn new(index: KeyIndexProcess<KE>, hash_store: HashStoreProcess<B>) -> KeyStore<KE, IT, B> {
     KeyStore{index: index,
              hash_store: hash_store}
@@ -86,18 +86,18 @@ impl <'db, KE: KeyEntry<KE> + Send, IT: Iterator<Vec<u8>>, B: BlobStoreBackend +
 }
 
 #[deriving(Clone)]
-pub struct HashStoreBackend<'db, B> {
-  hash_store: HashStoreProcess<'db, B>,
+pub struct HashStoreBackend<B> {
+  hash_store: HashStoreProcess<B>,
 }
 
-impl <'db, B> HashStoreBackend<'db, B> {
+impl <B> HashStoreBackend<B> {
   fn new(hash_store: Process<hash_store::Msg, hash_store::Reply, HashStore<B>>)
   -> HashStoreBackend<B> {
     HashStoreBackend{hash_store:hash_store}
   }
 }
 
-impl <'db, B: BlobStoreBackend + Clone> HashTreeBackend for HashStoreBackend<'db, B>
+impl <B: BlobStoreBackend + Clone + Send> HashTreeBackend for HashStoreBackend<B>
 {
   fn fetch_chunk(&mut self, hash: hash_index::Hash) -> Option<Vec<u8>> {
     assert!(hash.bytes.len() > 0);
@@ -145,11 +145,11 @@ impl <'db, B: BlobStoreBackend + Clone> HashTreeBackend for HashStoreBackend<'db
   }
 }
 
-impl <'db, KE: KeyEntry<KE> + Clone + Send, IT: Iterator<Vec<u8>> + Send,
+impl <KE: KeyEntry<KE> + Clone + Send, IT: Iterator<Vec<u8>> + Send,
       B: BlobStoreBackend + Clone + Send>
-        MsgHandler<Msg<KE, IT>, Reply<'db, B>> for KeyStore<'db, KE, IT, B>
+        MsgHandler<Msg<KE, IT>, Reply<B>> for KeyStore<KE, IT, B>
 {
-  fn handle(&mut self, msg: Msg<KE, IT>, reply: |Reply<'db, B>|) {
+  fn handle(&mut self, msg: Msg<KE, IT>, reply: |Reply<B>|) {
     match msg {
       Flush => {
         self.flush();
@@ -161,7 +161,7 @@ impl <'db, KE: KeyEntry<KE> + Clone + Send, IT: Iterator<Vec<u8>> + Send,
           key_index::ListResult(entries) => {
             // TODO(jos): Rewrite this tuple hell
             let mut my_entries = Vec::with_capacity(entries.len());
-            for (id, name, created, modified, accessed, hash, persistent_ref) in entries.move_iter()
+            for (id, name, created, modified, accessed, hash, persistent_ref) in entries.into_iter()
             {
               let local_hash_store = self.hash_store.clone();
               let local_hash = hash_index::Hash{bytes: hash.clone()};
@@ -320,7 +320,7 @@ mod tests {
     }
 
     fn name(&self) -> Vec<u8> {
-      self.name.as_slice().into_owned()
+      self.name.as_slice().into_vec()
     }
 
     fn size(&self) -> Option<u64> {
@@ -406,7 +406,7 @@ mod tests {
     }
 
     let root = KeyEntryStub::new(None,
-                                 b"root".into_owned(),
+                                 b"root".into_vec(),
                                  None, Some(123));
     let root_id = root.id();
     FileSystem{file: root,
@@ -454,7 +454,7 @@ mod tests {
                 hash_tree::NoData => fail!("No data."),
                 hash_tree::SingleBlock(chunk) => {
                   assert!(original.len() <= 1);
-                  assert_eq!(original.last().unwrap_or(&b"".into_owned()),
+                  assert_eq!(original.last().unwrap_or(&b"".into_vec()),
                              &chunk);
                   break
                 },
@@ -468,8 +468,8 @@ mod tests {
               assert_eq!(original.len(), chunk_count);
             },
             None => {
-              assert_eq!(hash, b"".into_owned());
-              assert_eq!(persistent_ref, b"".into_owned());
+              assert_eq!(hash, b"".into_vec());
+              assert_eq!(persistent_ref, b"".into_vec());
             }
           }
 
@@ -523,7 +523,7 @@ mod tests {
     bench.iter(|| {
       i += 1;
 
-      let entry = KeyEntryStub::new(None, format!("{}", i).as_bytes().into_owned(),
+      let entry = KeyEntryStub::new(None, format!("{}", i).as_bytes().into_vec(),
                                     Some(vec![bytes.clone()]), None);
       ksP.send_reply(Insert(entry.clone(), Some(proc() { Some(entry) })));
 
@@ -555,7 +555,7 @@ mod tests {
       }
       let my_bytes = my_bytes;
 
-      let entry = KeyEntryStub::new(None, format!("{}", i).as_bytes().into_owned(),
+      let entry = KeyEntryStub::new(None, format!("{}", i).as_bytes().into_vec(),
                                     Some(vec!(my_bytes)), None);
       ksP.send_reply(Insert(entry.clone(), Some(proc() { Some(entry) })));
 
@@ -575,7 +575,7 @@ mod tests {
     bench.iter(|| {
       let bytes = Vec::from_elem(128*1024, 0u8);
       let entry = KeyEntryStub::new(None,
-                                    vec![1u8, 2, 3].into_owned(),
+                                    vec![1u8, 2, 3].into_vec(),
                                     Some(Vec::from_elem(16, bytes)),
                                     None);
 
@@ -599,7 +599,7 @@ mod tests {
       = Process::new(proc() { KeyStore::new_for_testing(backend) });
 
     let bytes = Vec::from_elem(128*1024, 0u8);
-    let mut i = 0;
+    let mut i = 0i;
 
     bench.iter(|| {
       i += 1;
@@ -614,7 +614,7 @@ mod tests {
       let my_bytes = my_bytes;
 
       let entry = KeyEntryStub::new(None,
-                                    vec![1u8, 2, 3].into_owned(),
+                                    vec![1u8, 2, 3].into_vec(),
                                     Some(Vec::from_fn(16, |i| {
                                       let mut local_bytes = my_bytes.clone();
                                       local_bytes.as_mut_slice()[3] = i as u8;

@@ -26,7 +26,7 @@ use hash_index;
 use process::{Process, MsgHandler};
 
 
-pub type HashStoreProcess<'db, B> = Process<Msg, Reply, HashStore<'db, B>>;
+pub type HashStoreProcess<B> = Process<Msg, Reply, HashStore<B>>;
 
 pub enum Msg {
   /// `Insert(Hash, level, opt_payload, data)`: Ensure that a data-chunk is present in the index.
@@ -78,12 +78,12 @@ pub enum Reply {
   FlushOK,
 }
 
-pub struct HashStore<'db, B> {
-  hash_index: HashIndexProcess<'db>,
+pub struct HashStore<B> {
+  hash_index: HashIndexProcess,
   blob_store: BlobStoreProcess<B>,
 }
 
-impl <'db, B: Send + blob_store::BlobStoreBackend> HashStore<'db, B> {
+impl <B: Send + blob_store::BlobStoreBackend> HashStore<B> {
 
   pub fn new(hash_index: HashIndexProcess, blob_store: BlobStoreProcess<B>) -> HashStore<B> {
     HashStore{hash_index: hash_index,
@@ -123,7 +123,7 @@ impl <'db, B: Send + blob_store::BlobStoreBackend> HashStore<'db, B> {
 
 }
 
-impl <'db, B: Send + blob_store::BlobStoreBackend> MsgHandler<Msg, Reply> for HashStore<'db, B> {
+impl <B: Send + blob_store::BlobStoreBackend> MsgHandler<Msg, Reply> for HashStore<B> {
 
   fn handle(&mut self, msg: Msg, reply: |Reply|) {
     match msg {
@@ -251,7 +251,7 @@ mod tests {
 
       for chunk in chunks.iter() {
         match hsP.send_reply(
-          Insert(Hash::new(chunk.as_slice()), 0, None, chunk.as_slice().into_owned()))
+          Insert(Hash::new(chunk.as_slice()), 0, None, chunk.as_slice().into_vec()))
         {
           InsertOK(_chunk_ref) => (),
           _ => fail!("Insert failed."),
@@ -262,7 +262,7 @@ mod tests {
 
       for chunk in chunks.iter() {
         match hsP.send_reply(FetchChunkFromHash(Hash::new(chunk.as_slice()))) {
-          Chunk(found_chunk) => assert_eq!(chunk.as_slice().into_owned(), found_chunk),
+          Chunk(found_chunk) => assert_eq!(chunk.as_slice().into_vec(), found_chunk),
           _ => fail!("Could not find chunk."),
         }
       }

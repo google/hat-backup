@@ -1,0 +1,32 @@
+[root]
+name = "hat-backup"
+version = "0.0.1-pre"
+dependencies = [
+ "quickcheck 0.1.2 (git+https://github.com/BurntSushi/quickcheck#328770023126c17a485dd013e537c8c34289ee2d)",
+ "sodiumoxide 0.0.0 (git+https://github.com/dnaq/sodiumoxide#9909e2066c8fd626694fe4ce8340843955c5c0bd)",
+ "sqlite3 0.1.0 (git+https://github.com/linuxfood/rustsqlite#0d0891f29e4725323c2ccd561feb0d628b041283)",
+]
+
+[[package]]
+name = "quickcheck"
+version = "0.1.2"
+source = "git+https://github.com/BurntSushi/quickcheck#328770023126c17a485dd013e537c8c34289ee2d"
+dependencies = [
+ "quickcheck_macros 0.1.2 (git+https://github.com/BurntSushi/quickcheck#328770023126c17a485dd013e537c8c34289ee2d)",
+]
+
+[[package]]
+name = "quickcheck_macros"
+version = "0.1.2"
+source = "git+https://github.com/BurntSushi/quickcheck#328770023126c17a485dd013e537c8c34289ee2d"
+
+[[package]]
+name = "sodiumoxide"
+version = "0.0.0"
+source = "git+https://github.com/dnaq/sodiumoxide#9909e2066c8fd626694fe4ce8340843955c5c0bd"
+
+[[package]]
+name = "sqlite3"
+version = "0.1.0"
+source = "git+https://github.com/linuxfood/rustsqlite#0d0891f29e4725323c2ccd561feb0d628b041283"
+

@@ -1,0 +1,23 @@
+[package]
+name = "hat-backup"
+version = "0.0.1-pre"
+authors = ["Johan Nielsen <sejr@google.com>"]
+
+[[bin]]
+name = "hat"
+path = "src/hat/main.rs"
+
+[lib]
+name = "hat-lib"
+path = "src/hat/lib.rs"
+
+[dependencies.quickcheck]
+git = "https://github.com/BurntSushi/quickcheck"
+
+[dependencies.sodiumoxide]
+version = "0.0.0"
+git = "https://github.com/dnaq/sodiumoxide"
+
+[dependencies.sqlite3]
+version = "0.1.0"
+git = "https://github.com/linuxfood/rustsqlite"

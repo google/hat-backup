@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use std::io::{Timer};
-
+use std::time::duration::{Duration};
 
 pub struct PeriodicTimer {
   timer: Timer,
@@ -23,10 +23,10 @@ pub struct PeriodicTimer {
 
 impl PeriodicTimer {
 
-  pub fn new(interval_s: u64) -> PeriodicTimer {
+  pub fn new(interval: Duration) -> PeriodicTimer {
     let mut pt = PeriodicTimer{timer: Timer::new().unwrap(),
-                               periodic: Timer::new().unwrap().periodic(interval_s)};
-    pt.periodic = pt.timer.periodic(interval_s);
+                               periodic: Timer::new().unwrap().periodic(interval)};
+    pt.periodic = pt.timer.periodic(interval);
     pt
   }
 

@@ -12,13 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![crate_id="hat#0.1"]
 #![crate_type="bin"]
 #![license = "ALv2"]
 
 #![warn(non_uppercase_statics)]
 #![warn(non_camel_case_types)]
-#![warn(managed_heap_memory)]
 #![warn(unnecessary_qualification)]
 
 #![feature(globs)]
@@ -67,7 +65,7 @@ fn blob_dir() -> Path { Path::new("blobs") }
 
 
 fn usage() {
-  println!("Usage: {} [snapshot|checkout] name path", os::args().get(0));
+  println!("Usage: {} [snapshot|checkout] name path", os::args()[0]);
 }
 
 fn license() {
@@ -82,7 +80,7 @@ fn main() {
 
   let args = os::args();
   if args.len() == 2 {
-    let flag = args.get(1);
+    let ref flag = args[1];
     if flag == &"--license".to_string() {
         license();
     }
@@ -97,11 +95,11 @@ fn main() {
     return usage();
   }
 
-  let cmd = args.get(1);
+  let ref cmd = args[1];
 
   if cmd == &"snapshot".to_string() {
-    let name = args.get(2);  // used for naming the key index
-    let path = args.get(3);
+    let ref name = args[2];  // used for naming the key index
+    let ref path = args[3];
 
     {
       let backend = blob_store::FileBackend::new(blob_dir());
@@ -120,8 +118,8 @@ fn main() {
     return;
   }
   else if cmd == &"checkout".to_string() {
-    let name = args.get(2);  // used for naming the key index
-    let path = args.get(3);
+    let ref name = args[2];  // used for naming the key index
+    let ref path = args[3];
 
     let backend = blob_store::FileBackend::new(blob_dir());
     let hat_opt = hat::Hat::open_repository(

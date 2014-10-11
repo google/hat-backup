@@ -27,7 +27,7 @@ use libc::{c_int};
 
 
 pub struct DirIterator {
-  fd: *DIR,
+  fd: *mut DIR,
 }
 
 impl DirIterator {
@@ -41,7 +41,7 @@ impl DirIterator {
   fn read(&mut self) -> String {
     extern {
       fn rust_dirent_t_size() -> c_int;
-      fn rust_list_dir_val(ptr: *mut dirent_t) -> *c_char;
+      fn rust_list_dir_val(ptr: *mut dirent_t) -> *const c_char;
     }
 
     let mut entry_ptr = 0 as *mut dirent_t;
@@ -89,8 +89,8 @@ pub fn iterate_recursively<P: Send + Clone, W: PathHandler<P> + Send + Clone>
   let threads = 10;
 
   let queue = sync::Arc::new(sync::Mutex::new(vec!(root)));
-  let in_progress = sync::Arc::new(sync::Mutex::new(0));
-  let done = sync::Arc::new(sync::Mutex::new(0));
+  let in_progress = sync::Arc::new(sync::Mutex::new(0u));
+  let done = sync::Arc::new(sync::Mutex::new(0u));
 
   for _ in range(0u, threads) {
     let t_in_progress = in_progress.clone();

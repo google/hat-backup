@@ -40,10 +40,10 @@ use time;
 
 
 
-pub struct Hat<'db, B> {
+pub struct Hat<B> {
   repository_root: Path,
   blob_index: BlobIndexProcess,
-  hash_index: HashIndexProcess<'db>,
+  hash_index: HashIndexProcess,
 
   backend: B,
   max_blob_size: uint,
@@ -63,9 +63,9 @@ fn hash_index_name(root: &Path) -> String {
   concat_filename(root, "hash_index.sqlite3".to_string())
 }
 
-impl <'db, B: BlobStoreBackend + Clone + Send> Hat<'db, B> {
+impl <B: BlobStoreBackend + Clone + Send> Hat<B> {
   pub fn open_repository(repository_root: &Path, backend: B, max_blob_size: uint)
-                        -> Option<Hat<'db, B>> {
+                        -> Option<Hat<B>> {
     repository_root.as_str().map(|_| {
       let blob_index_path = blob_index_name(repository_root);
       let hash_index_path = hash_index_name(repository_root);
@@ -80,7 +80,7 @@ impl <'db, B: BlobStoreBackend + Clone + Send> Hat<'db, B> {
     })
   }
 
-  pub fn open_family(&self, name: String) -> Option<Family<'db, B>> {
+  pub fn open_family(&self, name: String) -> Option<Family<B>> {
     // We setup a standard pipeline of processes:
     // KeyStore -> KeyIndex
     //          -> HashStore -> HashIndex
@@ -122,7 +122,7 @@ impl FileEntry {
     if filename_opt.is_some() {
       lstat(&full_path).map(|st| {
         FileEntry{
-          name: filename_opt.unwrap().into_owned(),
+          name: filename_opt.unwrap().into_vec(),
           parent_id: parent.clone(),
           stat: st,
           full_path: full_path.clone()}
@@ -166,7 +166,7 @@ impl KeyEntry<FileEntry> for FileEntry {
   fn id(&self) -> Option<Vec<u8>> {
     Some(format!("d{:u}i{:u}",
                  self.stat.unstable.device,
-                 self.stat.unstable.inode).as_bytes().into_owned())
+                 self.stat.unstable.inode).as_bytes().into_vec())
   }
   fn parent_id(&self) -> Option<Vec<u8>> {
     self.parent_id.clone()
@@ -219,24 +219,24 @@ impl Iterator<Vec<u8>> for FileIterator {
     let mut buf = Vec::from_elem(128*1024, 0u8);
     match self.file.read(buf.as_mut_slice()) {
       Err(_) => None,
-      Ok(size) => Some(buf.slice_to(size).into_owned()),
+      Ok(size) => Some(buf.slice_to(size).into_vec()),
     }
   }
 }
 
 
 #[deriving(Clone)]
-struct InsertPathHandler<'db, B> {
+struct InsertPathHandler<B:'static> {
   count: sync::Arc<sync::Mutex<uint>>,
   last_print: sync::Arc<sync::Mutex<time::Timespec>>,
   my_last_print: time::Timespec,
 
-  key_store: KeyStoreProcess<'db, FileEntry, FileIterator, B>,
+  key_store: KeyStoreProcess<FileEntry, FileIterator, B>,
 }
 
-impl <'db, B> InsertPathHandler<'db, B> {
-  pub fn new(key_store: KeyStoreProcess<'db, FileEntry, FileIterator, B>)
-             -> InsertPathHandler<'db, B> {
+impl <B> InsertPathHandler<B> {
+  pub fn new(key_store: KeyStoreProcess<FileEntry, FileIterator, B>)
+             -> InsertPathHandler<B> {
     InsertPathHandler{
       count: sync::Arc::new(sync::Mutex::new(0)),
       last_print: sync::Arc::new(sync::Mutex::new(time::now().to_timespec())),
@@ -246,8 +246,8 @@ impl <'db, B> InsertPathHandler<'db, B> {
   }
 }
 
-impl <'db, B: BlobStoreBackend + Clone> listdir::PathHandler<Option<Vec<u8>>>
-  for InsertPathHandler<'db, B> {
+impl <B: BlobStoreBackend + Clone + Send> listdir::PathHandler<Option<Vec<u8>>>
+  for InsertPathHandler<B> {
   fn handle_path(&mut self, parent: Option<Vec<u8>>, path: Path) -> Option<Option<Vec<u8>>> {
     let count = {
       let mut guarded_count = self.count.lock();
@@ -268,7 +268,7 @@ impl <'db, B: BlobStoreBackend + Clone> listdir::PathHandler<Option<Vec<u8>>>
     let fileEntry_opt = FileEntry::new(path.clone(), parent);
     match fileEntry_opt {
       Err(e) => {
-        println!("Skipping '{}': {}", path.display(), e.to_str());
+        println!("Skipping '{}': {}", path.display(), e.to_string());
       },
       Ok(fileEntry) => {
         if fileEntry.is_symlink() {
@@ -279,7 +279,7 @@ impl <'db, B: BlobStoreBackend + Clone> listdir::PathHandler<Option<Vec<u8>>>
         let local_fileEntry = fileEntry.clone();
         let create_file_it = proc() {
           match local_fileEntry.file_iterator() {
-            Err(e) => {println!("Skipping '{}': {}", local_root.display(), e.to_str());
+            Err(e) => {println!("Skipping '{}': {}", local_root.display(), e.to_string());
                        None},
             Ok(it) => { Some(it) }
           }
@@ -311,12 +311,12 @@ fn try_a_few_times_then_fail(f: || -> bool, msg: &str) {
 }
 
 
-struct Family<'db, B> {
+struct Family<B> {
   name: String,
-  key_store: KeyStoreProcess<'db, FileEntry, FileIterator, B>,
+  key_store: KeyStoreProcess<FileEntry, FileIterator, B>,
 }
 
-impl <'db, B: BlobStoreBackend + Clone> Family<'db, B> {
+impl <B: BlobStoreBackend + Clone + Send> Family<B> {
 
   pub fn snapshot_dir(&self, dir: Path) {
     let mut handler = InsertPathHandler::new(self.key_store.clone());

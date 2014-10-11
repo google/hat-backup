@@ -12,13 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![crate_id="hat#0.1"]
 #![crate_type="lib"]
 #![license = "ALv2"]
 
 #![warn(non_uppercase_statics)]
 #![warn(non_camel_case_types)]
-#![warn(managed_heap_memory)]
 #![warn(unnecessary_qualification)]
 
 #![feature(globs)]

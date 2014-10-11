@@ -27,8 +27,8 @@ use std::sync::{Arc, Mutex};
 /// that implements the `MsgHandler` trait. You can then create a new process with:
 ///
 /// ```rust
-/// enum Msg (Ping, Foo);
-/// enum Reply (Pong, Bar);
+/// enum Msg {Ping, Foo};
+/// enum Reply {Pong, Bar};
 ///
 /// struct MyHandler {
 ///   fn handle(&mut self, msg: Msg, reply: |Reply|) {

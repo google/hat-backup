@@ -31,29 +31,23 @@ Disclaimer: The above text describes our goal and not the current status.
 
 
 ## Building from source
+0. Install rust 0.12.0 and newest Cargo
+   * Rust nighly is available from http://rust-lang.org
+   * Path for Cargo nightlies can be found at https://github.com/rust-lang/cargo
+   (Currently https://static.rust-lang.org/cargo-dist/cargo-nightly-x86_64-unknown-linux-gnu.tar.gz)
 1. Checkout the newest version of the source:
    * `git clone https://github.com/google/hat-backup.git`
    * `cd hat`
-2. Setup dependencies using the sources provided in git submodules:
-   * `git submodule init`
-   * `git submodule update`
-3. Compile the version of the Rust compiler that matches the code base:
-   * `cd rust && ./configure && make`
-   * `RUSTC=$(pwd)/$(dirnam $(find rust -type f -iname rustc|grep stage2/))`
-   * `export PATH=${RUSTC}:${PATH}`
-4. Compile our rust dependencies:
-   * `make deps`
-5. Finally, compile the hat executable (regular and optimized):
-   * `make bin/hat`
-   * `make bin/hat-opt`
+2. Let Cargo build everything needed:
+   * `cargo build`
 
-## Try the hat executable
-   * `./bin/hat-opt snapshot my_snapshot /some/path/to/dir`
-   * `./bin/hat-opt checkout my_snapshot output/dir`
+## Try the hat executable using Cargo (the binary is in target/)
+   * `cargo run snapshot my_snapshot /some/path/to/dir`
+   * `cargo run checkout my_snapshot output/dir`
 
 ## Generate source code documentation:
-   * `make doc`
-   * `${BROWSER} doc/hat/index.html`
+   * `cargo doc`
+   * `${BROWSER} target/doc/hat-lib/index.html`
 
 
 ## License and copyright

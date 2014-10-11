@@ -70,7 +70,7 @@ impl BlobIndex {
         next_id: -1,
         reserved: HashMap::new(),
       },
-      Err(err) => fail!(err.to_str()),
+      Err(err) => fail!(err.to_string()),
     };
     hi.initialize();
     hi
@@ -98,12 +98,12 @@ impl BlobIndex {
              id: self.next_id()}
   }
 
-  fn exec_or_die(&self, sql: &str) {
+  fn exec_or_die(&mut self, sql: &str) {
     match self.dbh.exec(sql) {
       Ok(true) => (),
       Ok(false) => fail!("exec: {}", self.dbh.get_errmsg()),
       Err(msg) => fail!(format!("exec: {}, {}\nIn sql: '{}'\n",
-                                msg.to_str(), self.dbh.get_errmsg(), sql))
+                                msg.to_string(), self.dbh.get_errmsg(), sql))
     }
   }
 
@@ -115,8 +115,8 @@ impl BlobIndex {
     }
   }
 
-  fn select1<'a>(&'a self, sql: &str) -> Option<Cursor<'a>> {
-    let cursor = self.prepare_or_die(sql);
+  fn select1<'a>(&'a mut self, sql: &str) -> Option<Cursor<'a>> {
+    let mut cursor = self.prepare_or_die(sql);
     if cursor.step() == SQLITE_ROW {
       Some(cursor)
     } else { None }
