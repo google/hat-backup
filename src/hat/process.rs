@@ -19,8 +19,6 @@
 //! currently that the `process` has a bounded input-channel and a standard implementation of a
 //! synchronous `send_reply()`.
 
-use std::sync::{Arc, Mutex};
-
 /// A long-living `thread` is promoted to a standard `process`.
 ///
 /// To create a new `process`, simply define a `Msg` type, a `Reply` type and a state struct
@@ -54,8 +52,7 @@ use std::sync::{Arc, Mutex};
 
 pub struct Process<Msg, Reply, Handler>
 {
-  sender: Sender<(Msg, Option<Sender<Reply>>)>,
-  ticket_count: Arc<Mutex<i32>>,
+  sender: SyncSender<(Msg, Option<Sender<Reply>>)>,
 }
 
 /// When cloning a `process` we clone the input-channel, allowing multiple threads to share the same
@@ -63,8 +60,7 @@ pub struct Process<Msg, Reply, Handler>
 impl <Msg: Send, Reply: Send, Handler> Clone
   for Process<Msg, Reply, Handler> {
   fn clone(&self) -> Process<Msg, Reply, Handler> {
-    Process{sender: self.sender.clone(),
-            ticket_count: self.ticket_count.clone()}
+    Process{sender: self.sender.clone()}
   }
 }
 
@@ -78,11 +74,8 @@ impl <Msg:Send, Reply:Send, Handler: MsgHandler<Msg, Reply>> Process<Msg, Reply,
   /// Create and start a new process using `handler`.
   pub fn new(handler_proc: proc():Send -> Handler) -> Process<Msg, Reply, Handler> {
 
-    let (sender, receiver) = channel();
-    let p = Process{
-      sender: sender,
-      ticket_count: Arc::new(Mutex::new(10)),
-    };
+    let (sender, receiver) = sync_channel(10);
+    let p = Process{sender: sender};
 
     p.start(receiver, handler_proc);
 
@@ -91,17 +84,12 @@ impl <Msg:Send, Reply:Send, Handler: MsgHandler<Msg, Reply>> Process<Msg, Reply,
 
 
   fn start(&self, receiver: Receiver<(Msg, Option<Sender<Reply>>)>,
-           handler_proc: proc():Send -> Handler) {
-    let local_ticket_count = self.ticket_count.clone();
+           handler_proc: proc():Send -> Handler)
+  {
     spawn(proc() {
       // fork handler
       let mut my_handler = handler_proc();
       loop {
-        { // increment available queueing tickets by one
-          let mut guarded_tickets = local_ticket_count.lock();
-          *guarded_tickets += 1;
-          guarded_tickets.cond.signal();
-        }
         match receiver.recv_opt() {
           Ok((msg, None)) => {
             my_handler.handle(msg, |_r: Reply| {});
@@ -115,28 +103,10 @@ impl <Msg:Send, Reply:Send, Handler: MsgHandler<Msg, Reply>> Process<Msg, Reply,
     });
   }
 
-  fn take_ticket(&self) {
-    let mut guarded_tickets = self.ticket_count.lock();
-    while *guarded_tickets <= 0 {
-      // release lock while waiting for change
-      guarded_tickets.cond.wait();
-    }
-    *guarded_tickets -= 1;
-  }
-
-  /// Asynchronous send.
-  ///
-  /// Will block if the bounded input-channel is full, but otherwise return immediately.
-  pub fn send(&self, msg: Msg) {
-    self.take_ticket();
-    self.sender.send((msg, None));
-  }
-
   /// Synchronous send.
   ///
   /// Will always wait for a reply from the receiving `process`.
   pub fn send_reply(&self, msg: Msg) -> Reply {
-    self.take_ticket();
     let (sender, receiver) = channel();
     self.sender.send((msg, Some(sender)));
     return receiver.recv();
