@@ -15,9 +15,12 @@
 //! Helpers for reading directory structures from the local filesystem.
 
 use std::sync;
+use std::sync::atomic;
 use std::os::{last_os_error};
 use std::io::{TypeDirectory};
 use std::io::fs::{lstat};
+use std::io::timer;
+use std::time;
 
 use std::c_str::CString;
 use libc::funcs::posix88::dirent;
@@ -86,82 +89,58 @@ pub trait PathHandler<D> {
 pub fn iterate_recursively<P: Send + Clone, W: PathHandler<P> + Send + Clone>
   (root: (Path, P), worker: &mut W)
 {
-  let threads = 10;
+  let threads = 5;
+  let (push_ch, work_ch) = sync_channel(threads);
+  let mut pool = sync::TaskPool::new(threads, || proc(_){()});
 
-  let queue = sync::Arc::new(sync::Mutex::new(vec!(root)));
-  let in_progress = sync::Arc::new(sync::Mutex::new(0u));
-  let done = sync::Arc::new(sync::Mutex::new(0u));
+  let seq_cst = atomic::SeqCst;  // Sequential consistency access mode
+  let running_workers = sync::Arc::new(atomic::AtomicInt::new(0));
 
-  for _ in range(0u, threads) {
-    let t_in_progress = in_progress.clone();
-    let t_queue = queue.clone();
-    let t_done = done.clone();
-    let t_worker_imm = worker.clone();
+  let mut timer = timer::Timer::new().unwrap();
+  let timeout = timer.periodic(time::Duration::microseconds(100));
 
-    spawn(proc() {
-      let mut t_worker = t_worker_imm;
+  // Insert the root dir into the queue:
+  push_ch.send(root);
 
-      loop {
-        let mut next = None;
-        let task_count = {
-          let mut guarded_tasks = t_in_progress.lock();
-          let mut guarded_queue = t_queue.lock();
-          if guarded_queue.len() > 0 {
-            next = guarded_queue.pop();
-            *guarded_tasks += 1;
-          }
-          *guarded_tasks
-        };
+  // Master thread:
+  loop {
+    select! {
+      () = timeout.recv() => {},  // Queue is empty: fall-through to see if we are done.
+      (root, payload) = work_ch.recv() => {
+        let t_worker = worker.clone();
+        let t_push_ch = push_ch.clone();
 
-        match next {
-          None => {
-            if task_count == 0 {
-              break;  // Stop when all workers are idle
-            }
-          },
-          Some((root_, payload)) => {
-            let mut root = root_;
-            let res = DirIterator::new(root.clone());
-            if res.is_ok() {
-              let mut it = res.unwrap();
-              for file in it {
-                if file != ".".into_string() && file != "..".into_string() {
-                  let rel_path = Path::new(file);
-                  root.push(rel_path);
-                  let dir_opt = t_worker.handle_path(payload.clone(), root.clone());
-                  if dir_opt.is_some() {
-                    let mut guarded_queue = t_queue.lock();
-                    guarded_queue.push((root.clone(), dir_opt.unwrap()));
-                  }
-                  root.pop();
+        // Count the pool thread as active:
+        let t_running_workers = running_workers.clone();
+        t_running_workers.fetch_add(1, seq_cst);
+
+        // Execute the task in a pool thread:
+        pool.execute(proc(&()) {
+          let mut root = root;
+          let mut t_worker = t_worker;
+          let res = DirIterator::new(root.clone());
+          if res.is_ok() {
+            let mut it = res.unwrap();
+            for file in it {
+              if file != ".".into_string() && file != "..".into_string() {
+                let rel_path = Path::new(file);
+                root.push(rel_path);
+                let dir_opt = t_worker.handle_path(payload.clone(), root.clone());
+                if dir_opt.is_some() {
+                  t_push_ch.send((root.clone(), dir_opt.unwrap()));
                 }
+                root.pop();
               }
             }
-
-            // Tell waiting threads that will not produce more
-            {
-              let mut guarded_tasks = t_in_progress.lock();
-              *guarded_tasks -= 1;
-            }
           }
-        }
-      }
 
-      // Loop is over, thread is stopping
-      {
-        let mut guarded_tasks_done = t_done.lock();
-        *guarded_tasks_done += 1;
-        guarded_tasks_done.cond.signal();
+          // Count this pool thread as idle:
+          t_running_workers.fetch_sub(1, seq_cst);
+        });
       }
-    });
-  }
-
-  // Wait for threads to complete
-  {
-    let guarded_done = done.lock();
-    while *guarded_done < threads {
-      guarded_done.cond.wait();
     }
+    // We are done when no workers are active (i.e. all tasks are done):
+    if running_workers.load(seq_cst) == 0 { break }
   }
 }
 
