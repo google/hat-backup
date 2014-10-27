@@ -101,7 +101,6 @@ impl <B: BlobStoreBackend + Clone + Send> HashTreeBackend for HashStoreBackend<B
 {
   fn fetch_chunk(&mut self, hash: hash_index::Hash) -> Option<Vec<u8>> {
     assert!(hash.bytes.len() > 0);
-
     match self.hash_store.send_reply(hash_store::FetchChunkFromHash(hash)) {
       hash_store::Chunk(bytes) => Some(bytes),
       _ => None,
@@ -110,12 +109,8 @@ impl <B: BlobStoreBackend + Clone + Send> HashTreeBackend for HashStoreBackend<B
 
   fn fetch_persistent_ref(&mut self, hash: hash_index::Hash) -> Option<Vec<u8>> {
     assert!(hash.bytes.len() > 0);
-
     loop {
-      match self.hash_store.send_reply(
-        hash_store::FetchPersistentRef(hash.clone())
-      )
-      {
+      match self.hash_store.send_reply(hash_store::FetchPersistentRef(hash.clone())) {
         hash_store::PersistentRef(r) => { return Some(r) }, // done
         hash_store::HashNotKnown => { return None }, // done
         hash_store::Retry => (),  // continue loop
@@ -125,8 +120,7 @@ impl <B: BlobStoreBackend + Clone + Send> HashTreeBackend for HashStoreBackend<B
   }
 
   fn fetch_payload(&mut self, hash: hash_index::Hash) -> Option<Vec<u8>> {
-    match self.hash_store.send_reply(hash_store::FetchPayload(hash))
-    {
+    match self.hash_store.send_reply(hash_store::FetchPayload(hash)) {
       hash_store::Payload(p) => { return p }, // done
       hash_store::HashNotKnown => { return None }, // done
       _ => fail!("Unexpected reply from hash store."),
@@ -136,12 +130,19 @@ impl <B: BlobStoreBackend + Clone + Send> HashTreeBackend for HashStoreBackend<B
   fn insert_chunk(&mut self, hash: hash_index::Hash,
                   level: i64, payload: Option<Vec<u8>>,
                   chunk: Vec<u8>) -> Vec<u8> {
-    match self.hash_store.send_reply(
-      hash_store::Insert(hash, level, payload, chunk))
-    {
+    match self.hash_store.send_reply(hash_store::Insert(hash, level, payload, chunk)) {
       hash_store::InsertOK(blob_ref) => blob_ref,
       _ => fail!("Unexpected answer from hash store."),
     }
+  }
+}
+
+fn file_size_warning(name: Vec<u8>, wanted: u64, got: u64) {
+  if wanted < got {
+    println!("Warning: File grew while reading it: {} (wanted {}, got {})", name, wanted, got)
+  } else if wanted > got {
+    println!("Warning: Could not read whole file (or it shrank): {} (wanted {}, got {})",
+             name, wanted, got)
   }
 }
 
@@ -184,14 +185,13 @@ impl <KE: KeyEntry<KE> + Clone + Send, IT: Iterator<Vec<u8>> + Send,
       Insert(org_entry, chunk_it_opt) => {
         match self.index.send_reply(key_index::LookupExact(org_entry.clone())) {
 
-          key_index::Id(entryId) => {
-            return reply(Id(entryId));
+          key_index::Id(entry_id) => {
+            return reply(Id(entry_id));
           },
 
           _ => {
-            let id = match self.index.send_reply(key_index::Insert(org_entry.clone()))
-            {
-              key_index::Id(entryId) => entryId,
+            let id = match self.index.send_reply(key_index::Insert(org_entry.clone())) {
+              key_index::Id(entry_id) => entry_id,
               _ => fail!("No ID returned from key index Insert()."),
             };
 
@@ -203,46 +203,37 @@ impl <KE: KeyEntry<KE> + Clone + Send, IT: Iterator<Vec<u8>> + Send,
             let backend = HashStoreBackend::new(self.hash_store.clone());
             let mut tree = SimpleHashTreeWriter::new(8, backend);
 
-            // Read and append all file chunks
+            // Check if we have an data source:
             let it_opt = chunk_it_opt.and_then(|p| p());
-            if it_opt.is_some() {
-
-              let mut bytes_read = 0u64;
-              it_opt.unwrap().map(|chunk: Vec<u8>| {
-                bytes_read += chunk.len() as u64;
-                tree.append(chunk);
-              }).last();
-
-              // Check that we read the whole file:
-              org_entry.size().map(|size| {
-                if size > bytes_read {
-                  println!("Warning: File grew while reading it: {} (wanted {}, got {})",
-                           org_entry.name(), size, bytes_read) }
-                else if size > bytes_read {
-                  println!(
-                    "Warning: Could not read whole file (or it shrank): {} (wanted {}, got {})",
-                    org_entry.name(), size, bytes_read) }
-              });
-
-              // Get top tree hash:
-              let (hash, persistent_ref) = tree.hash();
-
-              let local_index = self.index.clone();
-              self.hash_store.send_reply(
-                hash_store::CallAfterHashIsComitted(
-                  hash.clone(),
-                  proc() {
-                    local_index.send_reply(key_index::UpdateDataHash(org_entry.with_id(id),
-                                                                    Some(hash.bytes),
-                                                                    Some(persistent_ref)));
-                  }
-                )
-              );
-            } else {
-              // No data is associated with this entry
-              self.index.send_reply(
-                key_index::UpdateDataHash(org_entry, None, None));
+            if it_opt.is_none() {
+              // No data is associated with this entry.
+              self.index.send_reply(key_index::UpdateDataHash(org_entry, None, None));
+              // Bail out before storing data that does not exist:
+              return;
             }
+
+            // Read and insert all file chunks:
+            let mut bytes_read = 0u64;
+            it_opt.unwrap().map(|chunk: Vec<u8>| {
+              bytes_read += chunk.len() as u64;
+              tree.append(chunk);
+            }).last();
+
+            // Warn the user if we did not read the expected size:
+            org_entry.size().map(|s| { file_size_warning(org_entry.name(), s, bytes_read); });
+
+            // Get top tree hash:
+            let (hash, persistent_ref) = tree.hash();
+
+            // Install a callback for updating the entry's data hash once the data has been stored:
+            let new_entry = org_entry.with_id(id);
+            let local_index = self.index.clone();
+            let hash_bytes = hash.bytes.clone();
+            let callback = proc() {
+              let m = key_index::UpdateDataHash(new_entry, Some(hash_bytes), Some(persistent_ref));
+              local_index.send_reply(m);
+            };
+            self.hash_store.send_reply(hash_store::CallAfterHashIsComitted(hash, callback));
           }
         }
       }
