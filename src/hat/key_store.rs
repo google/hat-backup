@@ -14,19 +14,16 @@
 
 //! External API for creating and manipulating snapshots.
 
-use blob_store::{BlobStoreBackend};
+use blob_store;
 use hash_tree::{SimpleHashTreeWriter, HashTreeBackend,
                 SimpleHashTreeReader, ReaderResult};
 use hash_index;
-use hash_store::{HashStoreProcess};
-use hash_store;
 
 use process::{Process, MsgHandler};
 
 use key_index::{KeyIndexProcess, KeyEntry};
 use key_index;
 
-use hash_store::{HashStore};
 
 #[cfg(test)]
 use key_index::{KeyIndex};
@@ -61,79 +58,122 @@ pub enum Reply<B> {
 
 pub struct KeyStore<KE, IT, B> {
   index: KeyIndexProcess<KE>,
-  hash_store: HashStoreProcess<B>,
+  hash_index: hash_index::HashIndexProcess,
+  blob_store: blob_store::BlobStoreProcess<B>,
 }
 
 // Implementations
-impl <KE: KeyEntry<KE> + Send, IT: Iterator<Vec<u8>>, B: BlobStoreBackend + Send>
+impl <KE: KeyEntry<KE> + Send, IT: Iterator<Vec<u8>>, B: blob_store::BlobStoreBackend + Send>
   KeyStore<KE, IT, B> {
-  pub fn new(index: KeyIndexProcess<KE>, hash_store: HashStoreProcess<B>) -> KeyStore<KE, IT, B> {
-    KeyStore{index: index,
-             hash_store: hash_store}
+  pub fn new(index: KeyIndexProcess<KE>,
+             hash_index: hash_index::HashIndexProcess,
+             blob_store: blob_store::BlobStoreProcess<B>) -> KeyStore<KE, IT, B> {
+    KeyStore{index: index, hash_index: hash_index, blob_store: blob_store}
   }
 
   #[cfg(test)]
   pub fn new_for_testing(backend: B) -> KeyStore<KE, IT, B> {
     let kiP = Process::new(proc() { KeyIndex::new_for_testing() });
-    let hsP = Process::new(proc() { HashStore::new_for_testing(backend) });
-    KeyStore{index: kiP, hash_store: hsP}
+    let hiP = Process::new(proc() { hash_index::HashIndex::new_for_testing() });
+    let bsP = Process::new(proc() { blob_store::BlobStore::new_for_testing(backend, 1024) });
+    KeyStore{index: kiP, hash_index: hiP, blob_store: bsP}
   }
 
   pub fn flush(&mut self) {
-    self.hash_store.send_reply(hash_store::Flush);
+    self.blob_store.send_reply(blob_store::Flush);
+    self.hash_index.send_reply(hash_index::Flush);
     self.index.send_reply(key_index::Flush);
   }
 }
 
 #[deriving(Clone)]
 pub struct HashStoreBackend<B> {
-  hash_store: HashStoreProcess<B>,
+  hash_index: hash_index::HashIndexProcess,
+  blob_store: blob_store::BlobStoreProcess<B>,
 }
 
-impl <B> HashStoreBackend<B> {
-  fn new(hash_store: Process<hash_store::Msg, hash_store::Reply, HashStore<B>>)
-  -> HashStoreBackend<B> {
-    HashStoreBackend{hash_store:hash_store}
+impl <B: blob_store::BlobStoreBackend> HashStoreBackend<B> {
+  fn new(hash_index: hash_index::HashIndexProcess, blob_store: blob_store::BlobStoreProcess<B>)
+         -> HashStoreBackend<B> {
+    HashStoreBackend{hash_index: hash_index, blob_store: blob_store}
+  }
+
+  fn fetch_chunk_from_hash(&mut self, hash: hash_index::Hash) -> Option<Vec<u8>> {
+    assert!(hash.bytes.len() > 0);
+    match self.hash_index.send_reply(hash_index::FetchPersistentRef(hash)) {
+      hash_index::PersistentRef(chunk_ref_bytes) => {
+        let chunk_ref = blob_store::BlobID::from_bytes(chunk_ref_bytes);
+        self.fetch_chunk_from_persistent_ref(chunk_ref)
+      },
+      _ => None  // TODO: Do we need to distinguish `missing` from `unknown ref`?
+    }
+  }
+
+  fn fetch_chunk_from_persistent_ref(&mut self, chunk_ref: blob_store::BlobID) -> Option<Vec<u8>> {
+    match self.blob_store.send_reply(blob_store::Retrieve(chunk_ref)) {
+      blob_store::RetrieveOK(chunk) => Some(chunk),
+      _ => None
+    }
   }
 }
 
-impl <B: BlobStoreBackend + Clone + Send> HashTreeBackend for HashStoreBackend<B>
+impl <B: blob_store::BlobStoreBackend + Clone + Send> HashTreeBackend for HashStoreBackend<B>
 {
   fn fetch_chunk(&mut self, hash: hash_index::Hash) -> Option<Vec<u8>> {
     assert!(hash.bytes.len() > 0);
-    match self.hash_store.send_reply(hash_store::FetchChunkFromHash(hash)) {
-      hash_store::Chunk(bytes) => Some(bytes),
-      _ => None,
-    }
+    return self.fetch_chunk_from_hash(hash);
   }
 
   fn fetch_persistent_ref(&mut self, hash: hash_index::Hash) -> Option<Vec<u8>> {
     assert!(hash.bytes.len() > 0);
     loop {
-      match self.hash_store.send_reply(hash_store::FetchPersistentRef(hash.clone())) {
-        hash_store::PersistentRef(r) => { return Some(r) }, // done
-        hash_store::HashNotKnown => { return None }, // done
-        hash_store::Retry => (),  // continue loop
-        _ => fail!("Unexpected reply from hash store."),
+      match self.hash_index.send_reply(hash_index::FetchPersistentRef(hash.clone())) {
+        hash_index::PersistentRef(r) => { return Some(r) }, // done
+        hash_index::HashNotKnown => { return None }, // done
+        hash_index::Retry => (),  // continue loop
+        _ => fail!("Unexpected reply from hash index."),
       }
     };
   }
 
   fn fetch_payload(&mut self, hash: hash_index::Hash) -> Option<Vec<u8>> {
-    match self.hash_store.send_reply(hash_store::FetchPayload(hash)) {
-      hash_store::Payload(p) => { return p }, // done
-      hash_store::HashNotKnown => { return None }, // done
-      _ => fail!("Unexpected reply from hash store."),
+    match self.hash_index.send_reply(hash_index::FetchPayload(hash)) {
+      hash_index::Payload(p) => { return p }, // done
+      hash_index::HashNotKnown => { return None }, // done
+      _ => fail!("Unexpected reply from hash index."),
     }
   }
 
-  fn insert_chunk(&mut self, hash: hash_index::Hash,
-                  level: i64, payload: Option<Vec<u8>>,
+  fn insert_chunk(&mut self, hash: hash_index::Hash, level: i64, payload: Option<Vec<u8>>,
                   chunk: Vec<u8>) -> Vec<u8> {
-    match self.hash_store.send_reply(hash_store::Insert(hash, level, payload, chunk)) {
-      hash_store::InsertOK(blob_ref) => blob_ref,
-      _ => fail!("Unexpected answer from hash store."),
-    }
+    assert!(hash.bytes.len() > 0);
+
+    let mut hash_entry = hash_index::HashEntry{hash:hash.clone(), level:level, payload:payload,
+                                               persistent_ref: None};
+
+    match self.hash_index.send_reply(hash_index::Reserve(hash_entry.clone())) {
+      hash_index::HashKnown => {
+        // Someone came before us: piggyback on their result.
+        return self.fetch_persistent_ref(hash).expect(
+          "Could not find persistent_ref for known chunk.");
+      },
+      hash_index::ReserveOK => {
+        // We came first: this data-chunk is ours to process.
+        let local_hash_index = self.hash_index.clone();
+        let callback = proc(blobid: blob_store::BlobID){
+          local_hash_index.send_reply(hash_index::Commit(hash, blobid.as_bytes()));
+        };
+        match self.blob_store.send_reply(blob_store::Store(chunk, callback)) {
+          blob_store::StoreOK(blob_ref) => {
+            hash_entry.persistent_ref = Some(blob_ref.as_bytes());
+            self.hash_index.send_reply(hash_index::UpdateReserved(hash_entry));
+            return blob_ref.as_bytes();
+          },
+          _ => fail!("Unexpected reply from BlobStore."),
+        };
+      },
+      _ => fail!("Unexpected HashIndex reply."),
+    };
   }
 }
 
@@ -147,7 +187,7 @@ fn file_size_warning(name: Vec<u8>, wanted: u64, got: u64) {
 }
 
 impl <KE: KeyEntry<KE> + Clone + Send, IT: Iterator<Vec<u8>> + Send,
-      B: BlobStoreBackend + Clone + Send>
+      B: blob_store::BlobStoreBackend + Clone + Send>
         MsgHandler<Msg<KE, IT>, Reply<B>> for KeyStore<KE, IT, B>
 {
   fn handle(&mut self, msg: Msg<KE, IT>, reply: |Reply<B>|) {
@@ -164,16 +204,14 @@ impl <KE: KeyEntry<KE> + Clone + Send, IT: Iterator<Vec<u8>> + Send,
             let mut my_entries = Vec::with_capacity(entries.len());
             for (id, name, created, modified, accessed, hash, persistent_ref) in entries.into_iter()
             {
-              let local_hash_store = self.hash_store.clone();
               let local_hash = hash_index::Hash{bytes: hash.clone()};
               let local_ref = persistent_ref.clone();
 
               my_entries.push(
                 (id, name, created, modified, accessed, hash, persistent_ref,
-                 // proc() {
                    SimpleHashTreeReader::new(
-                     HashStoreBackend::new(local_hash_store), local_hash, local_ref)
-                 // }
+                     HashStoreBackend::new(self.hash_index.clone(), self.blob_store.clone()),
+                     local_hash, local_ref)
                  ));
             }
             return reply(ListResult(my_entries));
@@ -200,7 +238,7 @@ impl <KE: KeyEntry<KE> + Clone + Send, IT: Iterator<Vec<u8>> + Send,
             reply(Id(id.clone()));
 
             // Setup hash tree structure
-            let backend = HashStoreBackend::new(self.hash_store.clone());
+            let backend = HashStoreBackend::new(self.hash_index.clone(), self.blob_store.clone());
             let mut tree = SimpleHashTreeWriter::new(8, backend);
 
             // Check if we have an data source:
@@ -213,6 +251,7 @@ impl <KE: KeyEntry<KE> + Clone + Send, IT: Iterator<Vec<u8>> + Send,
             }
 
             // Read and insert all file chunks:
+            // (see HashStoreBackend::insert_chunk above)
             let mut bytes_read = 0u64;
             it_opt.unwrap().map(|chunk: Vec<u8>| {
               bytes_read += chunk.len() as u64;
@@ -233,7 +272,7 @@ impl <KE: KeyEntry<KE> + Clone + Send, IT: Iterator<Vec<u8>> + Send,
               let m = key_index::UpdateDataHash(new_entry, Some(hash_bytes), Some(persistent_ref));
               local_index.send_reply(m);
             };
-            self.hash_store.send_reply(hash_store::CallAfterHashIsComitted(hash, callback));
+            self.hash_index.send_reply(hash_index::CallAfterHashIsComitted(hash, callback));
           }
         }
       }

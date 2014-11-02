@@ -39,7 +39,6 @@ extern crate quickcheck;
 pub use blob_index::{BlobIndex};
 pub use blob_store::{BlobStore};
 pub use hash_index::{HashIndex};
-pub use hash_store::{HashStore};
 pub use key_index::{KeyIndex};
 pub use key_store::{KeyStore};
 pub use process::{Process};
@@ -56,7 +55,6 @@ pub mod process;
 
 pub mod hash_index;
 pub mod hash_tree;
-pub mod hash_store;
 
 pub mod blob_index;
 pub mod blob_store;

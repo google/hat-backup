@@ -20,7 +20,6 @@ use blob_index::{BlobIndex, BlobIndexProcess};
 use blob_store::{BlobStore, BlobStoreBackend};
 
 use hash_index::{HashIndex, HashIndexProcess};
-use hash_store::{HashStore};
 use hash_tree;
 
 use key_index::{KeyIndex, KeyEntry};
@@ -83,8 +82,8 @@ impl <B: BlobStoreBackend + Clone + Send> Hat<B> {
   pub fn open_family(&self, name: String) -> Option<Family<B>> {
     // We setup a standard pipeline of processes:
     // KeyStore -> KeyIndex
-    //          -> HashStore -> HashIndex
-    //                       -> BlobStore -> BlobIndex
+    //          -> HashIndex
+    //          -> BlobStore -> BlobIndex
 
     let local_blob_index = self.blob_index.clone();
     let local_backend = self.backend.clone();
@@ -93,11 +92,13 @@ impl <B: BlobStoreBackend + Clone + Send> Hat<B> {
       BlobStore::new(local_blob_index, local_backend, local_max_blob_size) });
 
     let local_hash_index = self.hash_index.clone();
-    let hsP = Process::new(proc() { HashStore::new(local_hash_index, bsP) });
+    let local_hash_index2 = self.hash_index.clone();
+    let local_bsP = bsP.clone();
 
     let key_index_path = concat_filename(&self.repository_root, name.clone());
     let kiP = Process::new(proc() { KeyIndex::new(key_index_path) });
-    let ksP = Process::new(proc() { KeyStore::new(kiP, hsP) });
+
+    let ksP = Process::new(proc() { KeyStore::new(kiP, local_hash_index2, bsP) });
 
     Some(Family{name: name,
                 key_store: ksP})

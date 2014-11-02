@@ -50,7 +50,6 @@ mod process;
 
 mod hash_index;
 mod hash_tree;
-mod hash_store;
 
 mod blob_index;
 mod blob_store;
