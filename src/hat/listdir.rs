@@ -15,7 +15,6 @@
 //! Helpers for reading directory structures from the local filesystem.
 
 use std::sync;
-use std::sync::atomic;
 use std::os::{last_os_error};
 use std::io::{TypeDirectory};
 use std::io::fs::{lstat};
@@ -91,11 +90,9 @@ pub fn iterate_recursively<P: Send + Clone, W: PathHandler<P> + Send + Clone>
   let (push_ch, work_ch) = sync_channel(threads);
   let mut pool = sync::TaskPool::new(threads, || proc(_){()});
 
-  let seq_cst = atomic::SeqCst;  // Sequentially consistent access mode
-  let running_workers = sync::Arc::new(atomic::AtomicInt::new(0));
-
   // Insert the first task into the queue:
   push_ch.send(Some(root));
+  let mut running_workers = 0i;
 
   // Master thread:
   loop {
@@ -103,7 +100,8 @@ pub fn iterate_recursively<P: Send + Clone, W: PathHandler<P> + Send + Clone>
       None => {
         // A worker has reached completion and has decremented the counter.
         // We are done when no more workers are active (i.e. all tasks are done):
-        if running_workers.load(seq_cst) == 0 {
+        running_workers -= 1;
+        if running_workers == 0 {
           break
         }
       },
@@ -111,11 +109,8 @@ pub fn iterate_recursively<P: Send + Clone, W: PathHandler<P> + Send + Clone>
         let t_worker = worker.clone();
         let t_push_ch = push_ch.clone();
 
-        // Count the pool thread as active:
-        let t_running_workers = running_workers.clone();
-        t_running_workers.fetch_add(1, seq_cst);
-
         // Execute the task in a pool thread:
+        running_workers += 1;
         pool.execute(proc(&()) {
           let mut root = root;
           let mut t_worker = t_worker;
@@ -136,7 +131,6 @@ pub fn iterate_recursively<P: Send + Clone, W: PathHandler<P> + Send + Clone>
           }
 
           // Count this pool thread as idle:
-          t_running_workers.fetch_sub(1, seq_cst);
           t_push_ch.send(None)
         });
       }
