@@ -83,11 +83,11 @@ impl BlobIndex {
 
   fn initialize(&mut self) {
     self.exec_or_die("CREATE TABLE IF NOT EXISTS
-                    blob_index (id        INTEGER PRIMARY KEY,
-                                name      BLOB,
-                                tag       INT)");
+                      blob_index (id        INTEGER PRIMARY KEY,
+                                  name      BLOB,
+                                  tag       INT)");
     self.exec_or_die("CREATE UNIQUE INDEX IF NOT EXISTS
-                    BlobIndex_UniqueName ON blob_index(name)");
+                      BlobIndex_UniqueName ON blob_index(name)");
     self.exec_or_die("BEGIN");
 
     self.refresh_next_id();
