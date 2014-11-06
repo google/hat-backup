@@ -19,8 +19,6 @@ use std::sync::atomic;
 use std::os::{last_os_error};
 use std::io::{TypeDirectory};
 use std::io::fs::{lstat};
-use std::io::timer;
-use std::time;
 
 use std::c_str::CString;
 use libc::funcs::posix88::dirent;
@@ -93,20 +91,23 @@ pub fn iterate_recursively<P: Send + Clone, W: PathHandler<P> + Send + Clone>
   let (push_ch, work_ch) = sync_channel(threads);
   let mut pool = sync::TaskPool::new(threads, || proc(_){()});
 
-  let seq_cst = atomic::SeqCst;  // Sequential consistency access mode
+  let seq_cst = atomic::SeqCst;  // Sequentially consistent access mode
   let running_workers = sync::Arc::new(atomic::AtomicInt::new(0));
 
-  let mut timer = timer::Timer::new().unwrap();
-  let timeout = timer.periodic(time::Duration::microseconds(100));
-
-  // Insert the root dir into the queue:
-  push_ch.send(root);
+  // Insert the first task into the queue:
+  push_ch.send(Some(root));
 
   // Master thread:
   loop {
-    select! {
-      () = timeout.recv() => {},  // Queue is empty: fall-through to see if we are done.
-      (root, payload) = work_ch.recv() => {
+    match work_ch.recv() {
+      None => {
+        // A worker has reached completion and has decremented the counter.
+        // We are done when no more workers are active (i.e. all tasks are done):
+        if running_workers.load(seq_cst) == 0 {
+          break
+        }
+      },
+      Some((root, payload)) => {
         let t_worker = worker.clone();
         let t_push_ch = push_ch.clone();
 
@@ -127,7 +128,7 @@ pub fn iterate_recursively<P: Send + Clone, W: PathHandler<P> + Send + Clone>
                 root.push(rel_path);
                 let dir_opt = t_worker.handle_path(payload.clone(), root.clone());
                 if dir_opt.is_some() {
-                  t_push_ch.send((root.clone(), dir_opt.unwrap()));
+                  t_push_ch.send(Some((root.clone(), dir_opt.unwrap())));
                 }
                 root.pop();
               }
@@ -136,11 +137,10 @@ pub fn iterate_recursively<P: Send + Clone, W: PathHandler<P> + Send + Clone>
 
           // Count this pool thread as idle:
           t_running_workers.fetch_sub(1, seq_cst);
+          t_push_ch.send(None)
         });
       }
     }
-    // We are done when no workers are active (i.e. all tasks are done):
-    if running_workers.load(seq_cst) == 0 { break }
   }
 }
 
