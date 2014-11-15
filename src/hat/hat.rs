@@ -34,6 +34,7 @@ use std::io::{Reader, IoResult, UserDir,
               TypeDirectory, TypeSymlink, TypeFile, FileStat};
 use std::io::fs::{lstat, File, mkdir_recursive};
 use std::sync;
+use std::sync::atomic;
 
 use time;
 
@@ -228,9 +229,8 @@ impl Iterator<Vec<u8>> for FileIterator {
 
 #[deriving(Clone)]
 struct InsertPathHandler<B:'static> {
-  count: sync::Arc<sync::Mutex<uint>>,
+  count: sync::Arc<sync::atomic::AtomicInt>,
   last_print: sync::Arc<sync::Mutex<time::Timespec>>,
-  my_last_print: time::Timespec,
 
   key_store: KeyStoreProcess<FileEntry, FileIterator, B>,
 }
@@ -239,9 +239,8 @@ impl <B> InsertPathHandler<B> {
   pub fn new(key_store: KeyStoreProcess<FileEntry, FileIterator, B>)
              -> InsertPathHandler<B> {
     InsertPathHandler{
-      count: sync::Arc::new(sync::Mutex::new(0)),
+      count: sync::Arc::new(sync::atomic::AtomicInt::new(0)),
       last_print: sync::Arc::new(sync::Mutex::new(time::now().to_timespec())),
-      my_last_print: time::now().to_timespec(),
       key_store: key_store,
     }
   }
@@ -249,21 +248,16 @@ impl <B> InsertPathHandler<B> {
 
 impl <B: BlobStoreBackend + Clone + Send> listdir::PathHandler<Option<Vec<u8>>>
   for InsertPathHandler<B> {
-  fn handle_path(&mut self, parent: Option<Vec<u8>>, path: Path) -> Option<Option<Vec<u8>>> {
-    let count = {
-      let mut guarded_count = self.count.lock();
-      *guarded_count += 1;
-      *guarded_count
-    };
+  fn handle_path(&self, parent: Option<Vec<u8>>, path: Path) -> Option<Option<Vec<u8>>> {
+    let count = self.count.fetch_add(1, atomic::SeqCst) + 1;
 
-    if self.my_last_print.sec <= time::now().to_timespec().sec - 1 {
+    if count % 16 == 0 {  // don't hammer the mutex
       let mut guarded_last_print = self.last_print.lock();
       let now = time::now().to_timespec();
       if guarded_last_print.sec <= now.sec - 1 {
         println!("#{}: {}", count, path.display());
         *guarded_last_print = now;
       }
-      self.my_last_print = now;
     }
 
     let fileEntry_opt = FileEntry::new(path.clone(), parent);

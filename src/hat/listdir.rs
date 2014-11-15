@@ -79,16 +79,20 @@ impl Iterator<String> for DirIterator {
 
 
 pub trait PathHandler<D> {
-  fn handle_path(&mut self, D, Path) -> Option<D>;
+  fn handle_path(&self, D, Path) -> Option<D>;
 }
 
 
 pub fn iterate_recursively<P: Send + Clone, W: PathHandler<P> + Send + Clone>
   (root: (Path, P), worker: &mut W)
 {
-  let threads = 5;
+  let threads = 10;
   let (push_ch, work_ch) = sync_channel(threads);
-  let mut pool = sync::TaskPool::new(threads, || proc(_){()});
+  let mut pool = sync::TaskPool::new(threads, || {
+    let w = worker.clone();
+    let c = push_ch.clone();
+    proc(_){(w, c)}
+  });
 
   // Insert the first task into the queue:
   push_ch.send(Some(root));
@@ -106,14 +110,10 @@ pub fn iterate_recursively<P: Send + Clone, W: PathHandler<P> + Send + Clone>
         }
       },
       Some((root, payload)) => {
-        let t_worker = worker.clone();
-        let t_push_ch = push_ch.clone();
-
         // Execute the task in a pool thread:
         running_workers += 1;
-        pool.execute(proc(&()) {
+        pool.execute(proc(&(ref worker, ref push_ch)) {
           let mut root = root;
-          let mut t_worker = t_worker;
           let res = DirIterator::new(root.clone());
           if res.is_ok() {
             let mut it = res.unwrap();
@@ -121,17 +121,16 @@ pub fn iterate_recursively<P: Send + Clone, W: PathHandler<P> + Send + Clone>
               if file != ".".into_string() && file != "..".into_string() {
                 let rel_path = Path::new(file);
                 root.push(rel_path);
-                let dir_opt = t_worker.handle_path(payload.clone(), root.clone());
+                let dir_opt = worker.handle_path(payload.clone(), root.clone());
                 if dir_opt.is_some() {
-                  t_push_ch.send(Some((root.clone(), dir_opt.unwrap())));
+                  push_ch.send(Some((root.clone(), dir_opt.unwrap())));
                 }
                 root.pop();
               }
             }
           }
-
           // Count this pool thread as idle:
-          t_push_ch.send(None)
+          push_ch.send(None)
         });
       }
     }
@@ -145,7 +144,7 @@ impl Clone for PrintPathHandler {
 }
 
 impl PathHandler<()> for PrintPathHandler {
-  fn handle_path(&mut self, _: (), path: Path) -> Option<()> {
+  fn handle_path(&self, _: (), path: Path) -> Option<()> {
     let filename_opt = path.filename_str();
     println!("{}", path.display());
     match filename_opt {
