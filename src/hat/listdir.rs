@@ -98,7 +98,7 @@ pub fn iterate_recursively<P: Send + Clone, W: PathHandler<P> + Send + Clone>
   loop {
     match work_ch.recv() {
       None => {
-        // A worker has reached completion and has decremented the counter.
+        // A worker has completed a task.
         // We are done when no more workers are active (i.e. all tasks are done):
         running_workers -= 1;
         if running_workers == 0 {
