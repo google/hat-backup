@@ -31,6 +31,9 @@ use key_index::{KeyIndex};
 
 pub type KeyStoreProcess<KE, IT, B> = Process<Msg<KE, IT>, Reply<B>, KeyStore<KE, IT, B>>;
 
+pub type DirElem<B> = (Vec<u8>, Vec<u8>, u64, u64, u64, Vec<u8>, Vec<u8>,
+                       ReaderResult<HashStoreBackend<B>>);
+
 // Public structs
 pub enum Msg<KE, IT> {
 
@@ -51,8 +54,7 @@ pub enum Msg<KE, IT> {
 
 pub enum Reply<B> {
   Id(Vec<u8>),
-  ListResult(Vec<(Vec<u8>, Vec<u8>, u64, u64, u64, Vec<u8>, Vec<u8>,
-                  ReaderResult<HashStoreBackend<B>>)>),
+  ListResult(Vec<DirElem<B>>),
   FlushOK,
 }
 
@@ -63,7 +65,7 @@ pub struct KeyStore<KE, IT, B> {
 }
 
 // Implementations
-impl <KE: KeyEntry<KE> + Send, IT: Iterator<Vec<u8>>, B: blob_store::BlobStoreBackend + Send>
+impl <KE: KeyEntry<KE> + Send, IT: Iterator<Vec<u8>>, B: blob_store::BlobStoreBackend + Send + Clone>
   KeyStore<KE, IT, B> {
   pub fn new(index: KeyIndexProcess<KE>,
              hash_index: hash_index::HashIndexProcess,
@@ -83,6 +85,11 @@ impl <KE: KeyEntry<KE> + Send, IT: Iterator<Vec<u8>>, B: blob_store::BlobStoreBa
     self.blob_store.send_reply(blob_store::Flush);
     self.hash_index.send_reply(hash_index::Flush);
     self.index.send_reply(key_index::Flush);
+  }
+
+  pub fn hash_tree_writer(&mut self) -> SimpleHashTreeWriter<HashStoreBackend<B>> {
+    let backend = HashStoreBackend::new(self.hash_index.clone(), self.blob_store.clone());
+    return SimpleHashTreeWriter::new(8, backend);
   }
 }
 
@@ -238,8 +245,7 @@ impl <KE: KeyEntry<KE> + Clone + Send, IT: Iterator<Vec<u8>> + Send,
             reply(Id(id.clone()));
 
             // Setup hash tree structure
-            let backend = HashStoreBackend::new(self.hash_index.clone(), self.blob_store.clone());
-            let mut tree = SimpleHashTreeWriter::new(8, backend);
+            let mut tree = self.hash_tree_writer();
 
             // Check if we have an data source:
             let it_opt = chunk_it_opt.and_then(|p| p());

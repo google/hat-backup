@@ -39,12 +39,10 @@ use std::sync::atomic;
 use time;
 
 
-
 pub struct Hat<B> {
   repository_root: Path,
   blob_index: BlobIndexProcess,
   hash_index: HashIndexProcess,
-
   backend: B,
   max_blob_size: uint,
 }
@@ -72,10 +70,10 @@ impl <B: BlobStoreBackend + Clone + Send> Hat<B> {
       let biP = Process::new(proc() { BlobIndex::new(blob_index_path) });
       let hiP = Process::new(proc() { HashIndex::new(hash_index_path) });
       Hat{repository_root: repository_root.clone(),
-                hash_index: hiP,
-                blob_index: biP,
-                backend: backend.clone(),
-                max_blob_size: max_blob_size,
+          hash_index: hiP,
+          blob_index: biP,
+          backend: backend.clone(),
+          max_blob_size: max_blob_size,
       }
     })
   }
@@ -101,8 +99,7 @@ impl <B: BlobStoreBackend + Clone + Send> Hat<B> {
 
     let ksP = Process::new(proc() { KeyStore::new(kiP, local_hash_index2, bsP) });
 
-    Some(Family{name: name,
-                key_store: ksP})
+    Some(Family{name: name, key_store: ksP})
   }
 }
 
@@ -110,9 +107,7 @@ impl <B: BlobStoreBackend + Clone + Send> Hat<B> {
 
 struct FileEntry {
   name: Vec<u8>,
-
   parent_id: Option<Vec<u8>>,
-
   stat: FileStat,
   full_path: Path,
 }
@@ -231,7 +226,6 @@ impl Iterator<Vec<u8>> for FileIterator {
 struct InsertPathHandler<B:'static> {
   count: sync::Arc<sync::atomic::AtomicInt>,
   last_print: sync::Arc<sync::Mutex<time::Timespec>>,
-
   key_store: KeyStoreProcess<FileEntry, FileIterator, B>,
 }
 
@@ -322,50 +316,51 @@ impl <B: BlobStoreBackend + Clone + Send> Family<B> {
     self.key_store.send_reply(key_store::Flush);
   }
 
-  pub fn checkout_in_dir(&self, output_dir: &mut Path, dir_id: Option<Vec<u8>>) {
-
-    fn put_chunks<B: hash_tree::HashTreeBackend + Clone>(
-      fd: &mut File, tree: hash_tree::ReaderResult<B>)
-    {
-      let mut it = match tree {
-        hash_tree::NoData => fail!("Trying to read data where none exist."),
-        hash_tree::SingleBlock(chunk) => {
-          try_a_few_times_then_fail(|| fd.write(chunk.as_slice()).is_ok(),
-                                    "Could not write chunk.");
-          return;
-        },
-        hash_tree::Tree(it) => it,
-      };
-      // We have a tree
-      for chunk in it {
-        try_a_few_times_then_fail(|| fd.write(chunk.as_slice()).is_ok(), "Could not write chunk.");
-      }
+  fn write_file_chunks<B: hash_tree::HashTreeBackend + Clone>(&self, fd: &mut File,
+                                                              tree: hash_tree::ReaderResult<B>) {
+    let mut it = match tree {
+      hash_tree::NoData => fail!("Trying to read data where none exist."),
+      hash_tree::SingleBlock(chunk) => {
+        try_a_few_times_then_fail(|| fd.write(chunk.as_slice()).is_ok(),
+                                  "Could not write chunk.");
+        return;
+      },
+      hash_tree::Tree(it) => it,
+    };
+    // We have a tree
+    for chunk in it {
+      try_a_few_times_then_fail(|| fd.write(chunk.as_slice()).is_ok(), "Could not write chunk.");
     }
+    try_a_few_times_then_fail(|| fd.flush().is_ok(), "Could not flush file.");
+  }
 
-    // create output_dir
-    mkdir_recursive(output_dir, UserDir).unwrap();
+  pub fn checkout_in_dir(&self, output_dir: Path, dir_id: Option<Vec<u8>>) {
+    let mut path = output_dir;
+    for (id, name, _, _, _, hash, _, data_res) in self.listFromKeyStore(dir_id).move_iter() {
+      // Extend directory with filename:
+      path.push(name);
 
-    let listing = match self.key_store.send_reply(key_store::ListDir(dir_id)) {
+      if hash.len() == 0 {
+        // This is a directory, recurse!
+        mkdir_recursive(&path, UserDir).unwrap();
+        self.checkout_in_dir(path.clone(), Some(id));
+      } else {
+        // This is a file, write it
+        let mut fd = File::create(&path).unwrap();
+        self.write_file_chunks(&mut fd, data_res);
+      }
+      // Prepare for next filename:
+      path.pop();
+    }
+  }
+
+  pub fn listFromKeyStore(&self, dir_id: Option<Vec<u8>>) -> Vec<key_store::DirElem<B>> {
+    let listing = match self.key_store.send_reply(key_store::ListDir(dir_id.clone())) {
       key_store::ListResult(ls) => ls,
       _ => fail!("Unexpected result from key store."),
     };
 
-    for (id, name, _, _, _, hash, _, data_res) in listing.move_iter() {
-
-      output_dir.push(name);
-
-      if hash.len() == 0 {
-        // This is a directory, recurse!
-        self.checkout_in_dir(output_dir, Some(id));
-      } else {
-        // This is a file, write it
-        let mut fd = File::create(output_dir).unwrap();
-        put_chunks(&mut fd, data_res);
-        try_a_few_times_then_fail(|| fd.flush().is_ok(), "Could not flush file.")
-      }
-
-      output_dir.pop();
-    }
-
+    return listing;
   }
+
 }
