@@ -14,12 +14,16 @@
 
 //! High level Hat API
 
+use serialize::{json, Encodable, Decodable};
+use serialize::json::{Json, ToJson};
+use std::collections::treemap::{TreeMap};
+
 use process::{Process};
 
 use blob_index::{BlobIndex, BlobIndexProcess};
 use blob_store::{BlobStore, BlobStoreBackend};
 
-use hash_index::{HashIndex, HashIndexProcess};
+use hash_index::{Hash, HashIndex, HashIndexProcess};
 use hash_tree;
 
 use key_index::{KeyIndex, KeyEntry};
@@ -30,8 +34,7 @@ use key_store;
 use listdir;
 
 use std::io;
-use std::io::{Reader, IoResult, UserDir,
-              TypeDirectory, TypeSymlink, TypeFile, FileStat};
+use std::io::{Reader, IoResult, UserDir, TypeDirectory, TypeSymlink, TypeFile, FileStat};
 use std::io::fs::{lstat, File, mkdir_recursive};
 use std::sync;
 use std::sync::atomic;
@@ -90,20 +93,16 @@ impl <B: BlobStoreBackend + Clone + Send> Hat<B> {
     let bsP = Process::new(proc() {
       BlobStore::new(local_blob_index, local_backend, local_max_blob_size) });
 
-    let local_hash_index = self.hash_index.clone();
-    let local_hash_index2 = self.hash_index.clone();
-    let local_bsP = bsP.clone();
-
     let key_index_path = concat_filename(&self.repository_root, name.clone());
     let kiP = Process::new(proc() { KeyIndex::new(key_index_path) });
 
-    let ksP = Process::new(proc() { KeyStore::new(kiP, local_hash_index2, bsP) });
+    let local_ks = KeyStore::new(kiP.clone(), self.hash_index.clone(), bsP.clone());
+    let ksP = Process::new(proc() { local_ks });
 
-    Some(Family{name: name, key_store: ksP})
+    let ks = KeyStore::new(kiP, self.hash_index.clone(), bsP);
+    Some(Family{name: name, key_store: ks, key_store_process: ksP})
   }
 }
-
-
 
 struct FileEntry {
   name: Vec<u8>,
@@ -302,18 +301,19 @@ fn try_a_few_times_then_fail(f: || -> bool, msg: &str) {
 
 struct Family<B> {
   name: String,
-  key_store: KeyStoreProcess<FileEntry, FileIterator, B>,
+  key_store: KeyStore<FileEntry, FileIterator, B>,
+  key_store_process: KeyStoreProcess<FileEntry, FileIterator, B>,
 }
 
 impl <B: BlobStoreBackend + Clone + Send> Family<B> {
 
   pub fn snapshot_dir(&self, dir: Path) {
-    let mut handler = InsertPathHandler::new(self.key_store.clone());
+    let mut handler = InsertPathHandler::new(self.key_store_process.clone());
     listdir::iterate_recursively((Path::new(dir.clone()), None), &mut handler);
   }
 
   pub fn flush(&self) {
-    self.key_store.send_reply(key_store::Flush);
+    self.key_store_process.send_reply(key_store::Flush);
   }
 
   fn write_file_chunks<B: hash_tree::HashTreeBackend + Clone>(&self, fd: &mut File,
@@ -355,12 +355,58 @@ impl <B: BlobStoreBackend + Clone + Send> Family<B> {
   }
 
   pub fn listFromKeyStore(&self, dir_id: Option<Vec<u8>>) -> Vec<key_store::DirElem<B>> {
-    let listing = match self.key_store.send_reply(key_store::ListDir(dir_id.clone())) {
+    let listing = match self.key_store_process.send_reply(key_store::ListDir(dir_id.clone())) {
       key_store::ListResult(ls) => ls,
       _ => fail!("Unexpected result from key store."),
     };
 
     return listing;
+  }
+
+  pub fn commit(&mut self) -> (Hash, Vec<u8>) {
+    let mut top_tree = self.key_store.hash_tree_writer();
+    self.commit_to_tree(&mut top_tree, None);
+    return top_tree.hash();
+  }
+
+  pub fn commit_to_tree(&mut self,
+                        tree: &mut hash_tree::SimpleHashTreeWriter<key_store::HashStoreBackend<B>>,
+                        dir_id: Option<Vec<u8>>) {
+    let mut keys = Vec::new();
+
+    for (id, name, ctime, mtime, atime, hash, data_ref, _) in self.listFromKeyStore(dir_id).move_iter() {
+      let mut m = TreeMap::new();
+      m.insert("id".to_string(), id.to_json());
+      m.insert("name".to_string(), name.to_json());
+      m.insert("ct".to_string(), ctime.to_json());
+      m.insert("at".to_string(), atime.to_json());
+
+      if hash.len() > 0 {
+        // This is file, store its data hash:
+        m.insert("data_hash".to_string(), hash.to_json());
+        m.insert("data_ref".to_string(), data_ref.to_json());
+      } else if hash.len() == 0 {
+        // This is a directory, recurse!
+        let mut inner_tree = self.key_store.hash_tree_writer();
+        self.commit_to_tree(&mut inner_tree, Some(id));
+        // Store a reference for the sub-tree in our tree:
+        let (dir_hash, dir_ref) = inner_tree.hash();
+        m.insert("dir_hash".to_string(), hash.to_json());
+        m.insert("dir_ref".to_string(), dir_ref.to_json());
+      }
+
+      keys.push(json::Object(m).to_json());
+
+      // Flush to our own tree when we have a decent amount.
+      // The tree prevents large directories from clogging ram.
+      if keys.len() >= 1000 {
+        tree.append(keys.to_json().to_string().as_bytes().into_vec());
+        keys.clear();
+      }
+    }
+    if keys.len() > 0 {
+      tree.append(keys.to_json().to_string().as_bytes().into_vec());
+    }
   }
 
 }

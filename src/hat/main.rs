@@ -90,13 +90,9 @@ fn main() {
     return;
   }
 
-  if args.len() != 4 {
-    return usage();
-  }
-
   let ref cmd = args[1];
 
-  if cmd == &"snapshot".to_string() {
+  if cmd == &"snapshot".to_string() && args.len() == 4 {
     let ref name = args[2];  // used for naming the key index
     let ref path = args[3];
 
@@ -115,19 +111,34 @@ fn main() {
     println!("Waiting for final flush...");
     return;
   }
-  else if cmd == &"checkout".to_string() {
+  else if cmd == &"checkout".to_string() && args.len() == 4 {
     let ref name = args[2];  // used for naming the key index
     let ref path = args[3];
 
     let backend = blob_store::FileBackend::new(blob_dir());
-    let hat_opt = hat::Hat::open_repository(
-      &Path::new("repo"), backend, MAX_BLOB_SIZE);
-    let hat = hat_opt.expect(format!("Could not open repository in {}.", path).as_slice());
+    let hat_opt = hat::Hat::open_repository(&Path::new("repo"), backend, MAX_BLOB_SIZE);
+    let hat = hat_opt.expect("Could not open repository in 'repo'".as_slice());
 
     let family_opt = hat.open_family(name.clone());
     let family = family_opt.expect(format!("Could not open family '{}'", name).as_slice());
 
     family.checkout_in_dir(Path::new(path.clone()), None);
+    return;
+  } else if cmd == &"commit".to_string() && args.len() == 3 {
+    let ref name = args[2];
+
+    let backend = blob_store::FileBackend::new(blob_dir());
+    let hat_opt = hat::Hat::open_repository(&Path::new("repo"), backend, MAX_BLOB_SIZE);
+    let hat = hat_opt.expect("Could not open repository in 'repo'".as_slice());
+
+    let family_opt = hat.open_family(name.clone());
+    let mut family = family_opt.expect(format!("Could not open family '{}'", name).as_slice());
+
+    let (hash, top_ref) = family.commit();
+    family.flush();
+
+    println!("hash: {}", hash.bytes);
+    println!("ref: {}", top_ref);
     return;
   }
 
