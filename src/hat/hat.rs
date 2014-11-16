@@ -14,8 +14,8 @@
 
 //! High level Hat API
 
-use serialize::{json, Encodable, Decodable};
-use serialize::json::{Json, ToJson};
+use serialize::{json};
+use serialize::json::{ToJson};
 use std::collections::treemap::{TreeMap};
 
 use process::{Process};
@@ -24,13 +24,13 @@ use blob_index::{BlobIndex, BlobIndexProcess};
 use blob_store::{BlobStore, BlobStoreBackend};
 
 use hash_index::{Hash, HashIndex, HashIndexProcess};
-use hash_tree;
-
 use key_index::{KeyIndex, KeyEntry};
-
 use key_store::{KeyStore, KeyStoreProcess};
 use key_store;
+use snapshot_index::{SnapshotIndex, SnapshotIndexProcess};
+use snapshot_index;
 
+use hash_tree;
 use listdir;
 
 use std::io;
@@ -44,6 +44,7 @@ use time;
 
 pub struct Hat<B> {
   repository_root: Path,
+  snapshot_index: SnapshotIndexProcess,
   blob_index: BlobIndexProcess,
   hash_index: HashIndexProcess,
   backend: B,
@@ -54,6 +55,10 @@ fn concat_filename(a: &Path, b: String) -> String {
   let mut result = a.clone();
   result.push(Path::new(b));
   result.as_str().expect("Unable to decode repository_root.").to_string()
+}
+
+fn snapshot_index_name(root: &Path) -> String {
+  concat_filename(root, "snapshot_index.sqlite3".to_string())
 }
 
 fn blob_index_name(root: &Path) -> String {
@@ -68,11 +73,14 @@ impl <B: BlobStoreBackend + Clone + Send> Hat<B> {
   pub fn open_repository(repository_root: &Path, backend: B, max_blob_size: uint)
                         -> Option<Hat<B>> {
     repository_root.as_str().map(|_| {
+      let snapshot_index_path = snapshot_index_name(repository_root);
       let blob_index_path = blob_index_name(repository_root);
       let hash_index_path = hash_index_name(repository_root);
+      let siP = Process::new(proc() { SnapshotIndex::new(snapshot_index_path) });
       let biP = Process::new(proc() { BlobIndex::new(blob_index_path) });
       let hiP = Process::new(proc() { HashIndex::new(hash_index_path) });
       Hat{repository_root: repository_root.clone(),
+          snapshot_index: siP,
           hash_index: hiP,
           blob_index: biP,
           backend: backend.clone(),
@@ -101,6 +109,19 @@ impl <B: BlobStoreBackend + Clone + Send> Hat<B> {
 
     let ks = KeyStore::new(kiP, self.hash_index.clone(), bsP);
     Some(Family{name: name, key_store: ks, key_store_process: ksP})
+  }
+
+  pub fn commit(&self, family_name: String) {
+    let mut family = self.open_family(family_name.clone()).expect(
+      format!("Could not open family '{}'", family_name).as_slice());
+
+    // Commit snapshot:
+    let (hash, top_ref) = family.commit();
+    family.flush();
+
+    // Update to snapshot index:
+    self.snapshot_index.send_reply(snapshot_index::Add(family_name, hash, top_ref));
+    self.snapshot_index.send_reply(snapshot_index::Flush);
   }
 }
 

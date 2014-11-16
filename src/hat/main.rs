@@ -57,6 +57,8 @@ mod blob_store;
 mod key_index;
 mod key_store;
 
+mod snapshot_index;
+
 
 static MAX_BLOB_SIZE: uint = 4 * 1024 * 1024;
 
@@ -64,7 +66,7 @@ fn blob_dir() -> Path { Path::new("blobs") }
 
 
 fn usage() {
-  println!("Usage: {} [snapshot|checkout] name path", os::args()[0]);
+  println!("Usage: {} [snapshot|commit|checkout] name path", os::args()[0]);
 }
 
 fn license() {
@@ -90,6 +92,9 @@ fn main() {
     return;
   }
 
+  if args.len() < 2 {
+    return usage(); // There's not even a command here.
+  }
   let ref cmd = args[1];
 
   if cmd == &"snapshot".to_string() && args.len() == 4 {
@@ -131,14 +136,7 @@ fn main() {
     let hat_opt = hat::Hat::open_repository(&Path::new("repo"), backend, MAX_BLOB_SIZE);
     let hat = hat_opt.expect("Could not open repository in 'repo'".as_slice());
 
-    let family_opt = hat.open_family(name.clone());
-    let mut family = family_opt.expect(format!("Could not open family '{}'", name).as_slice());
-
-    let (hash, top_ref) = family.commit();
-    family.flush();
-
-    println!("hash: {}", hash.bytes);
-    println!("ref: {}", top_ref);
+    hat.commit(name.clone());
     return;
   }
 
