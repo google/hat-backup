@@ -60,7 +60,7 @@ impl SnapshotIndex {
   }
 
   #[cfg(test)]
-  pub fn new_for_testing() -> HashIndex {
+  pub fn new_for_testing() -> SnapshotIndex {
     SnapshotIndex::new(":memory:".to_string())
   }
 
