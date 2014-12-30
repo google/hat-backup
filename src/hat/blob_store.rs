@@ -248,7 +248,7 @@ impl <B: BlobStoreBackend> BlobStore<B> {
     let mut ready_callback = Vec::new();
     let mut blob = Vec::new();
     loop {
-      match self.buffer_data.shift() {
+      match self.buffer_data.remove(0) {
         Some((chunk_ref, chunk, cb)) => {
           ready_callback.push((chunk_ref, cb));
           blob.push_all(chunk.as_slice());
@@ -262,7 +262,7 @@ impl <B: BlobStoreBackend> BlobStore<B> {
     self.blob_index.send_reply(blob_index::CommitDone(old_blob_desc));
 
     // Go through callbacks
-    for (blobid, cb) in ready_callback.move_iter() {
+    for (blobid, cb) in ready_callback.into_iter() {
       cb(blobid);
     }
   }

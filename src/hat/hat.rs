@@ -34,7 +34,7 @@ use hash_tree;
 use listdir;
 
 use std::io;
-use std::io::{Reader, IoResult, UserDir, TypeDirectory, TypeSymlink, TypeFile, FileStat};
+use std::io::{Reader, IoResult, USER_DIR, TypeDirectory, TypeSymlink, TypeFile, FileStat};
 use std::io::fs::{lstat, File, mkdir_recursive};
 use std::sync;
 use std::sync::atomic;
@@ -357,13 +357,13 @@ impl <B: BlobStoreBackend + Clone + Send> Family<B> {
 
   pub fn checkout_in_dir(&self, output_dir: Path, dir_id: Option<Vec<u8>>) {
     let mut path = output_dir;
-    for (id, name, _, _, _, hash, _, data_res) in self.listFromKeyStore(dir_id).move_iter() {
+    for (id, name, _, _, _, hash, _, data_res) in self.listFromKeyStore(dir_id).into_iter() {
       // Extend directory with filename:
       path.push(name);
 
       if hash.len() == 0 {
         // This is a directory, recurse!
-        mkdir_recursive(&path, UserDir).unwrap();
+        mkdir_recursive(&path, USER_DIR).unwrap();
         self.checkout_in_dir(path.clone(), Some(id));
       } else {
         // This is a file, write it
@@ -395,7 +395,7 @@ impl <B: BlobStoreBackend + Clone + Send> Family<B> {
                         dir_id: Option<Vec<u8>>) {
     let mut keys = Vec::new();
 
-    for (id, name, ctime, mtime, atime, hash, data_ref, _) in self.listFromKeyStore(dir_id).move_iter() {
+    for (id, name, ctime, mtime, atime, hash, data_ref, _) in self.listFromKeyStore(dir_id).into_iter() {
       let mut m = TreeMap::new();
       m.insert("id".to_string(), id.to_json());
       m.insert("name".to_string(), name.to_json());
