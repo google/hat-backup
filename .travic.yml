@@ -1,0 +1,7 @@
+language: rust
+rust: 0.12.0
+script:
+  - cargo build --verbose
+  - cargo test --verbose
+  - rustdoc --test README.md -L target
+  - cargo doc
