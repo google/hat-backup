@@ -78,13 +78,13 @@ impl <B: 'static + BlobStoreBackend + Clone + Send> Hat<B> {
       let snapshot_index_path = snapshot_index_name(repository_root);
       let blob_index_path = blob_index_name(repository_root);
       let hash_index_path = hash_index_name(repository_root);
-      let siP = Process::new(Thunk::new(move|| { SnapshotIndex::new(snapshot_index_path) }));
-      let biP = Process::new(Thunk::new(move|| { BlobIndex::new(blob_index_path) }));
-      let hiP = Process::new(Thunk::new(move|| { HashIndex::new(hash_index_path) }));
+      let si_p = Process::new(Thunk::new(move|| { SnapshotIndex::new(snapshot_index_path) }));
+      let bi_p = Process::new(Thunk::new(move|| { BlobIndex::new(blob_index_path) }));
+      let hi_p = Process::new(Thunk::new(move|| { HashIndex::new(hash_index_path) }));
       Hat{repository_root: repository_root.clone(),
-          snapshot_index: siP,
-          hash_index: hiP,
-          blob_index: biP,
+          snapshot_index: si_p,
+          hash_index: hi_p,
+          blob_index: bi_p,
           backend: backend.clone(),
           max_blob_size: max_blob_size,
       }
@@ -100,17 +100,17 @@ impl <B: 'static + BlobStoreBackend + Clone + Send> Hat<B> {
     let local_blob_index = self.blob_index.clone();
     let local_backend = self.backend.clone();
     let local_max_blob_size = self.max_blob_size;
-    let bsP = Process::new(Thunk::new(move|| {
+    let bs_p = Process::new(Thunk::new(move|| {
       BlobStore::new(local_blob_index, local_backend, local_max_blob_size) }));
 
     let key_index_path = concat_filename(&self.repository_root, name.clone());
-    let kiP = Process::new(Thunk::new(move|| { KeyIndex::new(key_index_path) }));
+    let ki_p = Process::new(Thunk::new(move|| { KeyIndex::new(key_index_path) }));
 
-    let local_ks = KeyStore::new(kiP.clone(), self.hash_index.clone(), bsP.clone());
-    let ksP = Process::new(Thunk::new(move|| { local_ks }));
+    let local_ks = KeyStore::new(ki_p.clone(), self.hash_index.clone(), bs_p.clone());
+    let ks_p = Process::new(Thunk::new(move|| { local_ks }));
 
-    let ks = KeyStore::new(kiP, self.hash_index.clone(), bsP);
-    Some(Family{name: name, key_store: ks, key_store_process: ksP})
+    let ks = KeyStore::new(ki_p, self.hash_index.clone(), bs_p);
+    Some(Family{name: name, key_store: ks, key_store_process: ks_p})
   }
 
   pub fn commit(&self, family_name: String) {

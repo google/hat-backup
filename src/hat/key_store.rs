@@ -76,10 +76,10 @@ impl <KE: 'static + KeyEntry<KE> + Send> KeyStore<KE>
 
   #[cfg(test)]
   pub fn new_for_testing<B:'static + blob_store::BlobStoreBackend + Send + Clone>(backend: B) -> KeyStore<KE> {
-    let kiP = Process::new(Thunk::new(move|| { KeyIndex::new_for_testing() }));
-    let hiP = Process::new(Thunk::new(move|| { hash_index::HashIndex::new_for_testing() }));
-    let bsP = Process::new(Thunk::new(move|| { blob_store::BlobStore::new_for_testing(backend, 1024) }));
-    KeyStore{index: kiP, hash_index: hiP, blob_store: bsP}
+    let ki_p = Process::new(Thunk::new(move|| { KeyIndex::new_for_testing() }));
+    let hi_p = Process::new(Thunk::new(move|| { hash_index::HashIndex::new_for_testing() }));
+    let bs_p = Process::new(Thunk::new(move|| { blob_store::BlobStore::new_for_testing(backend, 1024) }));
+    KeyStore{index: ki_p, hash_index: hi_p, blob_store: bs_p}
   }
 
   pub fn flush(&mut self) {
@@ -449,23 +449,23 @@ mod tests {
                filelist: create_files(root_id, size)}
   }
 
-  fn insert_fs(fs: &FileSystem, ksP: KeyStoreProcess<KeyEntryStub, KeyEntryStub>) {
+  fn insert_fs(fs: &FileSystem, ks_p: KeyStoreProcess<KeyEntryStub, KeyEntryStub>) {
 
     let local_file = fs.file.clone();
-    ksP.send_reply(Msg::Insert(fs.file.clone(),
+    ks_p.send_reply(Msg::Insert(fs.file.clone(),
                                if fs.file.data.is_some() {
                                  Some(Thunk::new(move|| { Some(local_file) }))
                                } else { None }));
 
     for fs in fs.filelist.iter() {
-      insert_fs(fs, ksP.clone());
+      insert_fs(fs, ks_p.clone());
     }
   }
 
   fn verify_filesystem(fs: &FileSystem,
-                       ksP: KeyStoreProcess<KeyEntryStub, KeyEntryStub>) -> usize {
+                       ks_p: KeyStoreProcess<KeyEntryStub, KeyEntryStub>) -> usize {
 
-    let listing = match ksP.send_reply(Msg::ListDir(fs.file.id())) {
+    let listing = match ks_p.send_reply(Msg::ListDir(fs.file.id())) {
       Reply::ListResult(ls) => ls,
       _ => panic!("Unexpected result from key store."),
     };
@@ -517,7 +517,7 @@ mod tests {
 
     let mut count = fs.filelist.len();
     for dir in fs.filelist.iter() {
-      count += verify_filesystem(dir, ksP.clone());
+      count += verify_filesystem(dir, ks_p.clone());
     }
 
     count
@@ -528,16 +528,16 @@ mod tests {
     let fs = rng_filesystem(size as usize);
 
     let backend = MemoryBackend::new();
-    let ksP = Process::new(Thunk::new(move|| { KeyStore::new_for_testing(backend) }));
+    let ks_p = Process::new(Thunk::new(move|| { KeyStore::new_for_testing(backend) }));
 
-    insert_fs(&fs, ksP.clone());
+    insert_fs(&fs, ks_p.clone());
 
-    match ksP.send_reply(Msg::Flush) {
+    match ks_p.send_reply(Msg::Flush) {
       Reply::FlushOK => (),
       _ => panic!("Unexpected result from key store."),
     }
 
-    verify_filesystem(&fs, ksP.clone());
+    verify_filesystem(&fs, ks_p.clone());
 
     true
   }
@@ -546,7 +546,7 @@ mod tests {
   #[bench]
   fn insert_1_key_x_128000_zeros(bench: &mut Bencher) {
     let backend = DevNullBackend;
-    let ksP : KeyStoreProcess<KeyEntryStub, KeyEntryStub>
+    let ks_p : KeyStoreProcess<KeyEntryStub, KeyEntryStub>
       = Process::new(Thunk::new(move|| { KeyStore::new_for_testing(backend) }));
 
     let bytes = vec![0u8; 128*1024];
@@ -557,7 +557,7 @@ mod tests {
 
       let entry = KeyEntryStub::new(None, format!("{}", i).as_bytes().to_vec(),
                                     Some(vec![bytes.clone()]), None);
-      ksP.send_reply(Msg::Insert(entry.clone(), Some(Thunk::new(move|| { Some(entry) }))));
+      ks_p.send_reply(Msg::Insert(entry.clone(), Some(Thunk::new(move|| { Some(entry) }))));
 
     });
 
@@ -569,7 +569,7 @@ mod tests {
   #[bench]
   fn insert_1_key_x_128000_unique(bench: &mut Bencher) {
     let backend = DevNullBackend;
-    let ksP : KeyStoreProcess<KeyEntryStub, KeyEntryStub>
+    let ks_p : KeyStoreProcess<KeyEntryStub, KeyEntryStub>
       = Process::new(Thunk::new(move|| { KeyStore::new_for_testing(backend) }));
 
     let bytes = vec![0u8; 128*1024];
@@ -589,7 +589,7 @@ mod tests {
 
       let entry = KeyEntryStub::new(None, format!("{}", i).as_bytes().to_vec(),
                                     Some(vec!(my_bytes)), None);
-      ksP.send_reply(Msg::Insert(entry.clone(), Some(Thunk::new(move|| { Some(entry) }))));
+      ks_p.send_reply(Msg::Insert(entry.clone(), Some(Thunk::new(move|| { Some(entry) }))));
 
     });
 
@@ -601,7 +601,7 @@ mod tests {
   #[bench]
   fn insert_1_key_x_16_x_128000_zeros(bench: &mut Bencher) {
     let backend = DevNullBackend;
-    let ksP : KeyStoreProcess<KeyEntryStub, KeyEntryStub>
+    let ks_p : KeyStoreProcess<KeyEntryStub, KeyEntryStub>
       = Process::new(Thunk::new(move|| { KeyStore::new_for_testing(backend) }));
 
     bench.iter(|| {
@@ -611,9 +611,9 @@ mod tests {
                                     Some(vec![bytes; 16]),
                                     None);
 
-      ksP.send_reply(Msg::Insert(entry.clone(), Some(Thunk::new(move|| { Some(entry) }))));
+      ks_p.send_reply(Msg::Insert(entry.clone(), Some(Thunk::new(move|| { Some(entry) }))));
 
-      match ksP.send_reply(Msg::Flush) {
+      match ks_p.send_reply(Msg::Flush) {
         Reply::FlushOK => (),
         _ => panic!("Unexpected result from key store."),
       }
@@ -627,7 +627,7 @@ mod tests {
   #[bench]
   fn insert_1_key_x_16_x_128000_unique(bench: &mut Bencher) {
     let backend = DevNullBackend;
-    let ksP : KeyStoreProcess<KeyEntryStub, KeyEntryStub>
+    let ks_p : KeyStoreProcess<KeyEntryStub, KeyEntryStub>
       = Process::new(Thunk::new(move|| { KeyStore::new_for_testing(backend) }));
 
     let bytes = vec![0u8; 128*1024];
@@ -654,9 +654,9 @@ mod tests {
 
       let entry = KeyEntryStub::new(None, vec![1u8, 2, 3], Some(chunks), None);
 
-      ksP.send_reply(Msg::Insert(entry.clone(), Some(Thunk::new(move|| { Some(entry) }))));
+      ks_p.send_reply(Msg::Insert(entry.clone(), Some(Thunk::new(move|| { Some(entry) }))));
 
-      match ksP.send_reply(Msg::Flush) {
+      match ks_p.send_reply(Msg::Flush) {
         Reply::FlushOK => (),
         _ => panic!("Unexpected result from key store."),
       }

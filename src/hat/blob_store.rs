@@ -191,9 +191,9 @@ impl <B: BlobStoreBackend> BlobStore<B> {
 
   #[cfg(test)]
   pub fn new_for_testing(backend: B, max_blob_size: usize) -> BlobStore<B> {
-    let biP = Process::new(Thunk::new(move|| { BlobIndex::new_for_testing() }));
+    let bi_p = Process::new(Thunk::new(move|| { BlobIndex::new_for_testing() }));
     let mut bs = BlobStore{backend: backend,
-                           blob_index: biP,
+                           blob_index: bi_p,
                            blob_desc: empty_blob_desc(),
                            buffer_data: Vec::new(),
                            buffer_data_len: 0,
@@ -379,18 +379,18 @@ pub mod tests {
     let mut backend = MemoryBackend::new();
 
     let local_backend = backend.clone();
-    let bsP : BlobStoreProcess =
+    let bs_p : BlobStoreProcess =
       Process::new(Thunk::new(move|| { BlobStore::new_for_testing(local_backend, 1024) }));
 
     let mut ids = Vec::new();
     for chunk in chunks.iter() {
-      match bsP.send_reply(Msg::Store(chunk.as_slice().to_vec(), Thunk::with_arg(move|_| {}))) {
+      match bs_p.send_reply(Msg::Store(chunk.as_slice().to_vec(), Thunk::with_arg(move|_| {}))) {
         Reply::StoreOK(id) => { ids.push((id, chunk)); },
         _ => panic!("Unexpected reply from blob store."),
       }
     }
 
-    assert_eq!(bsP.send_reply(Msg::Flush), Reply::FlushOK);
+    assert_eq!(bs_p.send_reply(Msg::Flush), Reply::FlushOK);
 
     // Non-empty chunks must be in the backend now:
     for &(ref id, chunk) in ids.iter() {
@@ -404,7 +404,7 @@ pub mod tests {
 
     // All chunks must be available through the blob store:
     for &(ref id, chunk) in ids.iter() {
-      match bsP.send_reply(Msg::Retrieve(id.clone())) {
+      match bs_p.send_reply(Msg::Retrieve(id.clone())) {
         Reply::RetrieveOK(found_chunk) => assert_eq!(found_chunk,
                                               chunk.as_slice().to_vec()),
         _ => panic!("Unexpected reply from blob store."),
@@ -419,18 +419,18 @@ pub mod tests {
     let mut backend = MemoryBackend::new();
 
     let local_backend = backend.clone();
-    let bsP: BlobStoreProcess = Process::new(Thunk::new(move|| {
+    let bs_p: BlobStoreProcess = Process::new(Thunk::new(move|| {
       BlobStore::new_for_testing(local_backend, 1024) }));
 
     let mut ids = Vec::new();
     for chunk in chunks.iter() {
-      match bsP.send_reply(Msg::Store(chunk.as_slice().to_vec(), Thunk::with_arg(move|_| {}))) {
+      match bs_p.send_reply(Msg::Store(chunk.as_slice().to_vec(), Thunk::with_arg(move|_| {}))) {
         Reply::StoreOK(id) => { ids.push((id, chunk)); },
         _ => panic!("Unexpected reply from blob store."),
       }
-      assert_eq!(bsP.send_reply(Msg::Flush), Reply::FlushOK);
+      assert_eq!(bs_p.send_reply(Msg::Flush), Reply::FlushOK);
       let &(ref id, chunk) = ids.last().unwrap();
-      assert_eq!(bsP.send_reply(Msg::Retrieve(id.clone())), Reply::RetrieveOK(chunk.clone()));
+      assert_eq!(bs_p.send_reply(Msg::Retrieve(id.clone())), Reply::RetrieveOK(chunk.clone()));
     }
 
     // Non-empty chunks must be in the backend now:
@@ -445,7 +445,7 @@ pub mod tests {
 
     // All chunks must be available through the blob store:
     for &(ref id, chunk) in ids.iter() {
-      match bsP.send_reply(Msg::Retrieve(id.clone())) {
+      match bs_p.send_reply(Msg::Retrieve(id.clone())) {
         Reply::RetrieveOK(found_chunk) => assert_eq!(found_chunk,
                                                      chunk.as_slice().to_vec()),
         _ => panic!("Unexpected reply from blob store."),
