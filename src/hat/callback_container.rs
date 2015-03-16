@@ -12,41 +12,47 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::hashmap::{HashMap};
-use std::hash::{Hash};
+use std::thunk::Thunk;
+use std::collections::{BTreeMap};
+use std::collections::btree_map;
 
 
 pub struct CallbackContainer<K> {
-  callbacks: HashMap<K, Vec<proc():Send>>,
-  ready: Vec<proc():Send>,
+  callbacks: BTreeMap<K, Vec<Thunk<'static>>>,
+  ready: Vec<Thunk<'static>>,
 }
 
 
-impl <K: Hash + Eq> CallbackContainer<K> {
+impl <K: Ord> CallbackContainer<K> {
 
   pub fn new() -> CallbackContainer<K> {
-    CallbackContainer{callbacks: HashMap::new(),
+    CallbackContainer{callbacks: BTreeMap::new(),
                       ready: vec!()}
   }
 
-  pub fn add(&mut self, k: K, callback: proc():Send) {
-    self.callbacks.find_with_or_insert_with(k, callback,
-                                            |_k, cbs, new| cbs.push(new),
-                                            |_k, new| vec!(new));
+  pub fn add(&mut self, k: K, callback: Thunk<'static>) {
+    match self.callbacks.entry(k) {
+      btree_map::Entry::Occupied(mut entry) => {
+        entry.get_mut().push(callback);
+      },
+      btree_map::Entry::Vacant(space) => {
+        space.insert(vec!(callback));
+      }
+    }
   }
 
-  pub fn allow_flush_of(&mut self, k: K) {
-    self.ready.extend(self.callbacks.pop(&k).unwrap_or(vec!()).into_iter());
+  pub fn allow_flush_of(&mut self, k: &K) {
+    self.ready.extend(self.callbacks.remove(k).unwrap_or(vec!()).into_iter());
   }
 
   pub fn flush(&mut self) {
     while self.ready.len() > 0 {
-      self.ready.pop().expect("len() > 0")();
+      self.ready.pop().expect("len() > 0").invoke(());
     }
     assert_eq!(self.ready.len(), 0);
   }
 
-  pub fn len(&self) -> uint {
+  pub fn len(&self) -> usize {
     self.callbacks.len()
   }
 

@@ -16,20 +16,20 @@
 
 use sodiumoxide::randombytes::{randombytes};
 
-use std::collections::hashmap::{HashMap};
-use serialize::hex::{ToHex};
+use std::collections::{HashMap};
+use rustc_serialize::hex::{ToHex};
 
 use process::{Process, MsgHandler};
 use sqlite3::database::{Database};
 
 use sqlite3::cursor::{Cursor};
-use sqlite3::types::{SQLITE_ROW};
+use sqlite3::types::ResultCode::{SQLITE_ROW};
 use sqlite3::{open};
 
 
-pub type BlobIndexProcess = Process<Msg, Reply, BlobIndex>;
+pub type BlobIndexProcess = Process<Msg, Reply>;
 
-#[deriving(Clone, Show)]
+#[derive(Clone, Debug)]
 pub struct BlobDesc {
   pub name: Vec<u8>,
   pub id: i64,
@@ -70,7 +70,7 @@ impl BlobIndex {
         next_id: -1,
         reserved: HashMap::new(),
       },
-      Err(err) => fail!(err.to_string()),
+      Err(err) => panic!("{:?}", err),
     };
     hi.initialize();
     hi
@@ -101,17 +101,17 @@ impl BlobIndex {
   fn exec_or_die(&mut self, sql: &str) {
     match self.dbh.exec(sql) {
       Ok(true) => (),
-      Ok(false) => fail!("exec: {}", self.dbh.get_errmsg()),
-      Err(msg) => fail!(format!("exec: {}, {}\nIn sql: '{}'\n",
-                                msg.to_string(), self.dbh.get_errmsg(), sql))
+      Ok(false) => panic!("exec: {}", self.dbh.get_errmsg()),
+      Err(msg) => panic!("exec: {:?}, {:?}\nIn sql: '{}'\n",
+                         msg, self.dbh.get_errmsg(), sql)
     }
   }
 
   fn prepare_or_die<'a>(&'a self, sql: &str) -> Cursor<'a> {
     match self.dbh.prepare(sql, &None) {
       Ok(s)  => s,
-      Err(x) => fail!(format!("sqlite error: {} ({:?})",
-                              self.dbh.get_errmsg(), x)),
+      Err(x) => panic!("sqlite error: {:?} ({:?})",
+                       self.dbh.get_errmsg(), x),
     }
   }
 
@@ -140,10 +140,10 @@ impl BlobIndex {
   }
 
   fn in_air(&mut self, blob: &BlobDesc) {
-    assert!(self.reserved.find(&blob.name).is_some(), "blob was not reserved!");
+    assert!(self.reserved.get(&blob.name).is_some(), "blob was not reserved!");
     self.exec_or_die(format!(
       "INSERT INTO blob_index (id, name, tag) VALUES ({}, x'{}', {})",
-      blob.id, blob.name.as_slice().to_hex(), 1u).as_slice());
+      blob.id, blob.name.as_slice().to_hex(), 1).as_slice());
     self.new_transaction();
   }
 
@@ -152,7 +152,7 @@ impl BlobIndex {
   }
 
   fn commit_blob(&mut self, blob: &BlobDesc) {
-    assert!(self.reserved.find(&blob.name).is_some(), "blob was not reserved!");
+    assert!(self.reserved.get(&blob.name).is_some(), "blob was not reserved!");
     self.exec_or_die(format!("UPDATE blob_index SET tag=0 WHERE id={}", blob.id).as_slice());
     self.new_transaction();
   }
@@ -165,18 +165,18 @@ impl Drop for BlobIndex {
 }
 
 impl MsgHandler<Msg, Reply> for BlobIndex {
-  fn handle(&mut self, msg: Msg, reply: |Reply|) {
+  fn handle(&mut self, msg: Msg, reply: Box<Fn(Reply)>) {
     match msg {
-      Reserve => {
-        return reply(Reserved(self.reserve()));
+      Msg::Reserve => {
+        return reply(Reply::Reserved(self.reserve()));
       },
-      InAir(blob) => {
+      Msg::InAir(blob) => {
         self.in_air(&blob);
-        return reply(CommitOK);
+        return reply(Reply::CommitOK);
       },
-      CommitDone(blob) => {
+      Msg::CommitDone(blob) => {
         self.commit_blob(&blob);
-        return reply(CommitOK);
+        return reply(Reply::CommitOK);
       }
     }
   }

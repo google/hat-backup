@@ -13,18 +13,20 @@
 // limitations under the License.
 
 #![crate_type="bin"]
-#![license = "ALv2"]
 
-#![warn(non_uppercase_statics)]
+#![warn(non_upper_case_globals)]
 #![warn(non_camel_case_types)]
-#![warn(unnecessary_qualification)]
+#![warn(unused_qualifications)]
 
-#![feature(globs)]
+#![feature(unboxed_closures)]
+
+#![feature(custom_attribute)]
+#![feature(plugin)]
+#![plugin(quickcheck_macros)]
 
 // Standard Rust imports
-extern crate debug;
-extern crate libc;
-extern crate serialize;
+// extern crate serialize;
+extern crate rand;
 extern crate test;
 extern crate time;
 
@@ -32,11 +34,14 @@ extern crate time;
 extern crate sodiumoxide;
 extern crate sqlite3;
 
+extern crate "rustc-serialize" as rustc_serialize;
+
 // Testing
 #[cfg(test)]
 extern crate quickcheck;
 
-use std::os;
+
+use std::env;
 
 mod callback_container;
 mod cumulative_counter;
@@ -60,28 +65,37 @@ mod key_store;
 mod snapshot_index;
 
 
-static MAX_BLOB_SIZE: uint = 4 * 1024 * 1024;
+static MAX_BLOB_SIZE: usize = 4 * 1024 * 1024;
 
 fn blob_dir() -> Path { Path::new("blobs") }
 
 
+#[cfg(not(test))]
 fn usage() {
-  println!("Usage: {} [snapshot|commit|checkout] name path", os::args()[0]);
+  println!("Usage: {} [snapshot|commit|checkout] name path", env::args().next().unwrap());
 }
 
+
+#[cfg(not(test))]
 fn license() {
   println!(include_str!("../../LICENSE"));
 }
 
 
-#[main]
+#[cfg(not(test))]
 fn main() {
   // Initialize sodium (must only be called once)
   sodiumoxide::init();
 
-  let args = os::args();
-  if args.len() == 2 {
-    let ref flag = args[1];
+  let mut args = env::args();
+
+  if args.len() < 2 {
+    return usage(); // There's not even a command here.
+  }
+  args.next(); // strip called name
+
+  if args.len() == 1 {
+    let ref flag = args.next().unwrap();
     if flag == &"--license".to_string() {
         license();
     }
@@ -92,14 +106,11 @@ fn main() {
     return;
   }
 
-  if args.len() < 2 {
-    return usage(); // There's not even a command here.
-  }
-  let ref cmd = args[1];
+  let ref cmd = args.next().unwrap();
 
-  if cmd == &"snapshot".to_string() && args.len() == 4 {
-    let ref name = args[2];  // used for naming the key index
-    let ref path = args[3];
+  if cmd == &"snapshot".to_string() && args.len() == 2 {
+    let ref name = args.next().unwrap();  // used for naming the key index
+    let ref path = args.next().unwrap();
 
     {
       let backend = blob_store::FileBackend::new(blob_dir());
@@ -116,9 +127,9 @@ fn main() {
     println!("Waiting for final flush...");
     return;
   }
-  else if cmd == &"checkout".to_string() && args.len() == 4 {
-    let ref name = args[2];  // used for naming the key index
-    let ref path = args[3];
+  else if cmd == &"checkout".to_string() && args.len() == 2 {
+    let ref name = args.next().unwrap();  // used for naming the key index
+    let ref path = args.next().unwrap();
 
     let backend = blob_store::FileBackend::new(blob_dir());
     let hat_opt = hat::Hat::open_repository(&Path::new("repo"), backend, MAX_BLOB_SIZE);
@@ -129,8 +140,9 @@ fn main() {
 
     family.checkout_in_dir(Path::new(path.clone()), None);
     return;
-  } else if cmd == &"commit".to_string() && args.len() == 3 {
-    let ref name = args[2];
+  }
+  else if cmd == &"commit".to_string() && args.len() == 1 {
+    let ref name = args.next().unwrap();
 
     let backend = blob_store::FileBackend::new(blob_dir());
     let hat_opt = hat::Hat::open_repository(&Path::new("repo"), backend, MAX_BLOB_SIZE);

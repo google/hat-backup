@@ -12,7 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::io::{Timer};
+use std::old_io::{Timer};
+use std::sync::mpsc::{Receiver};
 use std::time::duration::{Duration};
 
 pub struct PeriodicTimer {

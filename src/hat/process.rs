@@ -48,33 +48,41 @@
 /// last thing a handler does. The idiom `return reply(...)` is a simple way of guaranteeing this.
 ///
 /// A handler is allowed to call `reply()` **exactly** once. Not calling it or calling it multiple
-/// times will likely cause runtime failure when using `send_reply()`.
+/// times will likely cause runtime panicure when using `send_reply()`.
 
-pub struct Process<Msg, Reply, Handler>
+use std::thunk::Thunk;
+use std::thread;
+use std::sync::mpsc;
+
+
+pub struct Process<Msg, Reply>
 {
-  sender: SyncSender<(Msg, Option<Sender<Reply>>)>,
+  sender: mpsc::SyncSender<(Msg, Option<mpsc::Sender<Reply>>)>,
 }
 
 /// When cloning a `process` we clone the input-channel, allowing multiple threads to share the same
 /// `process`.
-impl <Msg: Send, Reply: Send, Handler> Clone
-  for Process<Msg, Reply, Handler> {
-  fn clone(&self) -> Process<Msg, Reply, Handler> {
+impl <Msg: Send, Reply: Send> Clone
+  for Process<Msg, Reply>
+{
+  fn clone(&self) -> Process<Msg, Reply> {
     Process{sender: self.sender.clone()}
   }
 }
 
 pub trait MsgHandler<Msg, Reply> {
-  fn handle(&mut self, msg: Msg, callback: |Reply|);
+  fn handle(&mut self, msg: Msg, callback: Box<Fn(Reply)>);
 }
 
-impl <Msg:Send, Reply:Send, Handler: MsgHandler<Msg, Reply>> Process<Msg, Reply, Handler>
+impl <Msg:'static + Send, Reply:'static + Send>
+  Process<Msg, Reply>
 {
 
   /// Create and start a new process using `handler`.
-  pub fn new(handler_proc: proc():Send -> Handler) -> Process<Msg, Reply, Handler> {
-
-    let (sender, receiver) = sync_channel(10);
+  pub fn new<H>(handler_proc: Thunk<'static, (), H>) -> Process<Msg, Reply>
+    where H: 'static + MsgHandler<Msg, Reply>
+  {
+    let (sender, receiver) = mpsc::sync_channel(10);
     let p = Process{sender: sender};
 
     p.start(receiver, handler_proc);
@@ -83,21 +91,22 @@ impl <Msg:Send, Reply:Send, Handler: MsgHandler<Msg, Reply>> Process<Msg, Reply,
   }
 
 
-  fn start(&self, receiver: Receiver<(Msg, Option<Sender<Reply>>)>,
-           handler_proc: proc():Send -> Handler)
+  fn start<H>(&self, receiver: mpsc::Receiver<(Msg, Option<mpsc::Sender<Reply>>)>,
+              handler_proc: Thunk<'static, (), H>)
+    where H: 'static + MsgHandler<Msg, Reply>
   {
-    spawn(proc() {
+    thread::spawn(move|| {
       // fork handler
-      let mut my_handler = handler_proc();
+      let mut my_handler = handler_proc.invoke(());
       loop {
-        match receiver.recv_opt() {
+        match receiver.recv() {
           Ok((msg, None)) => {
-            my_handler.handle(msg, |_r: Reply| {});
+            my_handler.handle(msg, Box::new(|_r: Reply| {}));
           },
           Ok((msg, Some(rep))) => {
-            my_handler.handle(msg, |r| { rep.send(r) });
+            my_handler.handle(msg, Box::new(move|r| { rep.send(r); }));
           },
-          Err(()) => break,
+          Err(_recv_error) => break,
         };
       };
     });
@@ -107,8 +116,8 @@ impl <Msg:Send, Reply:Send, Handler: MsgHandler<Msg, Reply>> Process<Msg, Reply,
   ///
   /// Will always wait for a reply from the receiving `process`.
   pub fn send_reply(&self, msg: Msg) -> Reply {
-    let (sender, receiver) = channel();
-    self.sender.send((msg, Some(sender)));
-    return receiver.recv();
+    let (sender, receiver) = mpsc::channel();
+    self.sender.send((msg, Some(sender))).ok();
+    return receiver.recv().unwrap();
   }
 }

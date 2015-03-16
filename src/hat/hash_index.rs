@@ -14,8 +14,9 @@
 
 //! Local state for known hashes and their external location (blob reference).
 
+use std::thunk::Thunk;
 use std::time::duration::{Duration};
-use serialize::hex::{ToHex};
+use rustc_serialize::hex::{ToHex};
 
 use callback_container::{CallbackContainer};
 use cumulative_counter::{CumulativeCounter};
@@ -24,7 +25,8 @@ use process::{Process, MsgHandler};
 
 use sqlite3::database::{Database};
 use sqlite3::cursor::{Cursor};
-use sqlite3::types::{SQLITE_DONE, SQLITE_OK, SQLITE_ROW, Integer64, Blob};
+use sqlite3::types::ResultCode::{SQLITE_DONE, SQLITE_OK, SQLITE_ROW};
+use sqlite3::BindArg::{Integer64, Blob};
 use sqlite3::{open};
 
 use periodic_timer::{PeriodicTimer};
@@ -32,11 +34,11 @@ use periodic_timer::{PeriodicTimer};
 use sodiumoxide::crypto::hash::{sha512};
 
 
-pub type HashIndexProcess = Process<Msg, Reply, HashIndex>;
+pub type HashIndexProcess = Process<Msg, Reply>;
 
 
 /// A wrapper around Hash digests.
-#[deriving(Clone, Show, Hash, Eq, PartialEq)]
+#[derive(Clone, Debug, Hash, Eq, PartialEq)]
 pub struct Hash{
   pub bytes: Vec<u8>,
 }
@@ -45,13 +47,13 @@ impl Hash {
   /// Computes `hash(text)` and stores this digest as the `bytes` field in a new `Hash` structure.
   pub fn new(text: &[u8]) -> Hash {
     let sha512::Digest(digest_bytes) = sha512::hash(text);
-    Hash{bytes: digest_bytes.slice(0, sha512::HASHBYTES).into_vec()}
+    Hash{bytes: digest_bytes.slice(0, sha512::HASHBYTES).iter().map(|&x| x).collect()}
   }
 }
 
 
 /// An entry that can be inserted into the hash index.
-#[deriving(Clone)]
+#[derive(Clone)]
 pub struct HashEntry{
 
   /// The hash of this entry (unique among all entries in the index).
@@ -101,7 +103,7 @@ pub enum Msg {
 
   /// Install a "on-commit" handler to be called after `Hash` is committed.
   /// Returns `CallbackRegistered` or `HashNotKnown`.
-  CallAfterHashIsComitted(Hash, proc():Send),
+  CallAfterHashIsComitted(Hash, Thunk<'static>),
 
   /// Flush the hash index to clear internal buffers and commit the underlying database.
   Flush,
@@ -123,7 +125,7 @@ pub enum Reply {
 }
 
 
-#[deriving(Clone)]
+#[derive(Clone)]
 struct QueueEntry {
   id: i64,
   level: i64,
@@ -134,7 +136,7 @@ struct QueueEntry {
 pub struct HashIndex {
   dbh: Database,
 
-  id_counter: CumulativeCounter<i64>,
+  id_counter: CumulativeCounter,
 
   queue: UniquePriorityQueue<i64, Vec<u8>, QueueEntry>,
 
@@ -150,13 +152,13 @@ impl HashIndex {
     let mut hi = match open(path.as_slice()) {
       Ok(dbh) => {
         HashIndex{dbh: dbh,
-                  id_counter: CumulativeCounter::new(0i64),
+                  id_counter: CumulativeCounter::new(0),
                   queue: UniquePriorityQueue::new(),
                   callbacks: CallbackContainer::new(),
                   flush_timer: PeriodicTimer::new(Duration::seconds(10)),
         }
       },
-      Err(err) => fail!(err.to_string()),
+      Err(err) => panic!("{:?}", err),
     };
     hi.exec_or_die("CREATE TABLE IF NOT EXISTS
                   hash_index (id        INTEGER PRIMARY KEY,
@@ -183,17 +185,17 @@ impl HashIndex {
   fn exec_or_die(&mut self, sql: &str) {
     match self.dbh.exec(sql) {
       Ok(true) => (),
-      Ok(false) => fail!("exec: {}", self.dbh.get_errmsg()),
-      Err(msg) => fail!(format!("exec: {}, {}\nIn sql: '{}'\n",
-                                msg.to_string(), self.dbh.get_errmsg(), sql))
+      Ok(false) => panic!("exec: {}", self.dbh.get_errmsg()),
+      Err(msg) => panic!("exec: {:?}, {:?}\nIn sql: '{}'\n",
+                         msg, self.dbh.get_errmsg(), sql)
     }
   }
 
   fn prepare_or_die<'a>(&'a self, sql: &str) -> Cursor<'a> {
     match self.dbh.prepare(sql, &None) {
       Ok(s)  => s,
-      Err(x) => fail!(format!("sqlite error: {} ({:?})",
-                              self.dbh.get_errmsg(), x)),
+      Err(x) => panic!("sqlite error: {} ({:?})",
+                       self.dbh.get_errmsg(), x),
     }
   }
 
@@ -213,8 +215,8 @@ impl HashIndex {
       let mut result = result;
       let id = result.get_int(0) as i64;
       let level = result.get_int(1) as i64;
-      let payload = result.get_blob(2).unwrap_or([]).into_vec();
-      let persistent_ref = result.get_blob(3).unwrap_or([]).into_vec();
+      let payload: Vec<u8> = result.get_blob(2).unwrap_or(&[]).iter().map(|&x| x).collect();
+      let persistent_ref: Vec<u8> = result.get_blob(3).unwrap_or(&[]).iter().map(|&x| x).collect();
       QueueEntry{id: id, level: level,
                  payload: if payload.len() == 0 { None }
                           else {Some(payload) },
@@ -271,14 +273,14 @@ impl HashIndex {
     }
   }
 
-  fn register_hash_callback(&mut self, hash: &Hash, callback: proc():Send) -> bool {
+  fn register_hash_callback(&mut self, hash: &Hash, callback: Thunk<'static>) -> bool {
     assert!(hash.bytes.len() > 0);
 
     if self.queue.find_value_of_key(&hash.bytes).is_some() {
       self.callbacks.add(hash.bytes.clone(), callback);
     } else if self.locate(hash).is_some() {
       // Hash was already committed
-      callback();
+      callback.invoke(());
     } else {
       // We cannot register this callback, since the hash doesn't exist anywhere
       return false
@@ -299,7 +301,7 @@ impl HashIndex {
           assert_eq!(id, queue_entry.id);
 
           let child_refs_opt = queue_entry.payload;
-          let payload = child_refs_opt.unwrap_or_else(|| b"".into_vec());
+          let payload = child_refs_opt.unwrap_or_else(|| vec!());
           let level = queue_entry.level;
           let persistent_ref = queue_entry.persistent_ref.expect("hash was comitted");
 
@@ -314,7 +316,7 @@ impl HashIndex {
           assert_eq!(SQLITE_OK, insert_stm.clear_bindings());
           assert_eq!(SQLITE_OK, insert_stm.reset());
 
-          self.callbacks.allow_flush_of(hash_bytes);
+          self.callbacks.allow_flush_of(&hash_bytes);
         },
       }
     }
@@ -362,69 +364,70 @@ impl HashIndex {
 
 
 impl MsgHandler<Msg, Reply> for HashIndex {
-  fn handle(&mut self, msg: Msg, reply: |Reply|) {
+  fn handle(&mut self, msg: Msg, reply: Box<Fn(Reply)>) {
     match msg {
 
-      HashExists(hash) => {
+      Msg::HashExists(hash) => {
         assert!(hash.bytes.len() > 0);
         return reply(match self.locate(&hash) {
-          Some(_) => HashKnown,
-          None => HashNotKnown,
+          Some(_) => Reply::HashKnown,
+          None => Reply::HashNotKnown,
         });
       },
 
-      FetchPayload(hash) => {
+      Msg::FetchPayload(hash) => {
         assert!(hash.bytes.len() > 0);
         return reply(match self.locate(&hash) {
-          Some(ref queue_entry) => Payload(queue_entry.payload.clone()),
-          None => HashNotKnown,
+          Some(ref queue_entry) => Reply::Payload(queue_entry.payload.clone()),
+          None => Reply::HashNotKnown,
         });
       },
 
-      FetchPersistentRef(hash) => {
+      Msg::FetchPersistentRef(hash) => {
         assert!(hash.bytes.len() > 0);
         return reply(match self.locate(&hash) {
-          Some(ref queue_entry) if queue_entry.persistent_ref.is_none() => Retry,
-          Some(queue_entry) => PersistentRef(queue_entry.persistent_ref.expect("persistent_ref")),
-          None => HashNotKnown,
+          Some(ref queue_entry) if queue_entry.persistent_ref.is_none() => Reply::Retry,
+          Some(queue_entry) =>
+            Reply::PersistentRef(queue_entry.persistent_ref.expect("persistent_ref")),
+          None => Reply::HashNotKnown,
         });
       },
 
-      Reserve(hash_entry) => {
+      Msg::Reserve(hash_entry) => {
         assert!(hash_entry.hash.bytes.len() > 0);
         // To avoid unused IO, we store entries in-memory until committed to persistent storage.
         // This allows us to continue after a crash without needing to scan through and delete
         // uncommitted entries.
         return reply(match self.locate(&hash_entry.hash) {
-          Some(_) => HashKnown,
-          None => { self.reserve(hash_entry); ReserveOK },
+          Some(_) => Reply::HashKnown,
+          None => { self.reserve(hash_entry); Reply::ReserveOK },
         });
       },
 
-      UpdateReserved(hash_entry) => {
+      Msg::UpdateReserved(hash_entry) => {
         assert!(hash_entry.hash.bytes.len() > 0);
         self.update_reserved(hash_entry);
-        return reply(ReserveOK);
+        return reply(Reply::ReserveOK);
       }
 
-      Commit(hash, persistent_ref) => {
+      Msg::Commit(hash, persistent_ref) => {
         assert!(hash.bytes.len() > 0);
         self.commit(&hash, &persistent_ref);
-        return reply(CommitOK);
+        return reply(Reply::CommitOK);
       },
 
-      CallAfterHashIsComitted(hash, callback) => {
+      Msg::CallAfterHashIsComitted(hash, callback) => {
         assert!(hash.bytes.len() > 0);
         if self.register_hash_callback(&hash, callback) {
-          return reply(CallbackRegistered);
+          return reply(Reply::CallbackRegistered);
         } else {
-          return reply(HashNotKnown);
+          return reply(Reply::HashNotKnown);
         }
       },
 
-      Flush => {
+      Msg::Flush => {
         self.flush();
-        return reply(CommitOK);
+        return reply(Reply::CommitOK);
       }
     }
   }

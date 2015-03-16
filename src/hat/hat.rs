@@ -14,9 +14,10 @@
 
 //! High level Hat API
 
-use serialize::{json};
-use serialize::json::{ToJson};
-use std::collections::treemap::{TreeMap};
+use rustc_serialize::{json};
+use rustc_serialize::json::{ToJson};
+use std::thunk::Thunk;
+use std::collections::{BTreeMap};
 
 use process::{Process};
 
@@ -33,9 +34,10 @@ use snapshot_index;
 use hash_tree;
 use listdir;
 
-use std::io;
-use std::io::{Reader, IoResult, USER_DIR, TypeDirectory, TypeSymlink, TypeFile, FileStat};
-use std::io::fs::{lstat, File, mkdir_recursive};
+use std::old_io;
+use std::old_io::{Reader, IoResult, USER_DIR, FileStat};
+use std::old_io::FileType::{Directory, Symlink, RegularFile};
+use std::old_io::fs::{lstat, File, mkdir_recursive};
 use std::sync;
 use std::sync::atomic;
 
@@ -48,7 +50,7 @@ pub struct Hat<B> {
   blob_index: BlobIndexProcess,
   hash_index: HashIndexProcess,
   backend: B,
-  max_blob_size: uint,
+  max_blob_size: usize,
 }
 
 fn concat_filename(a: &Path, b: String) -> String {
@@ -69,16 +71,16 @@ fn hash_index_name(root: &Path) -> String {
   concat_filename(root, "hash_index.sqlite3".to_string())
 }
 
-impl <B: BlobStoreBackend + Clone + Send> Hat<B> {
-  pub fn open_repository(repository_root: &Path, backend: B, max_blob_size: uint)
+impl <B: 'static + BlobStoreBackend + Clone + Send> Hat<B> {
+  pub fn open_repository(repository_root: &Path, backend: B, max_blob_size: usize)
                         -> Option<Hat<B>> {
     repository_root.as_str().map(|_| {
       let snapshot_index_path = snapshot_index_name(repository_root);
       let blob_index_path = blob_index_name(repository_root);
       let hash_index_path = hash_index_name(repository_root);
-      let siP = Process::new(proc() { SnapshotIndex::new(snapshot_index_path) });
-      let biP = Process::new(proc() { BlobIndex::new(blob_index_path) });
-      let hiP = Process::new(proc() { HashIndex::new(hash_index_path) });
+      let siP = Process::new(Thunk::new(move|| { SnapshotIndex::new(snapshot_index_path) }));
+      let biP = Process::new(Thunk::new(move|| { BlobIndex::new(blob_index_path) }));
+      let hiP = Process::new(Thunk::new(move|| { HashIndex::new(hash_index_path) }));
       Hat{repository_root: repository_root.clone(),
           snapshot_index: siP,
           hash_index: hiP,
@@ -89,7 +91,7 @@ impl <B: BlobStoreBackend + Clone + Send> Hat<B> {
     })
   }
 
-  pub fn open_family(&self, name: String) -> Option<Family<B>> {
+  pub fn open_family(&self, name: String) -> Option<Family> {
     // We setup a standard pipeline of processes:
     // KeyStore -> KeyIndex
     //          -> HashIndex
@@ -98,14 +100,14 @@ impl <B: BlobStoreBackend + Clone + Send> Hat<B> {
     let local_blob_index = self.blob_index.clone();
     let local_backend = self.backend.clone();
     let local_max_blob_size = self.max_blob_size;
-    let bsP = Process::new(proc() {
-      BlobStore::new(local_blob_index, local_backend, local_max_blob_size) });
+    let bsP = Process::new(Thunk::new(move|| {
+      BlobStore::new(local_blob_index, local_backend, local_max_blob_size) }));
 
     let key_index_path = concat_filename(&self.repository_root, name.clone());
-    let kiP = Process::new(proc() { KeyIndex::new(key_index_path) });
+    let kiP = Process::new(Thunk::new(move|| { KeyIndex::new(key_index_path) }));
 
     let local_ks = KeyStore::new(kiP.clone(), self.hash_index.clone(), bsP.clone());
-    let ksP = Process::new(proc() { local_ks });
+    let ksP = Process::new(Thunk::new(move|| { local_ks }));
 
     let ks = KeyStore::new(kiP, self.hash_index.clone(), bsP);
     Some(Family{name: name, key_store: ks, key_store_process: ksP})
@@ -120,8 +122,8 @@ impl <B: BlobStoreBackend + Clone + Send> Hat<B> {
     family.flush();
 
     // Update to snapshot index:
-    self.snapshot_index.send_reply(snapshot_index::Add(family_name, hash, top_ref));
-    self.snapshot_index.send_reply(snapshot_index::Flush);
+    self.snapshot_index.send_reply(snapshot_index::Msg::Add(family_name, hash, top_ref));
+    self.snapshot_index.send_reply(snapshot_index::Msg::Flush);
   }
 }
 
@@ -134,29 +136,29 @@ struct FileEntry {
 
 impl FileEntry {
   fn new(full_path: Path,
-         parent: Option<Vec<u8>>) -> Result<FileEntry, io::IoError> {
+         parent: Option<Vec<u8>>) -> Result<FileEntry, old_io::IoError> {
     let filename_opt = full_path.filename();
     if filename_opt.is_some() {
       lstat(&full_path).map(|st| {
         FileEntry{
-          name: filename_opt.unwrap().into_vec(),
+          name: filename_opt.unwrap().to_vec(),
           parent_id: parent.clone(),
           stat: st,
           full_path: full_path.clone()}
       })
     }
-    else { Err(io::IoError{kind: io::OtherIoError,
-                           desc: "Could not parse filename.",
-                           detail: None }) }
+    else { Err(old_io::IoError{kind: old_io::OtherIoError,
+                               desc: "Could not parse filename.",
+                               detail: None }) }
   }
 
   fn file_iterator(&self) -> IoResult<FileIterator> {
     FileIterator::new(&self.full_path)
   }
 
-  fn is_directory(&self) -> bool { self.stat.kind == TypeDirectory }
-  fn is_symlink(&self) -> bool { self.stat.kind == TypeSymlink }
-  fn is_file(&self) -> bool { self.stat.kind == TypeFile }
+  fn is_directory(&self) -> bool { self.stat.kind == Directory }
+  fn is_symlink(&self) -> bool { self.stat.kind == Symlink }
+  fn is_file(&self) -> bool { self.stat.kind == RegularFile }
 }
 
 impl Clone for FileEntry {
@@ -181,9 +183,9 @@ impl KeyEntry<FileEntry> for FileEntry {
     self.name.clone()
   }
   fn id(&self) -> Option<Vec<u8>> {
-    Some(format!("d{:u}i{:u}",
+    Some(format!("d{}i{}",
                  self.stat.unstable.device,
-                 self.stat.unstable.inode).as_bytes().into_vec())
+                 self.stat.unstable.inode).as_bytes().to_vec())
   }
   fn parent_id(&self) -> Option<Vec<u8>> {
     self.parent_id.clone()
@@ -231,27 +233,29 @@ impl FileIterator {
   }
 }
 
-impl Iterator<Vec<u8>> for FileIterator {
+impl Iterator for FileIterator {
+  type Item = Vec<u8>;
+
   fn next(&mut self) -> Option<Vec<u8>> {
-    let mut buf = Vec::from_elem(128*1024, 0u8);
+    let mut buf = vec![0u8; 128*1024];
     match self.file.read(buf.as_mut_slice()) {
       Err(_) => None,
-      Ok(size) => Some(buf.slice_to(size).into_vec()),
+      Ok(size) => Some(buf.slice_to(size).to_vec()),
     }
   }
 }
 
 
-#[deriving(Clone)]
-struct InsertPathHandler<B:'static> {
+#[derive(Clone)]
+struct InsertPathHandler {
   count: sync::Arc<sync::atomic::AtomicInt>,
   last_print: sync::Arc<sync::Mutex<time::Timespec>>,
-  key_store: KeyStoreProcess<FileEntry, FileIterator, B>,
+  key_store: KeyStoreProcess<FileEntry, FileIterator>,
 }
 
-impl <B> InsertPathHandler<B> {
-  pub fn new(key_store: KeyStoreProcess<FileEntry, FileIterator, B>)
-             -> InsertPathHandler<B> {
+impl InsertPathHandler {
+  pub fn new(key_store: KeyStoreProcess<FileEntry, FileIterator>)
+             -> InsertPathHandler {
     InsertPathHandler{
       count: sync::Arc::new(sync::atomic::AtomicInt::new(0)),
       last_print: sync::Arc::new(sync::Mutex::new(time::now().to_timespec())),
@@ -260,13 +264,13 @@ impl <B> InsertPathHandler<B> {
   }
 }
 
-impl <B: BlobStoreBackend + Clone + Send> listdir::PathHandler<Option<Vec<u8>>>
-  for InsertPathHandler<B> {
+impl listdir::PathHandler<Option<Vec<u8>>> for InsertPathHandler
+{
   fn handle_path(&self, parent: Option<Vec<u8>>, path: Path) -> Option<Option<Vec<u8>>> {
-    let count = self.count.fetch_add(1, atomic::SeqCst) + 1;
+    let count = self.count.fetch_add(1, atomic::Ordering::SeqCst) + 1;
 
     if count % 16 == 0 {  // don't hammer the mutex
-      let mut guarded_last_print = self.last_print.lock();
+      let mut guarded_last_print = self.last_print.lock().unwrap();
       let now = time::now().to_timespec();
       if guarded_last_print.sec <= now.sec - 1 {
         println!("#{}: {}", count, path.display());
@@ -286,23 +290,22 @@ impl <B: BlobStoreBackend + Clone + Send> listdir::PathHandler<Option<Vec<u8>>>
         let is_directory = fileEntry.is_directory();
         let local_root = path;
         let local_fileEntry = fileEntry.clone();
-        let create_file_it = proc() {
+        let create_file_it = Thunk::new(move|| {
           match local_fileEntry.file_iterator() {
             Err(e) => {println!("Skipping '{}': {}", local_root.display(), e.to_string());
                        None},
             Ok(it) => { Some(it) }
           }
-        };
+        });
         let create_file_it_opt = if is_directory { None }
                                  else { Some(create_file_it) };
 
-        match self.key_store.send_reply(
-          key_store::Insert(fileEntry, create_file_it_opt))
+        match self.key_store.send_reply(key_store::Msg::Insert(fileEntry, create_file_it_opt))
         {
-          key_store::Id(id) => {
+          key_store::Reply::Id(id) => {
             if is_directory { return Some(Some(id)) }
           },
-          _ => fail!("Unexpected reply from key store."),
+          _ => panic!("Unexpected reply from key store."),
         }
       }
     }
@@ -312,59 +315,61 @@ impl <B: BlobStoreBackend + Clone + Send> listdir::PathHandler<Option<Vec<u8>>>
 }
 
 
-fn try_a_few_times_then_fail(f: || -> bool, msg: &str) {
-  for i in range(1u, 5) {
+fn try_a_few_times_then_panic<F>(f: F, msg: &str) where F: FnMut() -> bool {
+  let mut f = f;
+  for i in range(1 as i32, 5) {
     if f() { return }
   }
-  fail!(msg.to_string());
+  panic!(msg.to_string());
 }
 
 
-struct Family<B> {
+struct Family {
   name: String,
-  key_store: KeyStore<FileEntry, FileIterator, B>,
-  key_store_process: KeyStoreProcess<FileEntry, FileIterator, B>,
+  key_store: KeyStore<FileEntry>,
+  key_store_process: KeyStoreProcess<FileEntry, FileIterator>,
 }
 
-impl <B: BlobStoreBackend + Clone + Send> Family<B> {
-
+impl Family
+{
   pub fn snapshot_dir(&self, dir: Path) {
     let mut handler = InsertPathHandler::new(self.key_store_process.clone());
     listdir::iterate_recursively((Path::new(dir.clone()), None), &mut handler);
   }
 
   pub fn flush(&self) {
-    self.key_store_process.send_reply(key_store::Flush);
+    self.key_store_process.send_reply(key_store::Msg::Flush);
   }
 
-  fn write_file_chunks<B: hash_tree::HashTreeBackend + Clone>(&self, fd: &mut File,
-                                                              tree: hash_tree::ReaderResult<B>) {
+  fn write_file_chunks<HTB: hash_tree::HashTreeBackend + Clone>(
+    &self, fd: &mut File, tree: hash_tree::ReaderResult<HTB>)
+  {
     let mut it = match tree {
-      hash_tree::NoData => fail!("Trying to read data where none exist."),
-      hash_tree::SingleBlock(chunk) => {
-        try_a_few_times_then_fail(|| fd.write(chunk.as_slice()).is_ok(),
-                                  "Could not write chunk.");
+      hash_tree::ReaderResult::NoData => panic!("Trying to read data where none exist."),
+      hash_tree::ReaderResult::SingleBlock(chunk) => {
+        try_a_few_times_then_panic(|| fd.write(chunk.as_slice()).is_ok(),
+                                   "Could not write chunk.");
         return;
       },
-      hash_tree::Tree(it) => it,
+      hash_tree::ReaderResult::Tree(it) => it,
     };
     // We have a tree
     for chunk in it {
-      try_a_few_times_then_fail(|| fd.write(chunk.as_slice()).is_ok(), "Could not write chunk.");
+      try_a_few_times_then_panic(|| fd.write(chunk.as_slice()).is_ok(), "Could not write chunk.");
     }
-    try_a_few_times_then_fail(|| fd.flush().is_ok(), "Could not flush file.");
+    try_a_few_times_then_panic(|| fd.flush().is_ok(), "Could not flush file.");
   }
 
   pub fn checkout_in_dir(&self, output_dir: Path, dir_id: Option<Vec<u8>>) {
     let mut path = output_dir;
     for (id, name, _, _, _, hash, _, data_res) in self.listFromKeyStore(dir_id).into_iter() {
       // Extend directory with filename:
-      path.push(name);
+      path.push(name.clone());
 
       if hash.len() == 0 {
         // This is a directory, recurse!
         mkdir_recursive(&path, USER_DIR).unwrap();
-        self.checkout_in_dir(path.clone(), Some(id));
+        self.checkout_in_dir(path.clone(), Some(id.clone()));
       } else {
         // This is a file, write it
         let mut fd = File::create(&path).unwrap();
@@ -375,10 +380,10 @@ impl <B: BlobStoreBackend + Clone + Send> Family<B> {
     }
   }
 
-  pub fn listFromKeyStore(&self, dir_id: Option<Vec<u8>>) -> Vec<key_store::DirElem<B>> {
-    let listing = match self.key_store_process.send_reply(key_store::ListDir(dir_id.clone())) {
-      key_store::ListResult(ls) => ls,
-      _ => fail!("Unexpected result from key store."),
+  pub fn listFromKeyStore(&self, dir_id: Option<Vec<u8>>) -> Vec<key_store::DirElem> {
+    let listing = match self.key_store_process.send_reply(key_store::Msg::ListDir(dir_id.clone())) {
+      key_store::Reply::ListResult(ls) => ls,
+      _ => panic!("Unexpected result from key store."),
     };
 
     return listing;
@@ -391,12 +396,12 @@ impl <B: BlobStoreBackend + Clone + Send> Family<B> {
   }
 
   pub fn commit_to_tree(&mut self,
-                        tree: &mut hash_tree::SimpleHashTreeWriter<key_store::HashStoreBackend<B>>,
+                        tree: &mut hash_tree::SimpleHashTreeWriter<key_store::HashStoreBackend>,
                         dir_id: Option<Vec<u8>>) {
     let mut keys = Vec::new();
 
     for (id, name, ctime, mtime, atime, hash, data_ref, _) in self.listFromKeyStore(dir_id).into_iter() {
-      let mut m = TreeMap::new();
+      let mut m = BTreeMap::new();
       m.insert("id".to_string(), id.to_json());
       m.insert("name".to_string(), name.to_json());
       m.insert("ct".to_string(), ctime.to_json());
@@ -416,17 +421,17 @@ impl <B: BlobStoreBackend + Clone + Send> Family<B> {
         m.insert("dir_ref".to_string(), dir_ref.to_json());
       }
 
-      keys.push(json::Object(m).to_json());
+      keys.push(json::Json::Object(m).to_json());
 
       // Flush to our own tree when we have a decent amount.
       // The tree prevents large directories from clogging ram.
       if keys.len() >= 1000 {
-        tree.append(keys.to_json().to_string().as_bytes().into_vec());
+        tree.append(keys.to_json().to_string().as_bytes().to_vec());
         keys.clear();
       }
     }
     if keys.len() > 0 {
-      tree.append(keys.to_json().to_string().as_bytes().into_vec());
+      tree.append(keys.to_json().to_string().as_bytes().to_vec());
     }
   }
 

@@ -2,31 +2,88 @@
 name = "hat-backup"
 version = "0.0.1-pre"
 dependencies = [
- "quickcheck 0.1.2 (git+https://github.com/BurntSushi/quickcheck#328770023126c17a485dd013e537c8c34289ee2d)",
- "sodiumoxide 0.0.0 (git+https://github.com/dnaq/sodiumoxide#9909e2066c8fd626694fe4ce8340843955c5c0bd)",
- "sqlite3 0.1.0 (git+https://github.com/linuxfood/rustsqlite#0d0891f29e4725323c2ccd561feb0d628b041283)",
+ "quickcheck 0.2.3 (registry+https://github.com/rust-lang/crates.io-index)",
+ "quickcheck_macros 0.2.3 (registry+https://github.com/rust-lang/crates.io-index)",
+ "rand 0.2.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "rustc-serialize 0.3.1 (git+https://github.com/rust-lang/rustc-serialize)",
+ "sodiumoxide 0.0.1 (git+https://github.com/dnaq/sodiumoxide)",
+ "sqlite3 0.1.0 (git+https://github.com/linuxfood/rustsqlite)",
+ "time 0.1.19 (git+https://github.com/rust-lang/time)",
 ]
 
 [[package]]
-name = "quickcheck"
+name = "gcc"
+version = "0.3.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[package]]
+name = "libc"
 version = "0.1.2"
-source = "git+https://github.com/BurntSushi/quickcheck#328770023126c17a485dd013e537c8c34289ee2d"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[package]]
+name = "libsodium-sys"
+version = "0.0.1"
+source = "git+https://github.com/dnaq/sodiumoxide#c383b509af2d6accf066f38c1ae8d244264da667"
+
+[[package]]
+name = "log"
+version = "0.2.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[package]]
+name = "quickcheck"
+version = "0.2.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
 dependencies = [
- "quickcheck_macros 0.1.2 (git+https://github.com/BurntSushi/quickcheck#328770023126c17a485dd013e537c8c34289ee2d)",
+ "log 0.2.5 (registry+https://github.com/rust-lang/crates.io-index)",
+ "rand 0.2.0 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
 [[package]]
 name = "quickcheck_macros"
-version = "0.1.2"
-source = "git+https://github.com/BurntSushi/quickcheck#328770023126c17a485dd013e537c8c34289ee2d"
+version = "0.2.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+dependencies = [
+ "quickcheck 0.2.3 (registry+https://github.com/rust-lang/crates.io-index)",
+]
+
+[[package]]
+name = "rand"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+dependencies = [
+ "libc 0.1.2 (registry+https://github.com/rust-lang/crates.io-index)",
+ "log 0.2.5 (registry+https://github.com/rust-lang/crates.io-index)",
+]
+
+[[package]]
+name = "rustc-serialize"
+version = "0.3.1"
+source = "git+https://github.com/rust-lang/rustc-serialize#392b17bdb00acce64703daf4d8c13bfa5c2f4812"
 
 [[package]]
 name = "sodiumoxide"
-version = "0.0.0"
-source = "git+https://github.com/dnaq/sodiumoxide#9909e2066c8fd626694fe4ce8340843955c5c0bd"
+version = "0.0.1"
+source = "git+https://github.com/dnaq/sodiumoxide#c383b509af2d6accf066f38c1ae8d244264da667"
+dependencies = [
+ "libsodium-sys 0.0.1 (git+https://github.com/dnaq/sodiumoxide)",
+]
 
 [[package]]
 name = "sqlite3"
 version = "0.1.0"
-source = "git+https://github.com/linuxfood/rustsqlite#0d0891f29e4725323c2ccd561feb0d628b041283"
+source = "git+https://github.com/linuxfood/rustsqlite#7d91c729ad3ddfb9b418d26382ebd60bfcd22c42"
+dependencies = [
+ "log 0.2.5 (registry+https://github.com/rust-lang/crates.io-index)",
+]
+
+[[package]]
+name = "time"
+version = "0.1.19"
+source = "git+https://github.com/rust-lang/time#36f32680ecba4ac75360de7f228349db1d0c384a"
+dependencies = [
+ "gcc 0.3.1 (registry+https://github.com/rust-lang/crates.io-index)",
+ "libc 0.1.2 (registry+https://github.com/rust-lang/crates.io-index)",
+]
 

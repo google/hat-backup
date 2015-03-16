@@ -12,51 +12,60 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::treemap::{TreeMap};
-use std::num::{Bounded};
+use std::collections::{BTreeMap};
+use std::collections::btree_map;
 
 
 pub struct OrderedCollection<K, V> {
-  map: TreeMap<K, V>
+  map: BTreeMap<K, V>
 }
 
-impl <K: Clone + Ord + Bounded, V: Clone> OrderedCollection<K, V> {
+impl <K: Clone + Ord, V> OrderedCollection<K, V> {
 
   pub fn new() -> OrderedCollection<K, V> {
-    OrderedCollection{map: TreeMap::new()}
+    OrderedCollection{map: BTreeMap::new()}
   }
 
   pub fn insert(&mut self, k: K, v: V) {
-    self.update_value(k, |v_opt| match v_opt {
-      Some(_) => fail!("Key already exists."),
-      None => v.clone(),
+    self.update_value(k, move|v_opt| match v_opt {
+      Some(_) => panic!("Key already exists."),
+      None => v,
     });
   }
 
-  pub fn update_value(&mut self, k: K, f: |Option<&V>| -> V) {
-    let v_opt = self.map.find(&k).map(|v| v.clone());
-    self.map.insert(k, f(v_opt.as_ref()));
+  pub fn update_value<F>(&mut self, k: K, f: F) where F: FnOnce(Option<&V>) -> V {
+    match self.map.entry(k) {
+      btree_map::Entry::Occupied(mut entry) => {
+        let new_v = f(Some(entry.get()));
+        entry.insert(new_v);
+      },
+      btree_map::Entry::Vacant(space) => {
+        space.insert(f(None));
+      }
+    }
   }
 
   pub fn pop(&mut self, k: &K) -> Option<V> {
-    self.map.pop(k)
+    self.map.remove(k)
   }
 
   pub fn find<'a>(&'a self, k: &K) -> Option<&'a V> {
-    self.map.find(k)
+    self.map.get(k)
   }
 
   pub fn find_min<'a>(&'a self) -> Option<(&'a K, &'a V)> {
-    self.map.lower_bound(&Bounded::min_value()).next()
+    self.map.iter().next()
   }
 
-  pub fn pop_min_when(&mut self, ready: |&K, &V| -> bool) -> Option<(K, V)> {
+  pub fn pop_min_when<F>(&mut self, ready: F) -> Option<(K, V)>
+    where F: Fn(&K, &V) -> bool
+  {
     let k_opt = self.find_min().and_then(|(k, v)| if ready(k, v) { Some(k.clone()) } else { None });
     k_opt.map(|k| { let v = self.pop(&k).unwrap();
                     (k, v) })
   }
 
-  pub fn len(&self) -> uint {
+  pub fn len(&self) -> usize {
     self.map.len()
   }
 

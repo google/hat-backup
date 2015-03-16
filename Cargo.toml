@@ -11,15 +11,21 @@ path = "src/hat/main.rs"
 name = "hat-lib"
 path = "src/hat/lib.rs"
 
-[dependencies.quickcheck]
-git = "https://github.com/BurntSushi/quickcheck"
+[dependencies]
+rand = "*"
+quickcheck = "*"
+quickcheck_macros = "*"
+
+[dependencies.rustc-serialize]
+git = "https://github.com/rust-lang/rustc-serialize"
+
+[dependencies.time]
+git = "https://github.com/rust-lang/time"
 
 [dependencies.sodiumoxide]
-version = "0.0.0"
 git = "https://github.com/dnaq/sodiumoxide"
 
 [dependencies.sqlite3]
-version = "0.1.0"
 git = "https://github.com/linuxfood/rustsqlite"
 
 

@@ -14,68 +14,17 @@
 
 //! Helpers for reading directory structures from the local filesystem.
 
+use std::path::PathBuf;
+use std::fs::PathExt;
+use std::ffi::{self, CString};
+
+use std::old_io::FileType::{Directory};
+use std::old_io::fs::{lstat};
+
+use std::fs::{read_dir};
+
 use std::sync;
-use std::os::{last_os_error};
-use std::io::{TypeDirectory};
-use std::io::fs::{lstat};
-
-use std::c_str::CString;
-use libc::funcs::posix88::dirent;
-use libc::types::common::posix88::{DIR,dirent_t};
-use libc::types::os::arch::c95::c_char;
-use libc::{c_int};
-
-
-pub struct DirIterator {
-  fd: *mut DIR,
-}
-
-impl DirIterator {
-  pub fn new(path: Path) -> Result<DirIterator, String> {
-    let fd = path.with_c_str(|c_str| unsafe { dirent::opendir(c_str) });
-
-    if fd as int > 0 { Ok(DirIterator{fd:fd}) }
-    else { Err(last_os_error()) }
-  }
-
-  fn read(&mut self) -> String {
-    extern {
-      fn rust_dirent_t_size() -> c_int;
-      fn rust_list_dir_val(ptr: *mut dirent_t) -> *const c_char;
-    }
-
-    let mut entry_ptr = 0 as *mut dirent_t;
-
-    let size = unsafe { rust_dirent_t_size() };
-    let mut buf = Vec::<u8>::with_capacity(size as uint);
-    let buf_ptr = buf.as_mut_ptr() as *mut dirent_t;
-
-    let retval = unsafe { dirent::readdir_r(self.fd, buf_ptr, &mut entry_ptr) };
-
-    if retval == 0 && !entry_ptr.is_null() {
-      let cstr = unsafe { CString::new(rust_list_dir_val(entry_ptr), false) };
-      cstr.as_str().expect("Path not UTF8.").into_string()
-    } else { "".to_string() }
-
-  }
-
-}
-
-impl Drop for DirIterator {
-  fn drop(&mut self) {
-    unsafe {
-      dirent::closedir(self.fd)
-    };
-  }
-}
-
-impl Iterator<String> for DirIterator {
-  fn next(&mut self) -> Option<String> {
-    let name = self.read();
-    if name.len() == 0 { None }
-    else { Some(name) }
-  }
-}
+use std::sync::mpsc;
 
 
 pub trait PathHandler<D> {
@@ -83,25 +32,24 @@ pub trait PathHandler<D> {
 }
 
 
-pub fn iterate_recursively<P: Send + Clone, W: PathHandler<P> + Send + Clone>
+pub fn iterate_recursively<P: 'static + Send + Clone, W: 'static + PathHandler<P> + Send + Clone>
   (root: (Path, P), worker: &mut W)
 {
+  let root = (PathBuf::new(&root.0), root.1);
+
   let threads = 10;
-  let (push_ch, work_ch) = sync_channel(threads);
-  let mut pool = sync::TaskPool::new(threads, || {
-    let w = worker.clone();
-    let c = push_ch.clone();
-    proc(_){(w, c)}
-  });
+  let (push_ch, work_ch) = mpsc::sync_channel(threads);
+  let mut pool = sync::TaskPool::new(threads);
 
   // Insert the first task into the queue:
-  push_ch.send(Some(root));
-  let mut running_workers = 0i;
+  push_ch.send(Some(root)).unwrap();
+  let mut running_workers = 0 as i32;
 
   // Master thread:
   loop {
     match work_ch.recv() {
-      None => {
+      Err(_) => unreachable!(),
+      Ok(None) => {
         // A worker has completed a task.
         // We are done when no more workers are active (i.e. all tasks are done):
         running_workers -= 1;
@@ -109,28 +57,29 @@ pub fn iterate_recursively<P: Send + Clone, W: PathHandler<P> + Send + Clone>
           break
         }
       },
-      Some((root, payload)) => {
+      Ok(Some((root, payload))) => {
         // Execute the task in a pool thread:
         running_workers += 1;
-        pool.execute(proc(&(ref worker, ref push_ch)) {
-          let mut root = root;
-          let res = DirIterator::new(root.clone());
+        let _worker = worker.clone();
+        let _push_ch = push_ch.clone();
+        pool.execute(move|| {
+          let res = read_dir(&root);
           if res.is_ok() {
             let mut it = res.unwrap();
-            for file in it {
-              if file != ".".into_string() && file != "..".into_string() {
-                let rel_path = Path::new(file);
-                root.push(rel_path);
-                let dir_opt = worker.handle_path(payload.clone(), root.clone());
+            for entry in it {
+              if entry.is_ok() {
+                let entry = entry.unwrap();
+                let file = entry.path();
+                let old_path = Path::new(file.to_str().unwrap());
+                let dir_opt = _worker.handle_path(payload.clone(), old_path);
                 if dir_opt.is_some() {
-                  push_ch.send(Some((root.clone(), dir_opt.unwrap())));
+                  _push_ch.send(Some((file.clone(), dir_opt.unwrap()))).unwrap();
                 }
-                root.pop();
               }
             }
           }
           // Count this pool thread as idle:
-          push_ch.send(None)
+          _push_ch.send(None).unwrap();
         });
       }
     }
@@ -149,10 +98,11 @@ impl PathHandler<()> for PrintPathHandler {
     println!("{}", path.display());
     match filename_opt {
       Some(".") | Some("..") | None => None,
-      Some(_) =>
-      match lstat(&path) {
-        Ok(ref st) if st.kind == TypeDirectory => Some(()),
-        _ => None,
+      Some(_) => {
+        match lstat(&path) {
+          Ok(ref st) if st.kind == Directory => Some(()),
+          _ => None,
+        }
       }
     }
   }

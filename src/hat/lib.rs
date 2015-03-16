@@ -13,18 +13,20 @@
 // limitations under the License.
 
 #![crate_type="lib"]
-#![license = "ALv2"]
 
-#![warn(non_uppercase_statics)]
+#![warn(non_upper_case_globals)]
 #![warn(non_camel_case_types)]
-#![warn(unnecessary_qualification)]
+#![warn(unused_qualifications)]
 
-#![feature(globs)]
+#![feature(custom_attribute)]
+#![feature(plugin)]
+#![plugin(quickcheck_macros)]
+
+extern crate "rustc-serialize" as rustc_serialize;
 
 // Standard Rust imports
-extern crate debug;
-extern crate libc;
-extern crate serialize;
+// extern crate serialize;
+extern crate rand;
 extern crate test;
 extern crate time;
 

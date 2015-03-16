@@ -12,23 +12,21 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::num::{One, one};
 
-
-pub struct CumulativeCounter<N> {
-  previous: N,
+pub struct CumulativeCounter {
+  previous: i64,
 }
 
 
-impl <N: Clone + Num + One> CumulativeCounter<N> {
+impl CumulativeCounter {
 
-  pub fn new(previous: N) -> CumulativeCounter<N> {
+  pub fn new(previous: i64) -> CumulativeCounter {
     CumulativeCounter{previous: previous}
   }
 
-  pub fn next(&mut self) -> N {
-    self.previous = self.previous.add(&one());
-    self.previous.clone()
+  pub fn next(&mut self) -> i64 {
+    self.previous += 1;
+    return self.previous;
   }
 
 }

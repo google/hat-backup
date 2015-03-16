@@ -17,13 +17,14 @@
 use process;
 
 use sqlite3::database::{Database};
-use sqlite3::types::{SQLITE_DONE, SQLITE_OK, Blob};
+use sqlite3::BindArg::{Blob};
+use sqlite3::types::ResultCode::{SQLITE_DONE, SQLITE_OK};
 use sqlite3::{open};
 
 use hash_index;
 
 
-pub type SnapshotIndexProcess = process::Process<Msg, Reply, SnapshotIndex>;
+pub type SnapshotIndexProcess = process::Process<Msg, Reply>;
 
 pub enum Msg {
   /// Register a new snapshot by its hash and persistent reference.
@@ -48,7 +49,7 @@ impl SnapshotIndex {
   pub fn new(path: String) -> SnapshotIndex {
     let mut si = match open(path.as_slice()) {
       Ok(dbh) => { SnapshotIndex{dbh: dbh} },
-      Err(err) => fail!(err.to_string()),
+      Err(err) => panic!("{:?}", err),
     };
     si.exec_or_die("CREATE TABLE IF NOT EXISTS
                     snapshot_index (id        INTEGER PRIMARY KEY,
@@ -67,9 +68,8 @@ impl SnapshotIndex {
   fn exec_or_die(&mut self, sql: &str) {
     match self.dbh.exec(sql) {
       Ok(true) => (),
-      Ok(false) => fail!("exec: {}", self.dbh.get_errmsg()),
-      Err(msg) => fail!(format!("exec: {}, {}\nIn sql: '{}'\n",
-                                msg.to_string(), self.dbh.get_errmsg(), sql))
+      Ok(false) => panic!("exec: {:?}", self.dbh.get_errmsg()),
+      Err(msg) => panic!("exec: {:?}, {:?}\nIn sql: '{}'\n", msg, self.dbh.get_errmsg(), sql)
     }
   }
 
@@ -77,7 +77,7 @@ impl SnapshotIndex {
     let mut insert_stm = self.dbh.prepare(
       "INSERT INTO snapshot_index (family, hash, tree_ref) VALUES (?, ?, ?)", &None).unwrap();
 
-    assert_eq!(SQLITE_OK, insert_stm.bind_param(1, &Blob(family.as_bytes().into_vec())));
+    assert_eq!(SQLITE_OK, insert_stm.bind_param(1, &Blob(family.as_bytes().iter().map(|&x| x).collect())));
     assert_eq!(SQLITE_OK, insert_stm.bind_param(2, &Blob(hash.bytes.clone())));
     assert_eq!(SQLITE_OK, insert_stm.bind_param(3, &Blob(tree_ref)));
 
@@ -92,17 +92,17 @@ impl SnapshotIndex {
 
 
 impl process::MsgHandler<Msg, Reply> for SnapshotIndex {
-  fn handle(&mut self, msg: Msg, reply: |Reply|) {
+  fn handle(&mut self, msg: Msg, reply: Box<Fn(Reply)>) {
     match msg {
 
-      Add(name, hash, tree_ref) => {
+      Msg::Add(name, hash, tree_ref) => {
         self.add_snapshot(name, hash, tree_ref);
-        return reply(AddOK);
+        return reply(Reply::AddOK);
       },
 
-      Flush => {
+      Msg::Flush => {
         self.flush();
-        return reply(FlushOK);
+        return reply(Reply::FlushOK);
       }
     }
   }

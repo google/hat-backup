@@ -14,16 +14,17 @@
 
 //! Combines data chunks into larger blobs to be stored externally.
 
+use std::thunk::Thunk;
 use std::sync::{Arc, Mutex};
+use std::thread;
+use std::vec;
 
-use serialize::{json, Encodable, Decodable};
-use serialize::hex::{ToHex};
-use serialize::json::{Json, ToJson, Decoder, from_str};
+use rustc_serialize;
+use rustc_serialize::hex::{ToHex};
 
-use std::collections::treemap::{TreeMap};
-use std::collections::lru_cache::{LruCache};
+use std::collections::{BTreeMap};
 
-use std::io::{File};
+use std::old_io::{File};
 use std::str;
 
 use process::{Process, MsgHandler};
@@ -35,7 +36,7 @@ use blob_index::{BlobIndexProcess};
 use blob_index::{BlobIndex};
 
 
-pub type BlobStoreProcess<B> = Process<Msg, Reply, BlobStore<B>>;
+pub type BlobStoreProcess = Process<Msg, Reply>;
 
 pub trait BlobStoreBackend {
   fn store(&mut self, name: &[u8], data: &[u8]) -> Result<(), String>;
@@ -43,24 +44,29 @@ pub trait BlobStoreBackend {
 }
 
 
-#[deriving(Clone)]
+#[derive(Clone)]
 pub struct FileBackend {
   root: Path,
-  read_cache: Arc<Mutex<LruCache<Vec<u8>, Result<Vec<u8>, String>>>>,
+  read_cache: Arc<Mutex<BTreeMap<Vec<u8>, Result<Vec<u8>, String>>>>,
+  max_cache_size: usize,
 }
 
 impl FileBackend {
 
   pub fn new(root: Path) -> FileBackend {
-    FileBackend{root: root, read_cache: Arc::new(Mutex::new(LruCache::new(10)))}
+    FileBackend{root: root, read_cache: Arc::new(Mutex::new(BTreeMap::new())), max_cache_size: 10}
   }
 
   fn guarded_cache_get(&self, name: &Vec<u8>) -> Option<Result<Vec<u8>, String>> {
-    self.read_cache.lock().get(name).map(|v| v.clone())
+    self.read_cache.lock().unwrap().get(name).map(|v| v.clone())
   }
 
   fn guarded_cache_put(&mut self, name: Vec<u8>, result: Result<Vec<u8>, String>) {
-    self.read_cache.lock().put(name, result);
+    let mut cache = self.read_cache.lock().unwrap();
+    if cache.len() >= self.max_cache_size {
+      cache.clear();
+    }
+    cache.insert(name, result);
   }
 }
 
@@ -83,7 +89,7 @@ impl BlobStoreBackend for FileBackend {
 
   fn retrieve(&mut self, name: &[u8]) -> Result<Vec<u8>, String> {
     // Check for key in cache:
-    let name = name.into_vec();
+    let name = name.to_vec();
     let value_opt = self.guarded_cache_get(&name);
     match value_opt {
       Some(result) => return result,
@@ -98,7 +104,7 @@ impl BlobStoreBackend for FileBackend {
     let mut fd = File::open(&path).unwrap();
 
     let res = fd.read_to_end().and_then(|data| {
-      Ok(data.into_vec()) }).or_else(|e| Err(e.to_string()));
+      Ok(data) }).or_else(|e| Err(e.to_string()));
 
     // Update cache to contain key:
     self.guarded_cache_put(name, res.clone());
@@ -109,35 +115,23 @@ impl BlobStoreBackend for FileBackend {
 }
 
 
-#[deriving(Show, Clone, Eq, PartialEq, Encodable, Decodable)]
+#[derive(Debug, Clone, Eq, PartialEq, RustcEncodable, RustcDecodable)]
 pub struct BlobID {
   name: Vec<u8>,
-  begin: uint,
-  end: uint,
+  begin: usize,
+  end: usize,
 }
 
 impl BlobID {
 
   pub fn from_bytes(bytes: Vec<u8>) -> BlobID {
-    let mut decoder = Decoder::new(from_str(
-      str::from_utf8(bytes.as_slice()).unwrap()).unwrap());
-    Decodable::decode(&mut decoder).unwrap()
+    return rustc_serialize::json::decode(str::from_utf8(bytes.as_slice()).unwrap()).unwrap();
   }
 
   pub fn as_bytes(&self) -> Vec<u8> {
-    self.to_json().to_string().as_bytes().into_vec()
+    return rustc_serialize::json::encode(&self).unwrap().as_bytes().to_vec();
   }
 
-}
-
-impl ToJson for BlobID {
-  fn to_json(&self) -> Json {
-    let mut m = TreeMap::new();
-    m.insert("name".to_string(), self.name.to_json());
-    m.insert("begin".to_string(), self.begin.to_json());
-    m.insert("end".to_string(), self.end.to_json());
-    json::Object(m).to_json()
-  }
 }
 
 
@@ -145,7 +139,7 @@ pub enum Msg {
   /// Store a new data chunk into the current blob. The callback is triggered after the blob
   /// containing the chunk has been committed to persistent storage (it is then safe to use the
   /// `BlobID` as persistent reference).
-  Store(Vec<u8>, proc(BlobID):Send -> ()),
+  Store(Vec<u8>, Thunk<'static, BlobID>),
   /// Retrieve the data chunk identified by `BlobID`.
   Retrieve(BlobID),
   /// Flush the current blob, independent of its size.
@@ -153,7 +147,7 @@ pub enum Msg {
 }
 
 
-#[deriving(Eq, PartialEq, Show)]
+#[derive(Eq, PartialEq, Debug)]
 pub enum Reply {
   StoreOK(BlobID),
   RetrieveOK(Vec<u8>),
@@ -167,22 +161,22 @@ pub struct BlobStore<B> {
   blob_index: BlobIndexProcess,
   blob_desc: blob_index::BlobDesc,
 
-  buffer_data: Vec<(BlobID, Vec<u8>, proc(BlobID):Send -> ())>,
-  buffer_data_len: uint,
+  buffer_data: Vec<(BlobID, Vec<u8>, Thunk<'static, BlobID>)>,
+  buffer_data_len: usize,
 
-  max_blob_size: uint,
+  max_blob_size: usize,
 }
 
 
 fn empty_blob_desc() -> blob_index::BlobDesc {
-  blob_index::BlobDesc{name: b"".into_vec(), id: 0}
+  blob_index::BlobDesc{name: vec!(), id: 0}
 }
 
 
 impl <B: BlobStoreBackend> BlobStore<B> {
 
   pub fn new(index: BlobIndexProcess, backend: B,
-             max_blob_size: uint) -> BlobStore<B> {
+             max_blob_size: usize) -> BlobStore<B> {
     let mut bs = BlobStore{
       backend: backend,
       blob_index: index,
@@ -196,8 +190,8 @@ impl <B: BlobStoreBackend> BlobStore<B> {
   }
 
   #[cfg(test)]
-  pub fn new_for_testing(backend: B, max_blob_size: uint) -> BlobStore<B> {
-    let biP = Process::new(proc() { BlobIndex::new_for_testing() });
+  pub fn new_for_testing(backend: B, max_blob_size: usize) -> BlobStore<B> {
+    let biP = Process::new(Thunk::new(move|| { BlobIndex::new_for_testing() }));
     let mut bs = BlobStore{backend: backend,
                            blob_index: biP,
                            blob_desc: empty_blob_desc(),
@@ -212,12 +206,12 @@ impl <B: BlobStoreBackend> BlobStore<B> {
   fn reserve_new_blob(&mut self) -> blob_index::BlobDesc {
     let old_blob_desc = self.blob_desc.clone();
 
-    let res = self.blob_index.send_reply(blob_index::Reserve);
+    let res = self.blob_index.send_reply(blob_index::Msg::Reserve);
     match res {
-      blob_index::Reserved(blob_desc) => {
+      blob_index::Reply::Reserved(blob_desc) => {
         self.blob_desc = blob_desc;
       },
-      _ => fail!("Could not reserve blob."),
+      _ => panic!("Could not reserve blob."),
     }
 
     old_blob_desc
@@ -226,14 +220,14 @@ impl <B: BlobStoreBackend> BlobStore<B> {
   fn backend_store(&mut self, name: &[u8], blob: &[u8]) {
     match self.backend.store(name, blob) {
       Ok(()) => (),
-      Err(s) => fail!(s),
+      Err(s) => panic!(s),
     }
   }
 
   fn backend_read(&mut self, name: &[u8]) -> Vec<u8> {
     match self.backend.retrieve(name) {
       Ok(data) => data,
-      Err(s) => fail!(s),
+      Err(s) => panic!(s),
     }
   }
 
@@ -247,8 +241,10 @@ impl <B: BlobStoreBackend> BlobStore<B> {
     // Prepare blob
     let mut ready_callback = Vec::new();
     let mut blob = Vec::new();
+
+    self.buffer_data.reverse();
     loop {
-      match self.buffer_data.remove(0) {
+      match self.buffer_data.pop() {
         Some((chunk_ref, chunk, cb)) => {
           ready_callback.push((chunk_ref, cb));
           blob.push_all(chunk.as_slice());
@@ -257,13 +253,13 @@ impl <B: BlobStoreBackend> BlobStore<B> {
       }
     }
 
-    self.blob_index.send_reply(blob_index::InAir(old_blob_desc.clone()));
+    self.blob_index.send_reply(blob_index::Msg::InAir(old_blob_desc.clone()));
     self.backend_store(old_blob_desc.name.as_slice(), blob.as_slice());
-    self.blob_index.send_reply(blob_index::CommitDone(old_blob_desc));
+    self.blob_index.send_reply(blob_index::Msg::CommitDone(old_blob_desc));
 
     // Go through callbacks
     for (blobid, cb) in ready_callback.into_iter() {
-      cb(blobid);
+      cb.invoke(blobid);
     }
   }
 
@@ -276,15 +272,14 @@ impl <B: BlobStoreBackend> BlobStore<B> {
 
 impl <B: BlobStoreBackend> MsgHandler<Msg, Reply> for BlobStore<B> {
 
-  fn handle(&mut self, msg: Msg, reply: |Reply|) {
+  fn handle(&mut self, msg: Msg, reply: Box<Fn(Reply)>) {
     match msg {
-
-      Store(blob, cb) => {
+      Msg::Store(blob, cb) => {
         if blob.len() == 0 {
           let id = BlobID{name: vec!(0), begin: 0, end: 0};
           let cb_id = id.clone();
-          spawn(proc(){ cb(cb_id) });
-          return reply(StoreOK(id));
+          thread::spawn(move|| { cb.invoke(cb_id) });
+          return reply(Reply::StoreOK(id));
         }
 
         let new_size = self.buffer_data_len + blob.len();
@@ -293,27 +288,25 @@ impl <B: BlobStoreBackend> MsgHandler<Msg, Reply> for BlobStore<B> {
                         end: new_size};
 
         self.buffer_data_len = new_size;
-        self.buffer_data.push((id.clone(), blob.into_vec(), cb));
+        self.buffer_data.push((id.clone(), blob, cb));
 
         // To avoid unnecessary blocking, we reply with the ID *before* possibly flushing.
-        reply(StoreOK(id));
+        reply(Reply::StoreOK(id));
 
         // Flushing can be expensive, so try not block on it.
         self.maybe_flush();
        },
-
-      Retrieve(id) => {
+      Msg::Retrieve(id) => {
         if id.begin == 0 && id.end == 0 {
-          return reply(RetrieveOK(vec![].into_vec()));
+          return reply(Reply::RetrieveOK(vec![]));
         }
         let blob = self.backend_read(id.name.as_slice());
         let chunk = blob.slice(id.begin, id.end);
-        return reply(RetrieveOK(chunk.into_vec()));
+        return reply(Reply::RetrieveOK(chunk.to_vec()));
       },
-
-      Flush => {
+      Msg::Flush => {
         self.flush();
-        return reply(FlushOK)
+        return reply(Reply::FlushOK)
       },
 
     }
@@ -325,44 +318,42 @@ impl <B: BlobStoreBackend> MsgHandler<Msg, Reply> for BlobStore<B> {
 #[cfg(test)]
 pub mod tests {
   use super::*;
-  use std::rand::{task_rng};
-  use quickcheck::{Config, Testable, gen};
-  use quickcheck::{quickcheck_config};
 
+  use std::thunk::Thunk;
   use process::{Process};
 
   use std::sync::{Arc, Mutex};
-  use std::collections::treemap::{TreeMap};
+  use std::collections::{BTreeMap};
 
-  #[deriving(Clone)]
+  #[derive(Clone)]
   pub struct MemoryBackend {
-    files: Arc<Mutex<TreeMap<Vec<u8>, Vec<u8>>>>
+    files: Arc<Mutex<BTreeMap<Vec<u8>, Vec<u8>>>>
   }
 
   impl MemoryBackend {
     pub fn new() -> MemoryBackend {
-      MemoryBackend{files: Arc::new(Mutex::new(TreeMap::new()))}
+      MemoryBackend{files: Arc::new(Mutex::new(BTreeMap::new()))}
     }
 
     fn guarded_insert(&mut self, key: Vec<u8>, value: Vec<u8>) -> Result<(), String>{
-      let mut guarded_files = self.files.lock();
+      let mut guarded_files = self.files.lock().unwrap();
       if guarded_files.contains_key(&key) {
-        return Err(format!("Key already exists: '{}'", key));
+        return Err(format!("Key already exists: '{:?}'", key));
       }
       guarded_files.insert(key, value);
       Ok(())
     }
 
     fn guarded_retrieve(&mut self, key: &[u8]) -> Result<Vec<u8>, String> {
-      let value_opt = self.files.lock().find(&key.into_vec()).map(|v| v.clone());
-      value_opt.map(|v| Ok(v)).unwrap_or_else(|| Err(format!("Unknown key: '{}'", key)))
+      let value_opt = self.files.lock().unwrap().get(&key.to_vec()).map(|v| v.clone());
+      value_opt.map(|v| Ok(v)).unwrap_or_else(|| Err(format!("Unknown key: '{:?}'", key)))
     }
   }
 
   impl BlobStoreBackend for MemoryBackend {
 
     fn store(&mut self, name: &[u8], data: &[u8]) -> Result<(), String> {
-      self.guarded_insert(name.to_owned(), data.into_vec())
+      self.guarded_insert(name.to_vec(), data.to_vec())
     }
 
     fn retrieve(&mut self, name: &[u8]) -> Result<Vec<u8>, String> {
@@ -370,7 +361,7 @@ pub mod tests {
     }
   }
 
-  #[deriving(Clone)]
+  #[derive(Clone)]
   pub struct DevNullBackend;
 
   impl BlobStoreBackend for DevNullBackend {
@@ -378,119 +369,97 @@ pub mod tests {
       Ok(())
     }
     fn retrieve(&mut self, name: &[u8]) -> Result<Vec<u8>, String> {
-      Err(format!("Unknown key: '{}'", name))
+      Err(format!("Unknown key: '{:?}'", name))
     }
   }
 
 
-  // QuickCheck configuration
-  static SIZE: uint = 100;
-  static CONFIG: Config = Config {
-    tests: 200,
-    max_tests: 1000,
-  };
+  #[quickcheck]
+  fn identity(chunks: Vec<Vec<u8>>) -> bool {
+    let mut backend = MemoryBackend::new();
 
-  // QuickCheck helpers:
-  fn qcheck<A: Testable>(f: A) {
-    quickcheck_config(CONFIG, &mut gen(task_rng(), SIZE), f)
+    let local_backend = backend.clone();
+    let bsP : BlobStoreProcess =
+      Process::new(Thunk::new(move|| { BlobStore::new_for_testing(local_backend, 1024) }));
+
+    let mut ids = Vec::new();
+    for chunk in chunks.iter() {
+      match bsP.send_reply(Msg::Store(chunk.as_slice().to_vec(), Thunk::with_arg(move|_| {}))) {
+        Reply::StoreOK(id) => { ids.push((id, chunk)); },
+        _ => panic!("Unexpected reply from blob store."),
+      }
+    }
+
+    assert_eq!(bsP.send_reply(Msg::Flush), Reply::FlushOK);
+
+    // Non-empty chunks must be in the backend now:
+    for &(ref id, chunk) in ids.iter() {
+      if chunk.len() > 0 {
+        match backend.retrieve(id.name.as_slice()) {
+          Ok(_) => (),
+          Err(e) => panic!(e),
+        }
+      }
+    }
+
+    // All chunks must be available through the blob store:
+    for &(ref id, chunk) in ids.iter() {
+      match bsP.send_reply(Msg::Retrieve(id.clone())) {
+        Reply::RetrieveOK(found_chunk) => assert_eq!(found_chunk,
+                                              chunk.as_slice().to_vec()),
+        _ => panic!("Unexpected reply from blob store."),
+      }
+    }
+
+    return true;
   }
 
-  #[test]
-  fn identity() {
-    fn prop(chunks: Vec<Vec<u8>>) -> bool {
-      let mut backend = MemoryBackend::new();
+  #[quickcheck]
+  fn identity_with_excessive_flushing(chunks: Vec<Vec<u8>>) -> bool {
+    let mut backend = MemoryBackend::new();
 
-      let local_backend = backend.clone();
-      let bsP : BlobStoreProcess<MemoryBackend> =
-        Process::new(proc() { BlobStore::new_for_testing(local_backend, 1024) });
+    let local_backend = backend.clone();
+    let bsP: BlobStoreProcess = Process::new(Thunk::new(move|| {
+      BlobStore::new_for_testing(local_backend, 1024) }));
 
-      let mut ids = Vec::new();
-      for chunk in chunks.iter() {
-        match bsP.send_reply(Store(chunk.as_slice().into_vec(), proc(_){})) {
-          StoreOK(id) => { ids.push((id, chunk)); },
-          _ => fail!("Unexpected reply from blob store."),
-        }
+    let mut ids = Vec::new();
+    for chunk in chunks.iter() {
+      match bsP.send_reply(Msg::Store(chunk.as_slice().to_vec(), Thunk::with_arg(move|_| {}))) {
+        Reply::StoreOK(id) => { ids.push((id, chunk)); },
+        _ => panic!("Unexpected reply from blob store."),
       }
-
-      assert_eq!(bsP.send_reply(Flush), FlushOK);
-
-      // Non-empty chunks must be in the backend now:
-      for &(ref id, chunk) in ids.iter() {
-        if chunk.len() > 0 {
-          match backend.retrieve(id.name.as_slice()) {
-            Ok(_) => (),
-            Err(e) => fail!(e),
-          }
-        }
-      }
-
-      // All chunks must be available through the blob store:
-      for &(ref id, chunk) in ids.iter() {
-        match bsP.send_reply(Retrieve(id.clone())) {
-          RetrieveOK(found_chunk) => assert_eq!(found_chunk,
-                                                chunk.as_slice().into_vec()),
-          _ => fail!("Unexpected reply from blob store."),
-        }
-      }
-
-      return true;
+      assert_eq!(bsP.send_reply(Msg::Flush), Reply::FlushOK);
+      let &(ref id, chunk) = ids.last().unwrap();
+      assert_eq!(bsP.send_reply(Msg::Retrieve(id.clone())), Reply::RetrieveOK(chunk.clone()));
     }
-    qcheck(prop);
+
+    // Non-empty chunks must be in the backend now:
+    for &(ref id, chunk) in ids.iter() {
+      if chunk.len() > 0 {
+        match backend.retrieve(id.name.as_slice()) {
+          Ok(_) => (),
+          Err(e) => panic!(e),
+        }
+      }
+    }
+
+    // All chunks must be available through the blob store:
+    for &(ref id, chunk) in ids.iter() {
+      match bsP.send_reply(Msg::Retrieve(id.clone())) {
+        Reply::RetrieveOK(found_chunk) => assert_eq!(found_chunk,
+                                                     chunk.as_slice().to_vec()),
+        _ => panic!("Unexpected reply from blob store."),
+      }
+    }
+
+    return true;
   }
 
-
-  #[test]
-  fn identity_with_excessive_flushing() {
-    fn prop(chunks: Vec<Vec<u8>>) -> bool {
-      let mut backend = MemoryBackend::new();
-
-      let local_backend = backend.clone();
-      let bsP: BlobStoreProcess<MemoryBackend> = Process::new(proc() {
-        BlobStore::new_for_testing(local_backend, 1024) });
-
-      let mut ids = Vec::new();
-      for chunk in chunks.iter() {
-        match bsP.send_reply(Store(chunk.as_slice().into_vec(), proc(_){})) {
-          StoreOK(id) => { ids.push((id, chunk)); },
-          _ => fail!("Unexpected reply from blob store."),
-        }
-        assert_eq!(bsP.send_reply(Flush), FlushOK);
-        let &(ref id, chunk) = ids.last().unwrap();
-        assert_eq!(bsP.send_reply(Retrieve(id.clone())), RetrieveOK(chunk.clone()));
-      }
-
-      // Non-empty chunks must be in the backend now:
-      for &(ref id, chunk) in ids.iter() {
-        if chunk.len() > 0 {
-          match backend.retrieve(id.name.as_slice()) {
-            Ok(_) => (),
-            Err(e) => fail!(e),
-          }
-        }
-      }
-
-      // All chunks must be available through the blob store:
-      for &(ref id, chunk) in ids.iter() {
-        match bsP.send_reply(Retrieve(id.clone())) {
-          RetrieveOK(found_chunk) => assert_eq!(found_chunk,
-                                                chunk.as_slice().into_vec()),
-          _ => fail!("Unexpected reply from blob store."),
-        }
-      }
-
-      return true;
-    }
-    qcheck(prop);
-  }
-
-  #[test]
-  fn blobid_identity() {
-    fn prop(name: Vec<u8>, begin: uint, end: uint) -> bool {
-      let blob_id = BlobID{name: name.into_vec(),
-                           begin: begin, end: end};
-      BlobID::from_bytes(blob_id.as_bytes()) == blob_id
-    }
-    qcheck(prop);
+  #[quickcheck]
+  fn blobid_identity(name: Vec<u8>, begin: usize, end: usize) -> bool {
+    let blob_id = BlobID{name: name.to_vec(),
+                         begin: begin, end: end};
+    BlobID::from_bytes(blob_id.as_bytes()) == blob_id
   }
 
 }
