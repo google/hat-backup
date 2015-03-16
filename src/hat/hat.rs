@@ -317,7 +317,7 @@ impl listdir::PathHandler<Option<Vec<u8>>> for InsertPathHandler
 
 fn try_a_few_times_then_panic<F>(f: F, msg: &str) where F: FnMut() -> bool {
   let mut f = f;
-  for i in range(1 as i32, 5) {
+  for _ in range(1 as i32, 5) {
     if f() { return }
   }
   panic!(msg.to_string());

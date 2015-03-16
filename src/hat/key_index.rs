@@ -15,7 +15,6 @@
 //! Local state for keys in the snapshot in progress (the "index").
 
 use std::time::duration::{Duration};
-use std::vec;
 
 use periodic_timer::{PeriodicTimer};
 use sodiumoxide::randombytes::{randombytes};

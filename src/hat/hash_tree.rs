@@ -22,9 +22,7 @@
 
 use std::num::Int;
 use rustc_serialize::json;
-use std::collections::{BTreeMap};
 use hash_index::{Hash};
-use std::vec::{self, Vec};
 use std::{str};
 
 

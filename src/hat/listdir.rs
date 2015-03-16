@@ -15,8 +15,6 @@
 //! Helpers for reading directory structures from the local filesystem.
 
 use std::path::PathBuf;
-use std::fs::PathExt;
-use std::ffi::{self, CString};
 
 use std::old_io::FileType::{Directory};
 use std::old_io::fs::{lstat};

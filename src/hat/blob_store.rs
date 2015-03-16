@@ -17,7 +17,6 @@
 use std::thunk::Thunk;
 use std::sync::{Arc, Mutex};
 use std::thread;
-use std::vec;
 
 use rustc_serialize;
 use rustc_serialize::hex::{ToHex};
@@ -81,7 +80,7 @@ impl BlobStoreBackend for FileBackend {
       Ok(f) => f,
     };
 
-    match file.write(data) {
+    match file.write_all(data) {
       Err(e) => Err(e.to_string()),
       Ok(()) => Ok(()),
     }

@@ -104,7 +104,7 @@ impl <Msg:'static + Send, Reply:'static + Send>
             my_handler.handle(msg, Box::new(|_r: Reply| {}));
           },
           Ok((msg, Some(rep))) => {
-            my_handler.handle(msg, Box::new(move|r| { rep.send(r); }));
+            my_handler.handle(msg, Box::new(move|r| { rep.send(r).unwrap(); }));
           },
           Err(_recv_error) => break,
         };
