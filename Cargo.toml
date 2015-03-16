@@ -7,10 +7,6 @@ authors = ["Johan Nielsen <sejr@google.com>"]
 name = "hat"
 path = "src/hat/main.rs"
 
-[lib]
-name = "hat-lib"
-path = "src/hat/lib.rs"
-
 [dependencies]
 rand = "*"
 quickcheck = "*"
