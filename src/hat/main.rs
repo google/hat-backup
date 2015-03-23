@@ -135,10 +135,7 @@ fn main() {
     let hat_opt = hat::Hat::open_repository(&Path::new("repo"), backend, MAX_BLOB_SIZE);
     let hat = hat_opt.expect("Could not open repository in 'repo'".as_slice());
 
-    let family_opt = hat.open_family(name.clone());
-    let family = family_opt.expect(format!("Could not open family '{}'", name).as_slice());
-
-    family.checkout_in_dir(Path::new(path.clone()), None);
+    hat.checkout_in_dir(name.clone(), Path::new(path.clone()));
     return;
   }
   else if cmd == &"commit".to_string() && args.len() == 1 {

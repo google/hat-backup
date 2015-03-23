@@ -211,12 +211,13 @@ pub struct SimpleHashTreeReader<B> {
   stack: Vec<HashRef>,
 }
 
+
 /// Wrapper for the result of `SimpleHashTreeReader::new()`.
 ///
 /// We wrap the output of `SimpleHashTreeReader::new(...)` in a `ReaderResult` to fast-path the
 /// single-block case (alternatively we could build a one-block iterator).
 pub enum ReaderResult<B> {
-  NoData,
+  Empty,
 
   /// The tree consists of just a single node and its data-chunk is given here.
   SingleBlock(Vec<u8>),
@@ -229,21 +230,21 @@ impl <B: HashTreeBackend + Clone> SimpleHashTreeReader<B> {
 
   /// Creates a new `HashTreeReader` that reads through the `backend` the blocks of the hash tree
   /// defined by `root_hash` and `root_ref`.
-  pub fn new(backend: B, root_hash: Hash, root_ref: Vec<u8>) ->  ReaderResult<B>
+  pub fn open(backend: B, root_hash: Hash, root_ref: Vec<u8>) -> Option<ReaderResult<B>>
   {
     if root_hash.bytes.len() == 0 {
-      return ReaderResult::NoData;
+      return None
     }
 
     let data = backend.clone().fetch_chunk(root_hash.clone()).expect(
       "Could not find tree root hash.");
 
     match hash_refs_from_bytes(data.as_slice()) {
-      None => ReaderResult::SingleBlock(data), // There's no tree top, just a data block
+      None => Some(ReaderResult::SingleBlock(data)), // There's no tree top, just a data block
       Some(childs) => {
         let mut childs = childs;
         childs.reverse();
-        ReaderResult::Tree(SimpleHashTreeReader{stack: childs, backend: backend})
+        Some(ReaderResult::Tree(SimpleHashTreeReader{stack: childs, backend: backend}))
       },
     }
   }
@@ -271,13 +272,21 @@ impl <B: HashTreeBackend + Clone> SimpleHashTreeReader<B> {
 }
 
 
-impl <B: HashTreeBackend + Clone> Iterator for SimpleHashTreeReader<B> {
+impl <B: HashTreeBackend + Clone> Iterator for ReaderResult<B> {
   type Item = Vec<u8>;
 
   /// Read the next block of the hash-tree.
   /// This operation can be expensive, as it may require fetching a file through the backend.
   fn next(&mut self) -> Option<Vec<u8>> {
-    self.extract()
+    let (force_empty, res) = match *self {
+      ReaderResult::Tree(ref mut it) => (false, it.extract()),
+      ReaderResult::SingleBlock(ref b) => (true, Some(b.clone())),
+      ReaderResult::Empty => (true, None),
+    };
+    if force_empty || res.is_none() {
+      *self = ReaderResult::Empty;
+    }
+    return res;
   }
 }
 
@@ -356,19 +365,13 @@ mod tests {
 
     let (hash, hash_ref) = ht.hash();
 
-    let mut tree_it = match SimpleHashTreeReader::new(backend, hash, hash_ref) {
-      ReaderResult::NoData => panic!("No data."),
-      ReaderResult::SingleBlock(found_chunk) => {
-        if chunks_count == 0 {
-          assert_eq!(found_chunk, Vec::new());
-        } else {
-          assert_eq!(chunks_count, 1);
-          assert_eq!(found_chunk, b"a".to_vec());
-        }
-        return true;
-      },
-      ReaderResult::Tree(it) => it,
-    };
+    let tree_it = SimpleHashTreeReader::open(backend, hash, hash_ref).expect("tree not found");
+
+    if chunks_count == 0 {
+      // An empty tree is a tree with a single empty chunk (as opposed to no chunks).
+      assert_eq!(vec![vec![]], tree_it.collect());
+      return true;
+    }
 
     // We have a tree, let's investigate!
     let mut actual_count = 0;
@@ -392,11 +395,8 @@ mod tests {
 
     let (hash, hash_ref) = ht.hash();
 
-    match SimpleHashTreeReader::new(backend, hash, hash_ref) {
-      ReaderResult::NoData => panic!("Expected a single block, got no data."),
-      ReaderResult::SingleBlock(found_block) => assert_eq!(found_block, block),
-      ReaderResult::Tree(_) => panic!("Expected a single block, not a tree."),
-    };
+    let it = SimpleHashTreeReader::open(backend, hash, hash_ref).expect("tree not found");
+    assert_eq!(vec![block], it.collect());
   }
 
   #[test]
@@ -410,11 +410,8 @@ mod tests {
 
     let (hash, hash_ref) = ht.hash();
 
-    match SimpleHashTreeReader::new(backend, hash, hash_ref) {
-      ReaderResult::NoData => panic!("Expected a single block, got no data."),
-      ReaderResult::SingleBlock(found_block) => assert_eq!(found_block, block),
-      ReaderResult::Tree(_) => panic!("Expected a single block, not a tree."),
-    };
+    let it = SimpleHashTreeReader::open(backend, hash, hash_ref).expect("tree not found");
+    assert_eq!(vec![block], it.collect());
   }
 
   #[test]
@@ -438,11 +435,7 @@ mod tests {
 
     let (hash, hash_ref) = ht.hash();
 
-    let it = match SimpleHashTreeReader::new(backend, hash, hash_ref) {
-      ReaderResult::NoData => panic!("Expected a hash tree, got no data."),
-      ReaderResult::SingleBlock(s) => panic!("Expected a hash tree here, got: {:?}", s),
-      ReaderResult::Tree(it) => it,
-    };
+    let it = SimpleHashTreeReader::open(backend, hash, hash_ref).expect("tree not found");
 
     for (i, chunk) in it.enumerate() {
       bytes.as_mut_slice()[0] = (i+1) as u8;
@@ -469,11 +462,7 @@ mod tests {
       assert!(backend.saw_chunk(&bytes));
     }
 
-    let it = match SimpleHashTreeReader::new(backend, hash, hash_ref) {
-      ReaderResult::NoData => panic!("Expected a hash tree, got no data."),
-      ReaderResult::SingleBlock(s) => panic!("Expected a hash tree here, got: {:?}", s),
-      ReaderResult::Tree(it) => it,
-    };
+    let it = SimpleHashTreeReader::open(backend, hash, hash_ref).expect("tree not found");
 
     for (i, chunk) in it.enumerate() {
       bytes.as_mut_slice()[0] = (i+1) as u8;

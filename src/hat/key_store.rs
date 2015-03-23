@@ -33,7 +33,7 @@ use key_index::{KeyIndex};
 pub type KeyStoreProcess<KE, IT> = Process<Msg<KE, IT>, Reply>;
 
 pub type DirElem = (Vec<u8>, Vec<u8>, u64, u64, u64, Vec<u8>, Vec<u8>,
-                    ReaderResult<HashStoreBackend>);
+                    Option<ReaderResult<HashStoreBackend>>);
 
 // Public structs
 pub enum Msg<KE, IT> {
@@ -101,7 +101,7 @@ pub struct HashStoreBackend {
 }
 
 impl HashStoreBackend {
-  fn new(hash_index: hash_index::HashIndexProcess,
+  pub fn new(hash_index: hash_index::HashIndexProcess,
          blob_store: blob_store::BlobStoreProcess)
          -> HashStoreBackend {
     HashStoreBackend{hash_index: hash_index, blob_store: blob_store}
@@ -219,7 +219,7 @@ impl
 
               my_entries.push(
                 (id, name, created, modified, accessed, hash, persistent_ref,
-                   SimpleHashTreeReader::new(
+                   SimpleHashTreeReader::open(
                      HashStoreBackend::new(self.hash_index.clone(), self.blob_store.clone()),
                      local_hash, local_ref)
                  ));
@@ -487,14 +487,8 @@ mod tests {
           match dir.file.data {
             Some(ref original) => {
               let it = match tree_data {
-                hash_tree::ReaderResult::NoData => panic!("No data."),
-                hash_tree::ReaderResult::SingleBlock(chunk) => {
-                  assert!(original.len() <= 1);
-                  assert_eq!(original.last().unwrap_or(&b"".to_vec()),
-                             &chunk);
-                  break
-                },
-                hash_tree::ReaderResult::Tree(it) => it,
+                None => panic!("No data."),
+                Some(it) => it,
               };
               let mut chunk_count = 0;
               for (i, chunk) in it.enumerate() {

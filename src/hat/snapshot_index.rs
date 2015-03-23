@@ -18,7 +18,7 @@ use process;
 
 use sqlite3::database::{Database};
 use sqlite3::BindArg::{Blob};
-use sqlite3::types::ResultCode::{SQLITE_DONE, SQLITE_OK};
+use sqlite3::types::ResultCode::{SQLITE_ROW, SQLITE_DONE, SQLITE_OK};
 use sqlite3::{open};
 
 use hash_index;
@@ -30,12 +30,16 @@ pub enum Msg {
   /// Register a new snapshot by its hash and persistent reference.
   Add(String, hash_index::Hash, Vec<u8>),
 
+  /// Extract latest snapshot data for family.
+  Latest(String),
+
   /// Flush the hash index to clear internal buffers and commit the underlying database.
   Flush,
 }
 
 pub enum Reply {
   AddOK,
+  Latest(Option<(hash_index::Hash, Vec<u8>)>),
   FlushOK,
 }
 
@@ -84,6 +88,19 @@ impl SnapshotIndex {
     assert_eq!(SQLITE_DONE, insert_stm.step());
   }
 
+  fn latest_snapshot(&mut self, family: String) -> Option<(hash_index::Hash, Vec<u8>)> {
+    let mut lookup_stm = self.dbh.prepare(
+      "SELECT hash, tree_ref FROM snapshot_index WHERE family=? ORDER BY id DESC", &None).unwrap();
+
+    assert_eq!(SQLITE_OK, lookup_stm.bind_param(1, &Blob(family.as_bytes().to_vec())));
+
+    if lookup_stm.step() == SQLITE_ROW {
+      return Some((hash_index::Hash{bytes: lookup_stm.get_blob(0).unwrap().to_vec()},
+                   lookup_stm.get_blob(1).unwrap().to_vec()));
+    }
+    return None;
+  }
+
   fn flush(&mut self) {
     // Callbacks assume their data is safe, so commit before calling them
     self.exec_or_die("COMMIT; BEGIN");
@@ -99,6 +116,11 @@ impl process::MsgHandler<Msg, Reply> for SnapshotIndex {
         self.add_snapshot(name, hash, tree_ref);
         return reply(Reply::AddOK);
       },
+
+      Msg::Latest(name) => {
+        let res_opt = self.latest_snapshot(name);
+        return reply(Reply::Latest(res_opt));
+      }
 
       Msg::Flush => {
         self.flush();

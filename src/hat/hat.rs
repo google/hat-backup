@@ -16,13 +16,14 @@
 
 use rustc_serialize::{json};
 use rustc_serialize::json::{ToJson};
+use std::str;
 use std::thunk::Thunk;
 use std::collections::{BTreeMap};
 
 use process::{Process};
 
 use blob_index::{BlobIndex, BlobIndexProcess};
-use blob_store::{BlobStore, BlobStoreBackend};
+use blob_store::{BlobStore, BlobStoreProcess, BlobStoreBackend};
 
 use hash_index::{Hash, HashIndex, HashIndexProcess};
 use key_index::{KeyIndex, KeyEntry};
@@ -48,8 +49,10 @@ pub struct Hat<B> {
   repository_root: Path,
   snapshot_index: SnapshotIndexProcess,
   blob_index: BlobIndexProcess,
+  blob_store: BlobStoreProcess,
   hash_index: HashIndexProcess,
-  backend: B,
+  blob_backend: B,
+  hash_backend: key_store::HashStoreBackend,
   max_blob_size: usize,
 }
 
@@ -81,11 +84,19 @@ impl <B: 'static + BlobStoreBackend + Clone + Send> Hat<B> {
       let si_p = Process::new(Thunk::new(move|| { SnapshotIndex::new(snapshot_index_path) }));
       let bi_p = Process::new(Thunk::new(move|| { BlobIndex::new(blob_index_path) }));
       let hi_p = Process::new(Thunk::new(move|| { HashIndex::new(hash_index_path) }));
+
+      let local_blob_index = bi_p.clone();
+      let local_backend = backend.clone();
+      let bs_p = Process::new(Thunk::new(move|| {
+        BlobStore::new(local_blob_index, local_backend, max_blob_size) }));
+
       Hat{repository_root: repository_root.clone(),
           snapshot_index: si_p,
-          hash_index: hi_p,
+          hash_index: hi_p.clone(),
           blob_index: bi_p,
-          backend: backend.clone(),
+          blob_store: bs_p.clone(),
+          blob_backend: backend.clone(),
+          hash_backend: key_store::HashStoreBackend::new(hi_p, bs_p),
           max_blob_size: max_blob_size,
       }
     })
@@ -97,19 +108,13 @@ impl <B: 'static + BlobStoreBackend + Clone + Send> Hat<B> {
     //          -> HashIndex
     //          -> BlobStore -> BlobIndex
 
-    let local_blob_index = self.blob_index.clone();
-    let local_backend = self.backend.clone();
-    let local_max_blob_size = self.max_blob_size;
-    let bs_p = Process::new(Thunk::new(move|| {
-      BlobStore::new(local_blob_index, local_backend, local_max_blob_size) }));
-
     let key_index_path = concat_filename(&self.repository_root, name.clone());
     let ki_p = Process::new(Thunk::new(move|| { KeyIndex::new(key_index_path) }));
 
-    let local_ks = KeyStore::new(ki_p.clone(), self.hash_index.clone(), bs_p.clone());
+    let local_ks = KeyStore::new(ki_p.clone(), self.hash_index.clone(), self.blob_store.clone());
     let ks_p = Process::new(Thunk::new(move|| { local_ks }));
 
-    let ks = KeyStore::new(ki_p, self.hash_index.clone(), bs_p);
+    let ks = KeyStore::new(ki_p, self.hash_index.clone(), self.blob_store.clone());
     Some(Family{name: name, key_store: ks, key_store_process: ks_p})
   }
 
@@ -124,6 +129,56 @@ impl <B: 'static + BlobStoreBackend + Clone + Send> Hat<B> {
     // Update to snapshot index:
     self.snapshot_index.send_reply(snapshot_index::Msg::Add(family_name, hash, top_ref));
     self.snapshot_index.send_reply(snapshot_index::Msg::Flush);
+  }
+
+  pub fn checkout_in_dir(&self, family_name: String, output_dir: Path) {
+    // Extract latest snapshot info:
+    let (dir_hash, dir_ref) =
+      match self.snapshot_index.send_reply(snapshot_index::Msg::Latest(family_name.clone())) {
+        snapshot_index::Reply::Latest(Some((h, r))) => (h, r),
+        snapshot_index::Reply::Latest(None) =>
+          panic!("Tries to checkout family '{}' before first commit", family_name),
+        _ => panic!("Unexpected result from snapshot index"),
+      };
+
+    let mut family = self.open_family(family_name.clone()).expect(
+      format!("Could not open family '{}'", family_name).as_slice());
+
+    let mut output_dir = output_dir;
+    self.checkout_dir_ref(&family, &mut output_dir, dir_hash, dir_ref);
+  }
+
+  fn checkout_dir_ref(&self, family: &Family, output: &mut Path, dir_hash: Hash, dir_ref: Vec<u8>) {
+    mkdir_recursive(&output, USER_DIR).unwrap();
+    for o in family.fetch_dir_data(dir_hash, dir_ref, self.hash_backend.clone()) {
+      for d in o.as_array().unwrap().iter() {
+        if let Some(ref m) = d.as_object() {
+          let name: Vec<u8> = m.get("name").unwrap().as_array()
+            .unwrap().iter().map(|x| x.as_i64().unwrap() as u8).collect();
+          output.push(Path::new(str::from_utf8(&name[..]).unwrap()));
+          println!("{}", output.display());
+
+          // TODO(jos): Replace all uses of JSON with either protocol bufffers or cap'n proto.
+          let bytes = m.get("dir_hash").or(m.get("data_hash"))
+            .and_then(|x| x.as_array()).unwrap().iter().map(|y| y.as_i64().unwrap() as u8);
+          let hash = Hash{bytes: bytes.collect()};
+
+          let pref = m.get("dir_ref").or(m.get("data_ref"))
+            .and_then(|x| x.as_array()).unwrap().iter().map(|x| x.as_i64().unwrap() as u8).collect();
+
+          if m.contains_key("dir_hash") {
+            self.checkout_dir_ref(family, output, hash, pref);
+          } else if m.contains_key("data_hash") {
+            let mut fd = File::create(&output).unwrap();
+            let tree_opt = hash_tree::SimpleHashTreeReader::open(self.hash_backend.clone(), hash, pref);
+            if let Some(tree) = tree_opt {
+              family.write_file_chunks(&mut fd, tree);
+            }
+          }
+          output.pop();
+        }
+      }
+    }
   }
 }
 
@@ -344,17 +399,7 @@ impl Family
   fn write_file_chunks<HTB: hash_tree::HashTreeBackend + Clone>(
     &self, fd: &mut File, tree: hash_tree::ReaderResult<HTB>)
   {
-    let mut it = match tree {
-      hash_tree::ReaderResult::NoData => panic!("Trying to read data where none exist."),
-      hash_tree::ReaderResult::SingleBlock(chunk) => {
-        try_a_few_times_then_panic(|| fd.write(chunk.as_slice()).is_ok(),
-                                   "Could not write chunk.");
-        return;
-      },
-      hash_tree::ReaderResult::Tree(it) => it,
-    };
-    // We have a tree
-    for chunk in it {
+    for chunk in tree {
       try_a_few_times_then_panic(|| fd.write(chunk.as_slice()).is_ok(), "Could not write chunk.");
     }
     try_a_few_times_then_panic(|| fd.flush().is_ok(), "Could not flush file.");
@@ -362,7 +407,7 @@ impl Family
 
   pub fn checkout_in_dir(&self, output_dir: Path, dir_id: Option<Vec<u8>>) {
     let mut path = output_dir;
-    for (id, name, _, _, _, hash, _, data_res) in self.listFromKeyStore(dir_id).into_iter() {
+    for (id, name, _, _, _, hash, _, data_res_opt) in self.listFromKeyStore(dir_id).into_iter() {
       // Extend directory with filename:
       path.push(name.clone());
 
@@ -373,7 +418,9 @@ impl Family
       } else {
         // This is a file, write it
         let mut fd = File::create(&path).unwrap();
-        self.write_file_chunks(&mut fd, data_res);
+        if let Some(data_res) = data_res_opt {
+          self.write_file_chunks(&mut fd, data_res);
+        }
       }
       // Prepare for next filename:
       path.pop();
@@ -387,6 +434,22 @@ impl Family
     };
 
     return listing;
+  }
+
+  pub fn fetch_dir_data<HTB: hash_tree::HashTreeBackend + Clone>(
+    &self, dir_hash: Hash, dir_ref: Vec<u8>, backend: HTB
+    ) -> Vec<json::Json> {
+    let mut out = Vec::new();
+    let mut it = hash_tree::SimpleHashTreeReader::open(backend, dir_hash, dir_ref)
+      .expect("unable to open dir");
+    for chunk in it {
+      if chunk.len() == 0 {
+        continue;
+      }
+      let m = json::Json::from_str(str::from_utf8(chunk.as_slice()).unwrap()).unwrap();
+      out.push(m);
+    }
+    return out;
   }
 
   pub fn commit(&mut self) -> (Hash, Vec<u8>) {
@@ -408,16 +471,18 @@ impl Family
       m.insert("at".to_string(), atime.to_json());
 
       if hash.len() > 0 {
-        // This is file, store its data hash:
+        // This is a file, store its data hash:
         m.insert("data_hash".to_string(), hash.to_json());
         m.insert("data_ref".to_string(), data_ref.to_json());
       } else if hash.len() == 0 {
+        drop(hash);
+        drop(data_ref);
         // This is a directory, recurse!
         let mut inner_tree = self.key_store.hash_tree_writer();
         self.commit_to_tree(&mut inner_tree, Some(id));
         // Store a reference for the sub-tree in our tree:
         let (dir_hash, dir_ref) = inner_tree.hash();
-        m.insert("dir_hash".to_string(), hash.to_json());
+        m.insert("dir_hash".to_string(), dir_hash.bytes.to_json());
         m.insert("dir_ref".to_string(), dir_ref.to_json());
       }
 
