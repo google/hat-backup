@@ -37,7 +37,7 @@ pub fn iterate_recursively<P: 'static + Send + Clone, W: 'static + PathHandler<P
 
   let threads = 10;
   let (push_ch, work_ch) = mpsc::sync_channel(threads);
-  let mut pool = sync::TaskPool::new(threads);
+  let pool = sync::TaskPool::new(threads);
 
   // Insert the first task into the queue:
   push_ch.send(Some(root)).unwrap();
@@ -63,8 +63,7 @@ pub fn iterate_recursively<P: 'static + Send + Clone, W: 'static + PathHandler<P
         pool.execute(move|| {
           let res = read_dir(&root);
           if res.is_ok() {
-            let mut it = res.unwrap();
-            for entry in it {
+            for entry in res.unwrap() {
               if entry.is_ok() {
                 let entry = entry.unwrap();
                 let file = entry.path();

@@ -47,7 +47,7 @@ impl Hash {
   /// Computes `hash(text)` and stores this digest as the `bytes` field in a new `Hash` structure.
   pub fn new(text: &[u8]) -> Hash {
     let sha512::Digest(digest_bytes) = sha512::hash(text);
-    Hash{bytes: digest_bytes.slice(0, sha512::HASHBYTES).iter().map(|&x| x).collect()}
+    Hash{bytes: digest_bytes[0 .. sha512::HASHBYTES].iter().map(|&x| x).collect()}
   }
 }
 

@@ -14,9 +14,22 @@
 
 #![crate_type="bin"]
 
+#![allow(dead_code)]
+
 #![warn(non_upper_case_globals)]
 #![warn(non_camel_case_types)]
 #![warn(unused_qualifications)]
+
+#![feature(test)]
+#![feature(std_misc)]
+#![feature(collections)]
+#![feature(core)]
+#![feature(io)]
+#![feature(path)]
+
+#![feature(old_io)]
+#![feature(old_path)]
+#![feature(old_fs)]
 
 #![feature(unboxed_closures)]
 

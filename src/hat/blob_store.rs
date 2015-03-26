@@ -300,7 +300,7 @@ impl <B: BlobStoreBackend> MsgHandler<Msg, Reply> for BlobStore<B> {
           return reply(Reply::RetrieveOK(vec![]));
         }
         let blob = self.backend_read(id.name.as_slice());
-        let chunk = blob.slice(id.begin, id.end);
+        let chunk = &blob[id.begin .. id.end];
         return reply(Reply::RetrieveOK(chunk.to_vec()));
       },
       Msg::Flush => {

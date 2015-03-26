@@ -22,7 +22,7 @@ use std::collections::{BTreeMap};
 
 use process::{Process};
 
-use blob_index::{BlobIndex, BlobIndexProcess};
+use blob_index::{BlobIndex};
 use blob_store::{BlobStore, BlobStoreProcess, BlobStoreBackend};
 
 use hash_index::{Hash, HashIndex, HashIndexProcess};
@@ -48,7 +48,6 @@ use time;
 pub struct Hat<B> {
   repository_root: Path,
   snapshot_index: SnapshotIndexProcess,
-  blob_index: BlobIndexProcess,
   blob_store: BlobStoreProcess,
   hash_index: HashIndexProcess,
   blob_backend: B,
@@ -93,7 +92,6 @@ impl <B: 'static + BlobStoreBackend + Clone + Send> Hat<B> {
       Hat{repository_root: repository_root.clone(),
           snapshot_index: si_p,
           hash_index: hi_p.clone(),
-          blob_index: bi_p,
           blob_store: bs_p.clone(),
           blob_backend: backend.clone(),
           hash_backend: key_store::HashStoreBackend::new(hi_p, bs_p),
@@ -141,7 +139,7 @@ impl <B: 'static + BlobStoreBackend + Clone + Send> Hat<B> {
         _ => panic!("Unexpected result from snapshot index"),
       };
 
-    let mut family = self.open_family(family_name.clone()).expect(
+    let family = self.open_family(family_name.clone()).expect(
       format!("Could not open family '{}'", family_name).as_slice());
 
     let mut output_dir = output_dir;
@@ -295,7 +293,7 @@ impl Iterator for FileIterator {
     let mut buf = vec![0u8; 128*1024];
     match self.file.read(buf.as_mut_slice()) {
       Err(_) => None,
-      Ok(size) => Some(buf.slice_to(size).to_vec()),
+      Ok(size) => Some(buf[..size].to_vec()),
     }
   }
 }
@@ -303,7 +301,7 @@ impl Iterator for FileIterator {
 
 #[derive(Clone)]
 struct InsertPathHandler {
-  count: sync::Arc<sync::atomic::AtomicInt>,
+  count: sync::Arc<sync::atomic::AtomicIsize>,
   last_print: sync::Arc<sync::Mutex<time::Timespec>>,
   key_store: KeyStoreProcess<FileEntry, FileIterator>,
 }
@@ -312,7 +310,7 @@ impl InsertPathHandler {
   pub fn new(key_store: KeyStoreProcess<FileEntry, FileIterator>)
              -> InsertPathHandler {
     InsertPathHandler{
-      count: sync::Arc::new(sync::atomic::AtomicInt::new(0)),
+      count: sync::Arc::new(sync::atomic::AtomicIsize::new(0)),
       last_print: sync::Arc::new(sync::Mutex::new(time::now().to_timespec())),
       key_store: key_store,
     }
@@ -333,20 +331,19 @@ impl listdir::PathHandler<Option<Vec<u8>>> for InsertPathHandler
       }
     }
 
-    let fileEntry_opt = FileEntry::new(path.clone(), parent);
-    match fileEntry_opt {
+    match FileEntry::new(path.clone(), parent) {
       Err(e) => {
         println!("Skipping '{}': {}", path.display(), e.to_string());
       },
-      Ok(fileEntry) => {
-        if fileEntry.is_symlink() {
+      Ok(file_entry) => {
+        if file_entry.is_symlink() {
           return None;
         }
-        let is_directory = fileEntry.is_directory();
+        let is_directory = file_entry.is_directory();
         let local_root = path;
-        let local_fileEntry = fileEntry.clone();
+        let local_file_entry = file_entry.clone();
         let create_file_it = Thunk::new(move|| {
-          match local_fileEntry.file_iterator() {
+          match local_file_entry.file_iterator() {
             Err(e) => {println!("Skipping '{}': {}", local_root.display(), e.to_string());
                        None},
             Ok(it) => { Some(it) }
@@ -355,7 +352,7 @@ impl listdir::PathHandler<Option<Vec<u8>>> for InsertPathHandler
         let create_file_it_opt = if is_directory { None }
                                  else { Some(create_file_it) };
 
-        match self.key_store.send_reply(key_store::Msg::Insert(fileEntry, create_file_it_opt))
+        match self.key_store.send_reply(key_store::Msg::Insert(file_entry, create_file_it_opt))
         {
           key_store::Reply::Id(id) => {
             if is_directory { return Some(Some(id)) }
@@ -400,7 +397,7 @@ impl Family
     &self, fd: &mut File, tree: hash_tree::ReaderResult<HTB>)
   {
     for chunk in tree {
-      try_a_few_times_then_panic(|| fd.write(chunk.as_slice()).is_ok(), "Could not write chunk.");
+      try_a_few_times_then_panic(|| fd.write_all(&chunk[..]).is_ok(), "Could not write chunk.");
     }
     try_a_few_times_then_panic(|| fd.flush().is_ok(), "Could not flush file.");
   }
@@ -440,13 +437,13 @@ impl Family
     &self, dir_hash: Hash, dir_ref: Vec<u8>, backend: HTB
     ) -> Vec<json::Json> {
     let mut out = Vec::new();
-    let mut it = hash_tree::SimpleHashTreeReader::open(backend, dir_hash, dir_ref)
+    let it = hash_tree::SimpleHashTreeReader::open(backend, dir_hash, dir_ref)
       .expect("unable to open dir");
     for chunk in it {
       if chunk.len() == 0 {
         continue;
       }
-      let m = json::Json::from_str(str::from_utf8(chunk.as_slice()).unwrap()).unwrap();
+      let m = json::Json::from_str(str::from_utf8(&chunk[..]).unwrap()).unwrap();
       out.push(m);
     }
     return out;
