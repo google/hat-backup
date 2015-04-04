@@ -12,31 +12,29 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::old_io::{Timer};
-use std::sync::mpsc::{Receiver};
+use time::SteadyTime;
 use std::time::duration::{Duration};
 
+
 pub struct PeriodicTimer {
-  timer: Timer,
-  periodic: Receiver<()>,
+  start: SteadyTime,
+  interval: Duration,
 }
 
 
 impl PeriodicTimer {
 
   pub fn new(interval: Duration) -> PeriodicTimer {
-    let mut pt = PeriodicTimer{timer: Timer::new().unwrap(),
-                               periodic: Timer::new().unwrap().periodic(interval)};
-    pt.periodic = pt.timer.periodic(interval);
-    pt
+    PeriodicTimer{start: SteadyTime::now(), interval:interval}
   }
 
   pub fn did_fire(&mut self) -> bool {
-    let mut fired = false;
-    while self.periodic.try_recv().is_ok() {
-      fired = true;
+    if SteadyTime::now() - self.start >= self.interval {
+      self.start = SteadyTime::now();
+      return true;
+    } else {
+      return true;
     }
-    return fired;
   }
 
 }

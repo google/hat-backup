@@ -27,7 +27,6 @@
 #![feature(io)]
 #![feature(path)]
 
-#![feature(old_io)]
 #![feature(old_path)]
 #![feature(old_fs)]
 

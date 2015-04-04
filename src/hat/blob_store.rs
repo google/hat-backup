@@ -23,7 +23,8 @@ use rustc_serialize::hex::{ToHex};
 
 use std::collections::{BTreeMap};
 
-use std::old_io::{File};
+use std::fs;
+use std::io::{Read, Write};
 use std::str;
 
 use process::{Process, MsgHandler};
@@ -75,7 +76,7 @@ impl BlobStoreBackend for FileBackend {
     let mut path = self.root.clone();
     path.push(name.to_hex());
 
-    let mut file = match File::create(&path) {
+    let mut file = match fs::File::create(&path) {
       Err(e) => return Err(e.to_string()),
       Ok(f) => f,
     };
@@ -100,10 +101,12 @@ impl BlobStoreBackend for FileBackend {
                  p.push(name.as_slice().to_hex());
                  p };
 
-    let mut fd = File::open(&path).unwrap();
-
-    let res = fd.read_to_end().and_then(|data| {
-      Ok(data) }).or_else(|e| Err(e.to_string()));
+    let mut fd = fs::File::open(&path).unwrap();
+    let mut buf = Vec::new();
+    let res = match fd.read_to_end(&mut buf) {
+      Ok(()) => Ok(buf),
+      Err(e) => Err(e.to_string()),
+    };
 
     // Update cache to contain key:
     self.guarded_cache_put(name, res.clone());

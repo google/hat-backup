@@ -15,9 +15,7 @@
 //! Helpers for reading directory structures from the local filesystem.
 
 use std::path::PathBuf;
-
-use std::old_io::FileType::{Directory};
-use std::old_io::fs::{lstat};
+use std::fs::PathExt;
 
 use std::fs::{read_dir};
 
@@ -26,15 +24,13 @@ use std::sync::mpsc;
 
 
 pub trait PathHandler<D> {
-  fn handle_path(&self, D, Path) -> Option<D>;
+  fn handle_path(&self, D, PathBuf) -> Option<D>;
 }
 
 
 pub fn iterate_recursively<P: 'static + Send + Clone, W: 'static + PathHandler<P> + Send + Clone>
-  (root: (Path, P), worker: &mut W)
+  (root: (PathBuf, P), worker: &mut W)
 {
-  let root = (PathBuf::new(&root.0), root.1);
-
   let threads = 10;
   let (push_ch, work_ch) = mpsc::sync_channel(threads);
   let pool = sync::TaskPool::new(threads);
@@ -67,8 +63,8 @@ pub fn iterate_recursively<P: 'static + Send + Clone, W: 'static + PathHandler<P
               if entry.is_ok() {
                 let entry = entry.unwrap();
                 let file = entry.path();
-                let old_path = Path::new(file.to_str().unwrap());
-                let dir_opt = _worker.handle_path(payload.clone(), old_path);
+                let path = PathBuf::new(file.to_str().unwrap());
+                let dir_opt = _worker.handle_path(payload.clone(), path);
                 if dir_opt.is_some() {
                   _push_ch.send(Some((file.clone(), dir_opt.unwrap()))).unwrap();
                 }
@@ -90,17 +86,11 @@ impl Clone for PrintPathHandler {
 }
 
 impl PathHandler<()> for PrintPathHandler {
-  fn handle_path(&self, _: (), path: Path) -> Option<()> {
-    let filename_opt = path.filename_str();
+  fn handle_path(&self, _: (), path: PathBuf) -> Option<()> {
     println!("{}", path.display());
-    match filename_opt {
-      Some(".") | Some("..") | None => None,
-      Some(_) => {
-        match lstat(&path) {
-          Ok(ref st) if st.kind == Directory => Some(()),
-          _ => None,
-        }
-      }
+    match path.metadata() {
+      Ok(ref m) if m.is_dir() => Some(()),
+      _ => None,
     }
   }
 }

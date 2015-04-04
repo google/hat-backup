@@ -35,10 +35,13 @@ use snapshot_index;
 use hash_tree;
 use listdir;
 
-use std::old_io;
-use std::old_io::{Reader, IoResult, USER_DIR, FileStat};
-use std::old_io::FileType::{Directory, Symlink, RegularFile};
-use std::old_io::fs::{lstat, File, mkdir_recursive};
+use std::path::PathBuf;
+use std::fs::PathExt;
+use std::fs;
+use std::io;
+use std::io::{Read, Write};
+
+use std::hash::{hash, SipHasher};
 use std::sync;
 use std::sync::atomic;
 
@@ -147,7 +150,7 @@ impl <B: 'static + BlobStoreBackend + Clone + Send> Hat<B> {
   }
 
   fn checkout_dir_ref(&self, family: &Family, output: &mut Path, dir_hash: Hash, dir_ref: Vec<u8>) {
-    mkdir_recursive(&output, USER_DIR).unwrap();
+    fs::create_dir_all(output).unwrap();
     for o in family.fetch_dir_data(dir_hash, dir_ref, self.hash_backend.clone()) {
       for d in o.as_array().unwrap().iter() {
         if let Some(ref m) = d.as_object() {
@@ -167,7 +170,7 @@ impl <B: 'static + BlobStoreBackend + Clone + Send> Hat<B> {
           if m.contains_key("dir_hash") {
             self.checkout_dir_ref(family, output, hash, pref);
           } else if m.contains_key("data_hash") {
-            let mut fd = File::create(&output).unwrap();
+            let mut fd = fs::File::create(output).unwrap();
             let tree_opt = hash_tree::SimpleHashTreeReader::open(self.hash_backend.clone(), hash, pref);
             if let Some(tree) = tree_opt {
               family.write_file_chunks(&mut fd, tree);
@@ -184,36 +187,37 @@ struct FileEntry {
   name: Vec<u8>,
   id: Option<u64>,
   parent_id: Option<u64>,
-  stat: FileStat,
-  full_path: Path,
+  metadata: fs::Metadata,
+  full_path: PathBuf,
+  link_path: Option<PathBuf>,
 }
 
 impl FileEntry {
-  fn new(full_path: Path,
-         parent: Option<u64>) -> Result<FileEntry, old_io::IoError> {
-    let filename_opt = full_path.filename();
+  fn new(full_path: PathBuf,
+         parent: Option<u64>) -> Result<FileEntry, String> {
+    let filename_opt = full_path.file_name().and_then(|n| n.to_str());
+    let link_path = fs::read_link(&full_path).ok();
+
     if filename_opt.is_some() {
-      lstat(&full_path).map(|st| {
-        FileEntry{
-          name: filename_opt.unwrap().to_vec(),
-          id: None,
-          parent_id: parent.clone(),
-          stat: st,
-          full_path: full_path.clone()}
+      Ok(FileEntry{
+        name: filename_opt.unwrap().bytes().collect(),
+        id: None,
+        parent_id: parent.clone(),
+        metadata: full_path.metadata().unwrap(),
+        full_path: full_path.clone(),
+        link_path: link_path,
       })
     }
-    else { Err(old_io::IoError{kind: old_io::OtherIoError,
-                               desc: "Could not parse filename.",
-                               detail: None }) }
+    else { Err("Could not parse filename."[..].to_string()) }
   }
 
-  fn file_iterator(&self) -> IoResult<FileIterator> {
+  fn file_iterator(&self) -> io::Result<FileIterator> {
     FileIterator::new(&self.full_path)
   }
 
-  fn is_directory(&self) -> bool { self.stat.kind == Directory }
-  fn is_symlink(&self) -> bool { self.stat.kind == Symlink }
-  fn is_file(&self) -> bool { self.stat.kind == RegularFile }
+  fn is_directory(&self) -> bool { self.metadata.is_dir() }
+  fn is_symlink(&self) -> bool { self.link_path.is_some() }
+  fn is_file(&self) -> bool { self.is_file() }
 }
 
 impl Clone for FileEntry {
@@ -222,16 +226,10 @@ impl Clone for FileEntry {
       name:self.name.clone(),
       id: self.id.clone(),
       parent_id:self.parent_id.clone(),
-      stat: FileStat{
-        size: self.stat.size,
-        kind: self.stat.kind,
-        perm: self.stat.perm,
-        created: self.stat.created,
-        modified: self.stat.modified,
-        accessed: self.stat.accessed,
-        unstable: self.stat.unstable,
-      },
-      full_path:self.full_path.clone()}
+      metadata: self.full_path.metadata().unwrap(),
+      full_path: self.full_path.clone(),
+      link_path: self.link_path.clone(),
+    }
   }
 }
 
@@ -240,24 +238,24 @@ impl KeyEntry<FileEntry> for FileEntry {
     self.name.clone()
   }
   fn id(&self) -> Option<u64> {
-    self.id
+    self.id.clone()
   }
   fn parent_id(&self) -> Option<u64> {
     self.parent_id.clone()
   }
 
   fn size(&self) -> Option<u64> {
-    Some(self.stat.size)
+    Some(self.metadata.len())
   }
 
   fn created(&self) -> Option<u64> {
-    Some(self.stat.created)
+    None
   }
   fn modified(&self) -> Option<u64> {
-    Some(self.stat.modified)
+    Some(self.metadata.modified())
   }
   fn accessed(&self) -> Option<u64> {
-    Some(self.stat.accessed)
+    Some(self.metadata.accessed())
   }
 
   fn permissions(&self) -> Option<u64> {
@@ -277,12 +275,12 @@ impl KeyEntry<FileEntry> for FileEntry {
 }
 
 struct FileIterator {
-  file: File
+  file: fs::File
 }
 
 impl FileIterator {
-  fn new(path: &Path) -> IoResult<FileIterator> {
-    match File::open(path) {
+  fn new(path: &PathBuf) -> io::Result<FileIterator> {
+    match fs::File::open(path) {
       Ok(f) => Ok(FileIterator{file: f}),
       Err(e) => Err(e),
     }
@@ -294,8 +292,9 @@ impl Iterator for FileIterator {
 
   fn next(&mut self) -> Option<Vec<u8>> {
     let mut buf = vec![0u8; 128*1024];
-    match self.file.read(buf.as_mut_slice()) {
+    match self.file.read(&mut buf[..]) {
       Err(_) => None,
+      Ok(size) if size == 0 => None,
       Ok(size) => Some(buf[..size].to_vec()),
     }
   }
@@ -322,7 +321,7 @@ impl InsertPathHandler {
 
 impl listdir::PathHandler<Option<u64>> for InsertPathHandler
 {
-  fn handle_path(&self, parent: Option<u64>, path: Path) -> Option<Option<u64>> {
+  fn handle_path(&self, parent: Option<u64>, path: PathBuf) -> Option<Option<u64>> {
     let count = self.count.fetch_add(1, atomic::Ordering::SeqCst) + 1;
 
     if count % 16 == 0 {  // don't hammer the mutex
@@ -389,7 +388,7 @@ impl Family
 {
   pub fn snapshot_dir(&self, dir: Path) {
     let mut handler = InsertPathHandler::new(self.key_store_process.clone());
-    listdir::iterate_recursively((Path::new(dir.clone()), None), &mut handler);
+    listdir::iterate_recursively((PathBuf::new(&dir), None), &mut handler);
   }
 
   pub fn flush(&self) {
@@ -397,7 +396,7 @@ impl Family
   }
 
   fn write_file_chunks<HTB: hash_tree::HashTreeBackend + Clone>(
-    &self, fd: &mut File, tree: hash_tree::ReaderResult<HTB>)
+    &self, fd: &mut fs::File, tree: hash_tree::ReaderResult<HTB>)
   {
     for chunk in tree {
       try_a_few_times_then_panic(|| fd.write_all(&chunk[..]).is_ok(), "Could not write chunk.");
@@ -413,11 +412,11 @@ impl Family
 
       if hash.len() == 0 {
         // This is a directory, recurse!
-        mkdir_recursive(&path, USER_DIR).unwrap();
+        fs::create_dir_all(&path).unwrap();
         self.checkout_in_dir(path.clone(), Some(id));
       } else {
         // This is a file, write it
-        let mut fd = File::create(&path).unwrap();
+        let mut fd = fs::File::create(&path).unwrap();
         if let Some(data_res) = data_res_opt {
           self.write_file_chunks(&mut fd, data_res);
         }

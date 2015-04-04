@@ -105,20 +105,20 @@ impl KeyIndex {
       Err(err) => panic!("{:?}", err),
     };
     ki.exec_or_die("CREATE TABLE IF NOT EXISTS
-                  key_index (rowid  INTEGER PRIMARY KEY,
-                             parent INTEGER,
-                             name   BLOB,
-                             created UINT8,
-                             modified UINT8,
-                             accessed UINT8,
-                             hash BLOB,
-                             persistent_ref BLOB
+                    key_index (rowid          INTEGER PRIMARY KEY,
+                               parent         INTEGER,
+                               name           BLOB,
+                               created        UINT8,
+                               modified       UINT8,
+                               accessed       UINT8,
+                               hash           BLOB,
+                               persistent_ref BLOB
                             );");
 
     if cfg!(test) {
       ki.exec_or_die("CREATE UNIQUE INDEX IF NOT EXISTS
-                    KeyIndex_UniqueParentName
-                    ON key_index(parent, name)");
+                      KeyIndex_UniqueParentName
+                      ON key_index(parent, name)");
     }
 
     ki.exec_or_die("BEGIN");
