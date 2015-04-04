@@ -473,7 +473,7 @@ mod tests {
 
   #[bench]
   fn append_unknown_16x128_kb(bench: &mut Bencher) {
-    let mut bytes = vec![0u8, 128*1024];
+    let mut bytes = vec![0u8; 128*1024];
 
     bench.iter(|| {
       let mut ht = SimpleHashTreeWriter::new(8, MemoryBackend::new());

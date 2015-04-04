@@ -29,8 +29,8 @@ use rustc_serialize::hex::{ToHex};
 
 
 pub trait KeyEntry<KE> {
-  fn id(&self) -> Option<Vec<u8>>;
-  fn parent_id(&self) -> Option<Vec<u8>>;
+  fn id(&self) -> Option<u64>;
+  fn parent_id(&self) -> Option<u64>;
 
   fn name(&self) -> Vec<u8>;
   fn size(&self) -> Option<u64>;
@@ -43,7 +43,7 @@ pub trait KeyEntry<KE> {
   fn user_id(&self) -> Option<u64>;
   fn group_id(&self) -> Option<u64>;
 
-  fn with_id(&self, Vec<u8>) -> KE;
+  fn with_id(&self, u64) -> KE;
 }
 
 pub type KeyIndexProcess<KE> = Process<Msg<KE>, Reply>;
@@ -64,17 +64,17 @@ pub enum Msg<KeyEntryT> {
 
   /// List a directory (aka. `level`) in the index.
   /// Returns `ListResult` with all the entries under the given parent.
-  ListDir(Option<Vec<u8>>),
+  ListDir(Option<u64>),
 
   /// Flush this key index.
   Flush,
 }
 
 pub enum Reply {
-  Id(Vec<u8>),
+  Id(u64),
   NotFound,
   UpdateOK,
-  ListResult(Vec<(Vec<u8>, Vec<u8>, u64, u64, u64, Vec<u8>, Vec<u8>)>),
+  ListResult(Vec<(u64, Vec<u8>, u64, u64, u64, Vec<u8>, Vec<u8>)>),
   FlushOK,
 }
 
@@ -83,6 +83,14 @@ pub struct KeyIndex {
   path: String,
   dbh: Database,
   flush_timer: PeriodicTimer,
+}
+
+
+fn i64_to_u64_or_panic(x: i64) -> u64 {
+  if x < 0 {
+    panic!("expected u64, got {:?}", x);
+  }
+  return x as u64
 }
 
 
@@ -97,8 +105,8 @@ impl KeyIndex {
       Err(err) => panic!("{:?}", err),
     };
     ki.exec_or_die("CREATE TABLE IF NOT EXISTS
-                  key_index (id     BLOB PRIMARY KEY,
-                             parent BLOB,
+                  key_index (rowid  INTEGER PRIMARY KEY,
+                             parent INTEGER,
                              name   BLOB,
                              created UINT8,
                              modified UINT8,
@@ -125,8 +133,8 @@ impl KeyIndex {
   fn exec_or_die(&mut self, sql: &str) {
     match self.dbh.exec(sql) {
       Ok(true) => (),
-      Ok(false) => panic!("exec: {:?}", self.dbh.get_errmsg()),
-      Err(msg) => panic!("exec: {:?}, {:?}", msg, self.dbh.get_errmsg()),
+      Ok(false) => panic!("exec: {:?}, {}", self.dbh.get_errmsg(), sql),
+      Err(msg) => panic!("exec: {:?}, {:?}, {}", msg, self.dbh.get_errmsg(), sql),
     }
   }
 
@@ -165,56 +173,40 @@ impl <A: KeyEntry<A>> MsgHandler<Msg<A>, Reply> for KeyIndex {
     match msg {
 
       Msg::Insert(entry) => {
-        let parent = entry.parent_id().unwrap_or(vec![]);
-        let id = entry.id().unwrap_or_else(|| randombytes(16));
+        let parent = entry.parent_id().unwrap_or(0);
 
         self.exec_or_die(format!(
-          "INSERT OR REPLACE INTO key_index (id, parent, name, created, accessed)
-           VALUES (x'{}', x'{}', x'{}', {}, {})",
-          id.as_slice().to_hex(), parent.as_slice().to_hex(), entry.name().as_slice().to_hex(),
+          "INSERT OR REPLACE INTO key_index (parent, name, created, accessed)
+           VALUES ({:?}, x'{}', {}, {})",
+          parent, entry.name().as_slice().to_hex(),
           entry.created().unwrap_or(0),
           entry.accessed().unwrap_or(0)).as_slice());
 
-        return reply(Reply::Id(id));
+        let id = self.dbh.get_last_insert_rowid();
+        return reply(Reply::Id(i64_to_u64_or_panic(id)));
       },
 
       Msg::LookupExact(entry) => {
-        let parent = entry.parent_id().unwrap_or(vec![]);
-        let mut cursor = match entry.id() {
-          Some(id) => {
-            self.prepare_or_die(format!(
-              "SELECT id FROM key_index
-                WHERE parent=x'{}' AND id=x'{}'
-                AND created={} AND modified={} AND accessed={}
-                LIMIT 1",
-              parent.as_slice().to_hex(), id.as_slice().to_hex(),
-              entry.created().unwrap_or(0),
-              entry.modified().unwrap_or(0),
-              entry.accessed().unwrap_or(0)).as_slice())
-          },
-          None => {
-            self.prepare_or_die(format!(
-              "SELECT id FROM key_index
-                WHERE parent=x'{}' AND name=x'{}'
-                AND created={} AND modified={} AND accessed={}
-                LIMIT 1",
-              parent.as_slice().to_hex(), entry.name().as_slice().to_hex(),
-              entry.created().unwrap_or(0),
-              entry.modified().unwrap_or(0),
-              entry.accessed().unwrap_or(0)).as_slice())
-          }
-        };
+        let parent = entry.parent_id().unwrap_or(0);
+        let mut cursor = self.prepare_or_die(format!(
+          "SELECT rowid FROM key_index
+           WHERE parent={:?} AND name=x'{}'
+           AND created={} AND modified={} AND accessed={}
+           LIMIT 1",
+          parent, entry.name().as_slice().to_hex(),
+          entry.created().unwrap_or(0),
+          entry.modified().unwrap_or(0),
+          entry.accessed().unwrap_or(0)).as_slice());
         if cursor.step() == SQLITE_ROW {
-          let res = Reply::Id(cursor.get_blob(0).expect("id").iter().map(|&x| x).collect());
           assert!(cursor.step() == SQLITE_DONE);
-          return reply(res);
+          return reply(Reply::Id((i64_to_u64_or_panic(cursor.get_i64(0)))));
         } else {
           return reply(Reply::NotFound);
         }
       },
 
       Msg::UpdateDataHash(entry, hash_opt, persistent_ref_opt) => {
-        let parent = entry.parent_id().unwrap_or(vec![]);
+        let parent = entry.parent_id().unwrap_or(0);
 
         assert!(hash_opt.is_some() == persistent_ref_opt.is_some());
 
@@ -224,19 +216,19 @@ impl <A: KeyEntry<A>> MsgHandler<Msg<A>, Reply> for KeyIndex {
               self.exec_or_die(format!(
                 "UPDATE key_index SET hash=x'{}', persistent_ref=x'{}'
                                                   , modified={}
-                  WHERE parent=x'{}' AND id=x'{}' AND IFNULL(modified,0)<={}",
+                  WHERE parent={:?} AND rowid={:?} AND IFNULL(modified,0)<={}",
                 hash_opt.unwrap().as_slice().to_hex(),
                 persistent_ref_opt.unwrap().as_slice().to_hex(),
-                modified, parent.as_slice().to_hex(), entry.id().unwrap().as_slice().to_hex(),
+                modified, parent, entry.id().expect("UpdateDataHash"),
                 modified).as_slice());
             },
             None => {
               self.exec_or_die(format!(
                 "UPDATE key_index SET hash=x'{}', persistent_ref=x'{}'
-                 WHERE parent=x'{}' AND id=x'{}'",
+                 WHERE parent={:?} AND rowid={:?}",
                 hash_opt.unwrap().as_slice().to_hex(),
                 persistent_ref_opt.unwrap().as_slice().to_hex(),
-                parent.as_slice().to_hex(), entry.id().unwrap().as_slice().to_hex()).as_slice());
+                parent, entry.id().expect("UpdateDataHash, None")).as_slice());
             }
           }
         } else {
@@ -245,15 +237,14 @@ impl <A: KeyEntry<A>> MsgHandler<Msg<A>, Reply> for KeyIndex {
               self.exec_or_die(format!(
                 "UPDATE key_index SET hash=NULL, persistent_ref=NULL
                                                , modified={}
-                  WHERE parent=x'{}' AND id=x'{}' AND IFNULL(modified, 0)<={}",
-                modified, parent.as_slice().to_hex(), entry.id().unwrap().as_slice().to_hex(),
-                modified).as_slice());
+                 WHERE parent={:?} AND rowid={:?} AND IFNULL(modified, 0)<={}",
+                modified, parent, entry.id().expect("UpdateDataHash2"), modified).as_slice());
             },
             None => {
               self.exec_or_die(format!(
                 "UPDATE key_index SET hash=NULL, persistent_ref=NULL
-                 WHERE parent=x'{}' AND id=x'{}'",
-                parent.as_slice().to_hex(), entry.id().unwrap().as_slice().to_hex()).as_slice());
+                 WHERE parent={:?} AND rowid={}",
+                parent, entry.id().expect("UpdateDataHash2, None")).as_slice());
             }
           }
         }
@@ -267,18 +258,18 @@ impl <A: KeyEntry<A>> MsgHandler<Msg<A>, Reply> for KeyIndex {
         return reply(Reply::FlushOK);
       },
 
-      Msg::ListDir(parent) => {
+      Msg::ListDir(parent_opt) => {
         let mut listing = Vec::new();
-        let parent = parent.unwrap_or(vec![]);
+        let parent = parent_opt.unwrap_or(0);
 
         let mut cursor = self.prepare_or_die(format!(
-           "SELECT id, name, created, modified, accessed, hash, persistent_ref
+           "SELECT rowid, name, created, modified, accessed, hash, persistent_ref
             FROM key_index
-            WHERE parent=x'{}'", parent.as_slice().to_hex()).as_slice());
+            WHERE parent={:?}", parent).as_slice());
 
         // TODO(jos): replace get_int with something that understands usize64
         while cursor.step() == SQLITE_ROW {
-          let id = cursor.get_blob(0).expect("id").iter().map(|&x| x).collect();
+          let id = i64_to_u64_or_panic(cursor.get_i64(0));
           let name = cursor.get_blob(1).expect("name").iter().map(|&x| x).collect();
           let created = cursor.get_int(2);
           let modified = cursor.get_int(3);
@@ -303,15 +294,15 @@ mod tests {
   use super::*;
 
   struct TestEntry {
-    id: Option<Vec<u8>>,
-    parent: Option<Vec<u8>>,
+    id: Option<u64>,
+    parent: Option<u64>,
     name: Vec<u8>,
   }
   impl KeyEntry<TestEntry> for TestEntry {
-    fn id(&self) -> Option<Vec<u8>> {
+    fn id(&self) -> Option<u64> {
       None
     }
-    fn parent_id(&self) -> Option<Vec<u8>>{
+    fn parent_id(&self) -> Option<u64>{
       self.parent.clone()
     }
     fn name(&self) -> Vec<u8> {
@@ -341,7 +332,7 @@ mod tests {
     fn group_id(&self) -> Option<u64> {
       None
     }
-    fn with_id(&self, id: Vec<u8>) -> TestEntry {
+    fn with_id(&self, id: u64) -> TestEntry {
       TestEntry{id:Some(id),
                 parent: self.parent_id(),
                 name: self.name()}

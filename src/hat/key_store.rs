@@ -32,7 +32,7 @@ use key_index::{KeyIndex};
 
 pub type KeyStoreProcess<KE, IT> = Process<Msg<KE, IT>, Reply>;
 
-pub type DirElem = (Vec<u8>, Vec<u8>, u64, u64, u64, Vec<u8>, Vec<u8>,
+pub type DirElem = (u64, Vec<u8>, u64, u64, u64, Vec<u8>, Vec<u8>,
                     Option<ReaderResult<HashStoreBackend>>);
 
 // Public structs
@@ -46,7 +46,7 @@ pub enum Msg<KE, IT> {
 
   /// List a "directory" (aka. a `level`) in the index.
   /// Returns `ListResult` with all the entries under the given parent.
-  ListDir(Option<Vec<u8>>),
+  ListDir(Option<u64>),
 
   /// Flush this key store and its dependencies.
   /// Returns `FlushOK`.
@@ -54,7 +54,7 @@ pub enum Msg<KE, IT> {
 }
 
 pub enum Reply {
-  Id(Vec<u8>),
+  Id(u64),
   ListResult(Vec<DirElem>),
   FlushOK,
 }
@@ -247,6 +247,9 @@ impl
             // The bounded input-channel will prevent the client from overflowing us.
             reply(Reply::Id(id.clone()));
 
+            let new_entry = org_entry.with_id(id);
+            assert!(new_entry.id().is_some());
+
             // Setup hash tree structure
             let mut tree = self.hash_tree_writer();
 
@@ -254,7 +257,7 @@ impl
             let it_opt = chunk_it_opt.and_then(|p| p.invoke(()));
             if it_opt.is_none() {
               // No data is associated with this entry.
-              self.index.send_reply(key_index::Msg::UpdateDataHash(org_entry, None, None));
+              self.index.send_reply(key_index::Msg::UpdateDataHash(new_entry, None, None));
               // Bail out before storing data that does not exist:
               return;
             }
@@ -274,7 +277,6 @@ impl
             let (hash, persistent_ref) = tree.hash();
 
             // Install a callback for updating the entry's data hash once the data has been stored:
-            let new_entry = org_entry.with_id(id);
             let local_index = self.index.clone();
             let hash_bytes = hash.bytes.clone();
             let callback = Thunk::new(move|| {
@@ -314,9 +316,9 @@ mod tests {
 
   #[derive(Clone, Debug)]
   struct KeyEntryStub {
-    parent_id: Option<Vec<u8>>,
+    parent_id: Option<u64>,
 
-    id: Vec<u8>,
+    id: Option<u64>,
     name: Vec<u8>,
 
     data: Option<Vec<Vec<u8>>>,
@@ -325,12 +327,12 @@ mod tests {
   }
 
   impl KeyEntryStub {
-    fn new(parent: Option<Vec<u8>>, name: Vec<u8>, data: Option<Vec<Vec<u8>>>,
+    fn new(parent: Option<u64>, name: Vec<u8>, data: Option<Vec<Vec<u8>>>,
            modified: Option<u64>) ->
       KeyEntryStub
     {
       KeyEntryStub{parent_id: parent,
-                   id: random_ascii_bytes(),
+                   id: None,
                    name: name,
                    data: data,
                    modified: modified}
@@ -339,11 +341,11 @@ mod tests {
 
   impl KeyEntry<KeyEntryStub> for KeyEntryStub {
 
-    fn id(&self) -> Option<Vec<u8>> {
-      Some(self.id.clone())
+    fn id(&self) -> Option<u64> {
+      self.id.clone()
     }
 
-    fn parent_id(&self) -> Option<Vec<u8>> {
+    fn parent_id(&self) -> Option<u64> {
       self.parent_id.clone()
     }
 
@@ -379,9 +381,10 @@ mod tests {
       None
     }
 
-    fn with_id(&self, id: Vec<u8>) -> KeyEntryStub {
-      assert_eq!(self.id, id);
-      self.clone()
+    fn with_id(&self, id: u64) -> KeyEntryStub {
+      let mut x = self.clone();
+      x.id = Some(id);
+      return x;
     }
 
   }
@@ -405,7 +408,7 @@ mod tests {
 
   fn rng_filesystem(size: usize) -> FileSystem
   {
-    fn create_files(parent_id: Option<Vec<u8>>, size: usize) -> Vec<FileSystem> {
+    fn create_files(parent_id: Option<u64>, size: usize) -> Vec<FileSystem> {
       let children = size as f32 / 10.0;
 
       // dist_factor * i for i in range(children) + children == size
@@ -449,22 +452,29 @@ mod tests {
                filelist: create_files(root_id, size)}
   }
 
-  fn insert_fs(fs: &FileSystem, ks_p: KeyStoreProcess<KeyEntryStub, KeyEntryStub>) {
-
+  fn insert_and_update_fs(fs: &mut FileSystem, ks_p: KeyStoreProcess<KeyEntryStub, KeyEntryStub>)
+  {
     let local_file = fs.file.clone();
-    ks_p.send_reply(Msg::Insert(fs.file.clone(),
-                               if fs.file.data.is_some() {
-                                 Some(Thunk::new(move|| { Some(local_file) }))
-                               } else { None }));
+    let id = match ks_p.send_reply(Msg::Insert(fs.file.clone(),
+                                               if fs.file.data.is_some() {
+                                                 Some(Thunk::new(move|| { Some(local_file) }))
+                                               } else { None })
+                                   ) {
+      Reply::Id(id) => id,
+      _ => panic!("unexpected reply from key store"),
+    };
 
-    for fs in fs.filelist.iter() {
-      insert_fs(fs, ks_p.clone());
+    fs.file.id = Some(id);
+
+    for f in fs.filelist.iter_mut() {
+      f.file.parent_id = Some(id);
+      insert_and_update_fs(f, ks_p.clone());
     }
   }
 
   fn verify_filesystem(fs: &FileSystem,
-                       ks_p: KeyStoreProcess<KeyEntryStub, KeyEntryStub>) -> usize {
-
+                       ks_p: KeyStoreProcess<KeyEntryStub, KeyEntryStub>) -> usize
+  {
     let listing = match ks_p.send_reply(Msg::ListDir(fs.file.id())) {
       Reply::ListResult(ls) => ls,
       _ => panic!("Unexpected result from key store."),
@@ -518,13 +528,14 @@ mod tests {
   }
 
   #[quickcheck]
-  fn identity(size: u8) -> bool {
-    let fs = rng_filesystem(size as usize);
-
+  fn identity(size: u8) -> bool
+  {
     let backend = MemoryBackend::new();
     let ks_p = Process::new(Thunk::new(move|| { KeyStore::new_for_testing(backend) }));
 
-    insert_fs(&fs, ks_p.clone());
+    let mut fs = rng_filesystem(size as usize);
+    insert_and_update_fs(&mut fs, ks_p.clone());
+    let fs = fs;
 
     match ks_p.send_reply(Msg::Flush) {
       Reply::FlushOK => (),

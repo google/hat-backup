@@ -182,19 +182,21 @@ impl <B: 'static + BlobStoreBackend + Clone + Send> Hat<B> {
 
 struct FileEntry {
   name: Vec<u8>,
-  parent_id: Option<Vec<u8>>,
+  id: Option<u64>,
+  parent_id: Option<u64>,
   stat: FileStat,
   full_path: Path,
 }
 
 impl FileEntry {
   fn new(full_path: Path,
-         parent: Option<Vec<u8>>) -> Result<FileEntry, old_io::IoError> {
+         parent: Option<u64>) -> Result<FileEntry, old_io::IoError> {
     let filename_opt = full_path.filename();
     if filename_opt.is_some() {
       lstat(&full_path).map(|st| {
         FileEntry{
           name: filename_opt.unwrap().to_vec(),
+          id: None,
           parent_id: parent.clone(),
           stat: st,
           full_path: full_path.clone()}
@@ -217,7 +219,9 @@ impl FileEntry {
 impl Clone for FileEntry {
   fn clone(&self) -> FileEntry {
     FileEntry{
-      name:self.name.clone(), parent_id:self.parent_id.clone(),
+      name:self.name.clone(),
+      id: self.id.clone(),
+      parent_id:self.parent_id.clone(),
       stat: FileStat{
         size: self.stat.size,
         kind: self.stat.kind,
@@ -235,12 +239,10 @@ impl KeyEntry<FileEntry> for FileEntry {
   fn name(&self) -> Vec<u8> {
     self.name.clone()
   }
-  fn id(&self) -> Option<Vec<u8>> {
-    Some(format!("d{}i{}",
-                 self.stat.unstable.device,
-                 self.stat.unstable.inode).as_bytes().to_vec())
+  fn id(&self) -> Option<u64> {
+    self.id
   }
-  fn parent_id(&self) -> Option<Vec<u8>> {
+  fn parent_id(&self) -> Option<u64> {
     self.parent_id.clone()
   }
 
@@ -267,9 +269,10 @@ impl KeyEntry<FileEntry> for FileEntry {
   fn group_id(&self) -> Option<u64> {
     None
   }
-  fn with_id(&self, id: Vec<u8>) -> FileEntry {
-    assert_eq!(Some(id), self.id());
-    self.clone()
+  fn with_id(&self, id: u64) -> FileEntry {
+    let mut x = self.clone();
+    x.id = Some(id);
+    return x;
   }
 }
 
@@ -317,9 +320,9 @@ impl InsertPathHandler {
   }
 }
 
-impl listdir::PathHandler<Option<Vec<u8>>> for InsertPathHandler
+impl listdir::PathHandler<Option<u64>> for InsertPathHandler
 {
-  fn handle_path(&self, parent: Option<Vec<u8>>, path: Path) -> Option<Option<Vec<u8>>> {
+  fn handle_path(&self, parent: Option<u64>, path: Path) -> Option<Option<u64>> {
     let count = self.count.fetch_add(1, atomic::Ordering::SeqCst) + 1;
 
     if count % 16 == 0 {  // don't hammer the mutex
@@ -402,7 +405,7 @@ impl Family
     try_a_few_times_then_panic(|| fd.flush().is_ok(), "Could not flush file.");
   }
 
-  pub fn checkout_in_dir(&self, output_dir: Path, dir_id: Option<Vec<u8>>) {
+  pub fn checkout_in_dir(&self, output_dir: Path, dir_id: Option<u64>) {
     let mut path = output_dir;
     for (id, name, _, _, _, hash, _, data_res_opt) in self.listFromKeyStore(dir_id).into_iter() {
       // Extend directory with filename:
@@ -411,7 +414,7 @@ impl Family
       if hash.len() == 0 {
         // This is a directory, recurse!
         mkdir_recursive(&path, USER_DIR).unwrap();
-        self.checkout_in_dir(path.clone(), Some(id.clone()));
+        self.checkout_in_dir(path.clone(), Some(id));
       } else {
         // This is a file, write it
         let mut fd = File::create(&path).unwrap();
@@ -424,8 +427,8 @@ impl Family
     }
   }
 
-  pub fn listFromKeyStore(&self, dir_id: Option<Vec<u8>>) -> Vec<key_store::DirElem> {
-    let listing = match self.key_store_process.send_reply(key_store::Msg::ListDir(dir_id.clone())) {
+  pub fn listFromKeyStore(&self, dir_id: Option<u64>) -> Vec<key_store::DirElem> {
+    let listing = match self.key_store_process.send_reply(key_store::Msg::ListDir(dir_id)) {
       key_store::Reply::ListResult(ls) => ls,
       _ => panic!("Unexpected result from key store."),
     };
@@ -457,7 +460,7 @@ impl Family
 
   pub fn commit_to_tree(&mut self,
                         tree: &mut hash_tree::SimpleHashTreeWriter<key_store::HashStoreBackend>,
-                        dir_id: Option<Vec<u8>>) {
+                        dir_id: Option<u64>) {
     let mut keys = Vec::new();
 
     for (id, name, ctime, mtime, atime, hash, data_ref, _) in self.listFromKeyStore(dir_id).into_iter() {
