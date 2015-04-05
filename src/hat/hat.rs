@@ -217,7 +217,7 @@ impl FileEntry {
 
   fn is_directory(&self) -> bool { self.metadata.is_dir() }
   fn is_symlink(&self) -> bool { self.link_path.is_some() }
-  fn is_file(&self) -> bool { self.is_file() }
+  fn is_file(&self) -> bool { self.metadata.is_file() }
 }
 
 impl Clone for FileEntry {
