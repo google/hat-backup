@@ -36,7 +36,6 @@ use hash_tree;
 use listdir;
 
 use std::path::PathBuf;
-use std::fs::PathExt;
 use std::fs;
 use std::io;
 use std::io::{Read, Write};
@@ -49,7 +48,7 @@ use time;
 
 
 pub struct Hat<B> {
-  repository_root: Path,
+  repository_root: PathBuf,
   snapshot_index: SnapshotIndexProcess,
   blob_store: BlobStoreProcess,
   hash_index: HashIndexProcess,
@@ -58,49 +57,47 @@ pub struct Hat<B> {
   max_blob_size: usize,
 }
 
-fn concat_filename(a: &Path, b: String) -> String {
+fn concat_filename(a: &PathBuf, b: String) -> String {
   let mut result = a.clone();
-  result.push(Path::new(b));
-  result.as_str().expect("Unable to decode repository_root.").to_string()
+  result.push(&b);
+  result.into_os_string().into_string().unwrap()
 }
 
-fn snapshot_index_name(root: &Path) -> String {
+fn snapshot_index_name(root: &PathBuf) -> String {
   concat_filename(root, "snapshot_index.sqlite3".to_string())
 }
 
-fn blob_index_name(root: &Path) -> String {
+fn blob_index_name(root: &PathBuf) -> String {
   concat_filename(root, "blob_index.sqlite3".to_string())
 }
 
-fn hash_index_name(root: &Path) -> String {
+fn hash_index_name(root: &PathBuf) -> String {
   concat_filename(root, "hash_index.sqlite3".to_string())
 }
 
 impl <B: 'static + BlobStoreBackend + Clone + Send> Hat<B> {
-  pub fn open_repository(repository_root: &Path, backend: B, max_blob_size: usize)
-                        -> Option<Hat<B>> {
-    repository_root.as_str().map(|_| {
-      let snapshot_index_path = snapshot_index_name(repository_root);
-      let blob_index_path = blob_index_name(repository_root);
-      let hash_index_path = hash_index_name(repository_root);
-      let si_p = Process::new(Thunk::new(move|| { SnapshotIndex::new(snapshot_index_path) }));
-      let bi_p = Process::new(Thunk::new(move|| { BlobIndex::new(blob_index_path) }));
-      let hi_p = Process::new(Thunk::new(move|| { HashIndex::new(hash_index_path) }));
+  pub fn open_repository(repository_root: &PathBuf, backend: B, max_blob_size: usize)
+                        -> Hat<B> {
+    let snapshot_index_path = snapshot_index_name(repository_root);
+    let blob_index_path = blob_index_name(repository_root);
+    let hash_index_path = hash_index_name(repository_root);
+    let si_p = Process::new(Thunk::new(move|| { SnapshotIndex::new(snapshot_index_path) }));
+    let bi_p = Process::new(Thunk::new(move|| { BlobIndex::new(blob_index_path) }));
+    let hi_p = Process::new(Thunk::new(move|| { HashIndex::new(hash_index_path) }));
 
-      let local_blob_index = bi_p.clone();
-      let local_backend = backend.clone();
-      let bs_p = Process::new(Thunk::new(move|| {
-        BlobStore::new(local_blob_index, local_backend, max_blob_size) }));
+    let local_blob_index = bi_p.clone();
+    let local_backend = backend.clone();
+    let bs_p = Process::new(Thunk::new(move|| {
+      BlobStore::new(local_blob_index, local_backend, max_blob_size) }));
 
-      Hat{repository_root: repository_root.clone(),
-          snapshot_index: si_p,
-          hash_index: hi_p.clone(),
-          blob_store: bs_p.clone(),
-          blob_backend: backend.clone(),
-          hash_backend: key_store::HashStoreBackend::new(hi_p, bs_p),
-          max_blob_size: max_blob_size,
-      }
-    })
+    Hat{repository_root: repository_root.clone(),
+        snapshot_index: si_p,
+        hash_index: hi_p.clone(),
+        blob_store: bs_p.clone(),
+        blob_backend: backend.clone(),
+        hash_backend: key_store::HashStoreBackend::new(hi_p, bs_p),
+        max_blob_size: max_blob_size,
+    }
   }
 
   pub fn open_family(&self, name: String) -> Option<Family> {
@@ -132,7 +129,7 @@ impl <B: 'static + BlobStoreBackend + Clone + Send> Hat<B> {
     self.snapshot_index.send_reply(snapshot_index::Msg::Flush);
   }
 
-  pub fn checkout_in_dir(&self, family_name: String, output_dir: Path) {
+  pub fn checkout_in_dir(&self, family_name: String, output_dir: PathBuf) {
     // Extract latest snapshot info:
     let (dir_hash, dir_ref) =
       match self.snapshot_index.send_reply(snapshot_index::Msg::Latest(family_name.clone())) {
@@ -149,14 +146,14 @@ impl <B: 'static + BlobStoreBackend + Clone + Send> Hat<B> {
     self.checkout_dir_ref(&family, &mut output_dir, dir_hash, dir_ref);
   }
 
-  fn checkout_dir_ref(&self, family: &Family, output: &mut Path, dir_hash: Hash, dir_ref: Vec<u8>) {
+  fn checkout_dir_ref(&self, family: &Family, output: &mut PathBuf, dir_hash: Hash, dir_ref: Vec<u8>) {
     fs::create_dir_all(output).unwrap();
     for o in family.fetch_dir_data(dir_hash, dir_ref, self.hash_backend.clone()) {
       for d in o.as_array().unwrap().iter() {
         if let Some(ref m) = d.as_object() {
           let name: Vec<u8> = m.get("name").unwrap().as_array()
             .unwrap().iter().map(|x| x.as_i64().unwrap() as u8).collect();
-          output.push(Path::new(str::from_utf8(&name[..]).unwrap()));
+          output.push(str::from_utf8(&name[..]).unwrap());
           println!("{}", output.display());
 
           // TODO(jos): Replace all uses of JSON with either protocol bufffers or cap'n proto.
@@ -203,7 +200,7 @@ impl FileEntry {
         name: filename_opt.unwrap().bytes().collect(),
         id: None,
         parent_id: parent.clone(),
-        metadata: full_path.metadata().unwrap(),
+        metadata: fs::metadata(&full_path).unwrap(),
         full_path: full_path.clone(),
         link_path: link_path,
       })
@@ -226,7 +223,7 @@ impl Clone for FileEntry {
       name:self.name.clone(),
       id: self.id.clone(),
       parent_id:self.parent_id.clone(),
-      metadata: self.full_path.metadata().unwrap(),
+      metadata: fs::metadata(&self.full_path).unwrap(),
       full_path: self.full_path.clone(),
       link_path: self.link_path.clone(),
     }
@@ -386,7 +383,7 @@ struct Family {
 
 impl Family
 {
-  pub fn snapshot_dir(&self, dir: Path) {
+  pub fn snapshot_dir(&self, dir: PathBuf) {
     let mut handler = InsertPathHandler::new(self.key_store_process.clone());
     listdir::iterate_recursively((PathBuf::new(&dir), None), &mut handler);
   }
@@ -404,11 +401,11 @@ impl Family
     try_a_few_times_then_panic(|| fd.flush().is_ok(), "Could not flush file.");
   }
 
-  pub fn checkout_in_dir(&self, output_dir: Path, dir_id: Option<u64>) {
+  pub fn checkout_in_dir(&self, output_dir: PathBuf, dir_id: Option<u64>) {
     let mut path = output_dir;
     for (id, name, _, _, _, hash, _, data_res_opt) in self.listFromKeyStore(dir_id).into_iter() {
       // Extend directory with filename:
-      path.push(name.clone());
+      path.push(str::from_utf8(&name[..]).unwrap());
 
       if hash.len() == 0 {
         // This is a directory, recurse!

@@ -14,11 +14,8 @@
 
 //! Helpers for reading directory structures from the local filesystem.
 
+use std::fs;
 use std::path::PathBuf;
-use std::fs::PathExt;
-
-use std::fs::{read_dir};
-
 use std::sync::mpsc;
 
 use threadpool;
@@ -58,7 +55,7 @@ pub fn iterate_recursively<P: 'static + Send + Clone, W: 'static + PathHandler<P
         let _worker = worker.clone();
         let _push_ch = push_ch.clone();
         pool.execute(move|| {
-          let res = read_dir(&root);
+          let res = fs::read_dir(&root);
           if res.is_ok() {
             for entry in res.unwrap() {
               if entry.is_ok() {
@@ -89,7 +86,7 @@ impl Clone for PrintPathHandler {
 impl PathHandler<()> for PrintPathHandler {
   fn handle_path(&self, _: (), path: PathBuf) -> Option<()> {
     println!("{}", path.display());
-    match path.metadata() {
+    match fs::metadata(&path) {
       Ok(ref m) if m.is_dir() => Some(()),
       _ => None,
     }

@@ -25,6 +25,7 @@ use std::collections::{BTreeMap};
 
 use std::fs;
 use std::io::{Read, Write};
+use std::path::PathBuf;
 use std::str;
 
 use process::{Process, MsgHandler};
@@ -46,14 +47,14 @@ pub trait BlobStoreBackend {
 
 #[derive(Clone)]
 pub struct FileBackend {
-  root: Path,
+  root: PathBuf,
   read_cache: Arc<Mutex<BTreeMap<Vec<u8>, Result<Vec<u8>, String>>>>,
   max_cache_size: usize,
 }
 
 impl FileBackend {
 
-  pub fn new(root: Path) -> FileBackend {
+  pub fn new(root: PathBuf) -> FileBackend {
     FileBackend{root: root, read_cache: Arc::new(Mutex::new(BTreeMap::new())), max_cache_size: 10}
   }
 
@@ -74,7 +75,7 @@ impl BlobStoreBackend for FileBackend {
 
   fn store(&mut self, name: &[u8], data: &[u8]) -> Result<(), String> {
     let mut path = self.root.clone();
-    path.push(name.to_hex());
+    path.push(&name.to_hex());
 
     let mut file = match fs::File::create(&path) {
       Err(e) => return Err(e.to_string()),
@@ -98,7 +99,7 @@ impl BlobStoreBackend for FileBackend {
 
     // Read key:
     let path = { let mut p = self.root.clone();
-                 p.push(name.as_slice().to_hex());
+                 p.push(&name.to_hex());
                  p };
 
     let mut fd = fs::File::open(&path).unwrap();

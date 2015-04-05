@@ -27,9 +27,6 @@
 #![feature(io)]
 #![feature(path)]
 
-#![feature(old_path)]
-#![feature(old_fs)]
-
 #![feature(unboxed_closures)]
 
 #![feature(custom_attribute)]
@@ -55,6 +52,7 @@ extern crate quickcheck;
 
 
 use std::env;
+use std::path::PathBuf;
 
 mod callback_container;
 mod cumulative_counter;
@@ -80,7 +78,7 @@ mod snapshot_index;
 
 static MAX_BLOB_SIZE: usize = 4 * 1024 * 1024;
 
-fn blob_dir() -> Path { Path::new("blobs") }
+fn blob_dir() -> PathBuf { PathBuf::new("blobs") }
 
 
 #[cfg(not(test))]
@@ -127,13 +125,12 @@ fn main() {
 
     {
       let backend = blob_store::FileBackend::new(blob_dir());
-      let hat_opt = hat::Hat::open_repository(&Path::new("repo"), backend, MAX_BLOB_SIZE);
-      let hat = hat_opt.expect(format!("Could not open repository in {}.", path).as_slice());
+      let hat = hat::Hat::open_repository(&PathBuf::new("repo"), backend, MAX_BLOB_SIZE);
 
       let family_opt = hat.open_family(name.clone());
       let family = family_opt.expect(format!("Could not open family '{}'", name).as_slice());
 
-      family.snapshot_dir(Path::new(path.clone()));
+      family.snapshot_dir(PathBuf::new(path));
       family.flush();
     }
 
@@ -145,18 +142,16 @@ fn main() {
     let ref path = args.next().unwrap();
 
     let backend = blob_store::FileBackend::new(blob_dir());
-    let hat_opt = hat::Hat::open_repository(&Path::new("repo"), backend, MAX_BLOB_SIZE);
-    let hat = hat_opt.expect("Could not open repository in 'repo'".as_slice());
+    let hat = hat::Hat::open_repository(&PathBuf::new("repo"), backend, MAX_BLOB_SIZE);
 
-    hat.checkout_in_dir(name.clone(), Path::new(path.clone()));
+    hat.checkout_in_dir(name.clone(), PathBuf::new(path));
     return;
   }
   else if cmd == &"commit".to_string() && args.len() == 1 {
     let ref name = args.next().unwrap();
 
     let backend = blob_store::FileBackend::new(blob_dir());
-    let hat_opt = hat::Hat::open_repository(&Path::new("repo"), backend, MAX_BLOB_SIZE);
-    let hat = hat_opt.expect("Could not open repository in 'repo'".as_slice());
+    let hat = hat::Hat::open_repository(&PathBuf::new("repo"), backend, MAX_BLOB_SIZE);
 
     hat.commit(name.clone());
     return;
