@@ -19,7 +19,6 @@ use std::fs::PathExt;
 
 use std::fs::{read_dir};
 
-use std::sync;
 use std::sync::mpsc;
 
 use threadpool;
