@@ -47,6 +47,7 @@ extern crate sodiumoxide;
 extern crate sqlite3;
 
 extern crate "rustc-serialize" as rustc_serialize;
+extern crate threadpool;
 
 // Testing
 #[cfg(test)]

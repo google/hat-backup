@@ -24,6 +24,9 @@ git = "https://github.com/dnaq/sodiumoxide"
 [dependencies.sqlite3]
 git = "https://github.com/linuxfood/rustsqlite"
 
+[dependencies.threadpool]
+git = "https://github.com/rust-lang/threadpool"
+rev = "1c6fdb3d"
 
 [profile.dev]
 opt-level = 0

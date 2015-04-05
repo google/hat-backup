@@ -22,6 +22,8 @@ use std::fs::{read_dir};
 use std::sync;
 use std::sync::mpsc;
 
+use threadpool;
+
 
 pub trait PathHandler<D> {
   fn handle_path(&self, D, PathBuf) -> Option<D>;
@@ -33,7 +35,7 @@ pub fn iterate_recursively<P: 'static + Send + Clone, W: 'static + PathHandler<P
 {
   let threads = 10;
   let (push_ch, work_ch) = mpsc::sync_channel(threads);
-  let pool = sync::TaskPool::new(threads);
+  let pool = threadpool::ThreadPool::new(threads);
 
   // Insert the first task into the queue:
   push_ch.send(Some(root)).unwrap();

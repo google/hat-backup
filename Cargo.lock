@@ -8,6 +8,7 @@ dependencies = [
  "rustc-serialize 0.3.1 (git+https://github.com/rust-lang/rustc-serialize)",
  "sodiumoxide 0.0.1 (git+https://github.com/dnaq/sodiumoxide)",
  "sqlite3 0.1.0 (git+https://github.com/linuxfood/rustsqlite)",
+ "threadpool 0.1.2 (git+https://github.com/rust-lang/threadpool?rev=1c6fdb3d)",
  "time 0.1.19 (git+https://github.com/rust-lang/time)",
 ]
 
@@ -77,6 +78,11 @@ source = "git+https://github.com/linuxfood/rustsqlite#7d91c729ad3ddfb9b418d26382
 dependencies = [
  "log 0.2.5 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
+
+[[package]]
+name = "threadpool"
+version = "0.1.2"
+source = "git+https://github.com/rust-lang/threadpool?rev=1c6fdb3d#1c6fdb3d293464f85df639ecb477d0cfd5b93597"
 
 [[package]]
 name = "time"
