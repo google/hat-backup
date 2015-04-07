@@ -175,10 +175,11 @@ impl <A: KeyEntry<A>> MsgHandler<Msg<A>, Reply> for KeyIndex {
         let parent = entry.parent_id().unwrap_or(0);
 
         self.exec_or_die(&format!(
-          "INSERT OR REPLACE INTO key_index (parent, name, created, accessed)
-           VALUES ({:?}, x'{}', {}, {})",
+          "INSERT OR REPLACE INTO key_index (parent, name, created, modified, accessed)
+           VALUES ({:?}, x'{}', {}, {}, {})",
           parent, entry.name().to_hex(),
           entry.created().unwrap_or(0),
+          entry.modified().unwrap_or(0),
           entry.accessed().unwrap_or(0)));
 
         let id = self.dbh.get_last_insert_rowid();
