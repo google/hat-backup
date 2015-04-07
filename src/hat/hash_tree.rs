@@ -20,7 +20,6 @@
 // extern crate serialize;
 // use serialize::json;
 
-use std::num::Int;
 use rustc_serialize::json;
 use hash_index::{Hash};
 use std::{str};
@@ -58,7 +57,7 @@ fn hash_refs_from_bytes(bytes: &[u8]) -> Option<Vec<HashRef>> {
 #[quickcheck]
 fn test_json(count: u8, hash: Vec<u8>, pref: Vec<u8>) -> bool {
   let mut refs = Vec::new();
-  for i in range(0, count) {
+  for _ in 0..count {
     refs.push(HashRef::new(hash.clone(), pref.clone()));
   }
   let j = hash_refs_to_bytes(&refs);
@@ -173,7 +172,7 @@ impl <B: HashTreeBackend + Clone> SimpleHashTreeWriter<B> {
 
     // Unless only root has data, collapse all levels up to top level (which is handled next)
     let top_level = self.top_level().expect("levels.len() > 0");
-    range(first_non_empty_level_idx, top_level).map(|l| self.collapse_level(l)).last();
+    (first_non_empty_level_idx..top_level).map(|l| self.collapse_level(l)).last();
 
     // Collapse top level if possible
     let top_level = self.top_level().expect("levels.len() > 0");
@@ -230,7 +229,7 @@ impl <B: HashTreeBackend + Clone> SimpleHashTreeReader<B> {
 
   /// Creates a new `HashTreeReader` that reads through the `backend` the blocks of the hash tree
   /// defined by `root_hash` and `root_ref`.
-  pub fn open(backend: B, root_hash: Hash, root_ref: Vec<u8>) -> Option<ReaderResult<B>>
+  pub fn open(backend: B, root_hash: Hash, _root_ref: Vec<u8>) -> Option<ReaderResult<B>>
   {
     if root_hash.bytes.len() == 0 {
       return None
@@ -298,7 +297,6 @@ mod tests {
 
   use std::sync::{Arc, Mutex};
 
-  use std;
   use hash_index::{Hash};
   use std::collections::{BTreeMap, BTreeSet};
 
@@ -316,7 +314,7 @@ mod tests {
       }
     }
     fn saw_chunk(&self, chunk: &Vec<u8>) -> bool {
-      let mut guarded_seen = self.seen_chunks.lock().unwrap();
+      let guarded_seen = self.seen_chunks.lock().unwrap();
       guarded_seen.contains(chunk)
     }
   }
@@ -324,17 +322,17 @@ mod tests {
   impl HashTreeBackend for MemoryBackend {
 
     fn fetch_chunk(&mut self, hash:Hash) -> Option<Vec<u8>> {
-      let mut guarded_chunks = self.chunks.lock().unwrap();
+      let guarded_chunks = self.chunks.lock().unwrap();
       guarded_chunks.get(&hash.bytes).map(|&(_, _, ref chunk)| chunk.clone())
     }
 
     fn fetch_payload(&mut self, hash:Hash) -> Option<Vec<u8>> {
-      let mut guarded_chunks = self.chunks.lock().unwrap();
+      let guarded_chunks = self.chunks.lock().unwrap();
       guarded_chunks.get(&hash.bytes).and_then(|&(_, ref payload, _)| payload.clone())
     }
 
     fn fetch_persistent_ref(&mut self, hash:Hash) -> Option<Vec<u8>> {
-      let mut guarded_chunks = self.chunks.lock().unwrap();
+      let guarded_chunks = self.chunks.lock().unwrap();
       if guarded_chunks.contains_key(&hash.bytes) {
         Some(hash.bytes)
       } else {
@@ -359,17 +357,18 @@ mod tests {
     let backend = MemoryBackend::new();
     let mut ht = SimpleHashTreeWriter::new(4, backend.clone());
 
-    for _ in range(0, chunks_count) {
+    for _ in 0..chunks_count {
       ht.append(b"a".to_vec());
     }
 
     let (hash, hash_ref) = ht.hash();
 
-    let tree_it = SimpleHashTreeReader::open(backend, hash, hash_ref).expect("tree not found");
+    let mut tree_it = SimpleHashTreeReader::open(backend, hash, hash_ref).expect("tree not found");
 
     if chunks_count == 0 {
       // An empty tree is a tree with a single empty chunk (as opposed to no chunks).
-      assert_eq!(vec![vec![]], tree_it.collect());
+      assert_eq!(Some(vec![]), tree_it.next());
+      assert_eq!(0, tree_it.count());
       return true;
     }
 
@@ -395,8 +394,10 @@ mod tests {
 
     let (hash, hash_ref) = ht.hash();
 
-    let it = SimpleHashTreeReader::open(backend, hash, hash_ref).expect("tree not found");
-    assert_eq!(vec![block], it.collect());
+    let mut it = SimpleHashTreeReader::open(backend, hash, hash_ref).expect("tree not found");
+
+    assert_eq!(Some(block), it.next());
+    assert_eq!(0, it.count());
   }
 
   #[test]
@@ -410,8 +411,9 @@ mod tests {
 
     let (hash, hash_ref) = ht.hash();
 
-    let it = SimpleHashTreeReader::open(backend, hash, hash_ref).expect("tree not found");
-    assert_eq!(vec![block], it.collect());
+    let mut it = SimpleHashTreeReader::open(backend, hash, hash_ref).expect("tree not found");
+    assert_eq!(Some(block), it.next());
+    assert_eq!(0, it.count());
   }
 
   #[test]
@@ -422,13 +424,13 @@ mod tests {
 
     let mut bytes = vec!(0u8);
     {
-      for i in std::iter::range_inclusive(1u8, (order * 4) as u8) {
+      for i in 1u8..(order * 4 + 1) as u8 {
         bytes.as_mut_slice()[0] = i;
         ht.append(bytes.clone());
       }
     }
 
-    for i in std::iter::range_inclusive(1u8, (order * 4) as u8) {
+    for i in 1u8..(order * 4 + 1) as u8 {
       bytes.as_mut_slice()[0] = i;
       assert!(backend.saw_chunk(&bytes));
     }
@@ -450,14 +452,14 @@ mod tests {
     let mut ht = SimpleHashTreeWriter::new(order, backend.clone());
     let mut bytes = vec!(0u8);
 
-    for i in std::iter::range_inclusive(1u8, (order - 1) as u8) {
+    for i in 1u8..order as u8 {
       bytes.as_mut_slice()[0] = i;
       ht.append(bytes.clone());
     }
 
     let (hash, hash_ref) = ht.hash();
 
-    for i in std::iter::range_inclusive(1u8, (order - 1) as u8) {
+    for i in 1u8..order as u8 {
       bytes.as_mut_slice()[0] = i;
       assert!(backend.saw_chunk(&bytes));
     }
@@ -477,7 +479,7 @@ mod tests {
 
     bench.iter(|| {
       let mut ht = SimpleHashTreeWriter::new(8, MemoryBackend::new());
-      for i in range(0u8, 16) {
+      for i in 0u8..16 {
         bytes.as_mut_slice()[0] = i;
         ht.append(bytes.clone());
       };
@@ -489,11 +491,11 @@ mod tests {
 
   #[bench]
   fn append_known_16x128_kb(bench: &mut Bencher) {
-    let bytes = vec![0u8, 128*1024];
+    let bytes = vec![0u8; 128*1024];
 
     bench.iter(|| {
       let mut ht = SimpleHashTreeWriter::new(8, MemoryBackend::new());
-      for _ in range(0i32, 16) {
+      for _ in 0i32..16 {
         ht.append(bytes.clone());
       }
       ht.hash();

@@ -156,7 +156,7 @@ mod tests {
     }
 
     // Verify that everything is now there, and all entries are complete
-    for _ in range(0, in_use1.len()) {
+    for _ in 0..in_use1.len() {
       let next = upq.pop_min_if_complete();
       assert!(next.is_some());
 

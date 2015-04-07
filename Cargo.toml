@@ -17,6 +17,7 @@ git = "https://github.com/rust-lang/rustc-serialize"
 
 [dependencies.time]
 git = "https://github.com/rust-lang/time"
+features = ["std-duration"]
 
 [dependencies.sodiumoxide]
 git = "https://github.com/dnaq/sodiumoxide"
@@ -26,7 +27,6 @@ git = "https://github.com/linuxfood/rustsqlite"
 
 [dependencies.threadpool]
 git = "https://github.com/rust-lang/threadpool"
-rev = "1c6fdb3d"
 
 [profile.dev]
 opt-level = 0

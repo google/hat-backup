@@ -51,7 +51,7 @@ pub struct SnapshotIndex {
 impl SnapshotIndex {
 
   pub fn new(path: String) -> SnapshotIndex {
-    let mut si = match open(path.as_slice()) {
+    let mut si = match open(&path) {
       Ok(dbh) => { SnapshotIndex{dbh: dbh} },
       Err(err) => panic!("{:?}", err),
     };

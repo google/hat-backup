@@ -76,9 +76,9 @@ impl <KE: 'static + KeyEntry<KE> + Send> KeyStore<KE>
 
   #[cfg(test)]
   pub fn new_for_testing<B:'static + blob_store::BlobStoreBackend + Send + Clone>(backend: B) -> KeyStore<KE> {
-    let ki_p = Process::new(Thunk::new(move|| { KeyIndex::new_for_testing() }));
-    let hi_p = Process::new(Thunk::new(move|| { hash_index::HashIndex::new_for_testing() }));
-    let bs_p = Process::new(Thunk::new(move|| { blob_store::BlobStore::new_for_testing(backend, 1024) }));
+    let ki_p = Process::new(Box::new(move|| { KeyIndex::new_for_testing() }));
+    let hi_p = Process::new(Box::new(move|| { hash_index::HashIndex::new_for_testing() }));
+    let bs_p = Process::new(Box::new(move|| { blob_store::BlobStore::new_for_testing(backend, 1024) }));
     KeyStore{index: ki_p, hash_index: hi_p, blob_store: bs_p}
   }
 
@@ -170,7 +170,7 @@ impl HashTreeBackend for HashStoreBackend
         // We came first: this data-chunk is ours to process.
         let local_hash_index = self.hash_index.clone();
 
-        let callback = Thunk::with_arg(move|blobid: blob_store::BlobID| {
+        let callback = Box::new(move|blobid: blob_store::BlobID| {
           local_hash_index.send_reply(hash_index::Msg::Commit(hash, blobid.as_bytes()));
         });
         match self.blob_store.send_reply(blob_store::Msg::Store(chunk, callback)) {
@@ -254,7 +254,7 @@ impl
             let mut tree = self.hash_tree_writer();
 
             // Check if we have an data source:
-            let it_opt = chunk_it_opt.and_then(|p| p.invoke(()));
+            let it_opt = chunk_it_opt.and_then(|open| open());
             if it_opt.is_none() {
               // No data is associated with this entry.
               self.index.send_reply(key_index::Msg::UpdateDataHash(new_entry, None, None));
@@ -279,7 +279,7 @@ impl
             // Install a callback for updating the entry's data hash once the data has been stored:
             let local_index = self.index.clone();
             let hash_bytes = hash.bytes.clone();
-            let callback = Thunk::new(move|| {
+            let callback = Box::new(move|| {
               local_index.send_reply(
                 key_index::Msg::UpdateDataHash(new_entry, Some(hash_bytes), Some(persistent_ref)));
             });
@@ -296,11 +296,8 @@ impl
 mod tests {
   use super::*;
 
-  use std::thunk::Thunk;
-
   use key_index::{KeyEntry};
   use blob_store::tests::{MemoryBackend, DevNullBackend};
-  use hash_tree;
 
   use process::{Process};
 
@@ -417,11 +414,11 @@ mod tests {
       let mut child_size = 0.0 as f32;
 
       let mut files = Vec::new();
-      for _ in range(0, children as usize) {
+      for _ in 0..children as usize {
 
         let data_opt = if thread_rng().gen() { None } else {
           let mut v = vec![];
-          for i in range(0, 8) {
+          for _ in 0..8 {
             v.push(random_ascii_bytes())
           }
           Some(v)
@@ -457,7 +454,7 @@ mod tests {
     let local_file = fs.file.clone();
     let id = match ks_p.send_reply(Msg::Insert(fs.file.clone(),
                                                if fs.file.data.is_some() {
-                                                 Some(Thunk::new(move|| { Some(local_file) }))
+                                                 Some(Box::new(move|| { Some(local_file) }))
                                                } else { None })
                                    ) {
       Reply::Id(id) => id,
@@ -531,7 +528,7 @@ mod tests {
   fn identity(size: u8) -> bool
   {
     let backend = MemoryBackend::new();
-    let ks_p = Process::new(Thunk::new(move|| { KeyStore::new_for_testing(backend) }));
+    let ks_p = Process::new(Box::new(move|| { KeyStore::new_for_testing(backend) }));
 
     let mut fs = rng_filesystem(size as usize);
     insert_and_update_fs(&mut fs, ks_p.clone());
@@ -552,7 +549,7 @@ mod tests {
   fn insert_1_key_x_128000_zeros(bench: &mut Bencher) {
     let backend = DevNullBackend;
     let ks_p : KeyStoreProcess<KeyEntryStub, KeyEntryStub>
-      = Process::new(Thunk::new(move|| { KeyStore::new_for_testing(backend) }));
+      = Process::new(Box::new(move|| { KeyStore::new_for_testing(backend) }));
 
     let bytes = vec![0u8; 128*1024];
 
@@ -562,7 +559,7 @@ mod tests {
 
       let entry = KeyEntryStub::new(None, format!("{}", i).as_bytes().to_vec(),
                                     Some(vec![bytes.clone()]), None);
-      ks_p.send_reply(Msg::Insert(entry.clone(), Some(Thunk::new(move|| { Some(entry) }))));
+      ks_p.send_reply(Msg::Insert(entry.clone(), Some(Box::new(move|| { Some(entry) }))));
 
     });
 
@@ -575,7 +572,7 @@ mod tests {
   fn insert_1_key_x_128000_unique(bench: &mut Bencher) {
     let backend = DevNullBackend;
     let ks_p : KeyStoreProcess<KeyEntryStub, KeyEntryStub>
-      = Process::new(Thunk::new(move|| { KeyStore::new_for_testing(backend) }));
+      = Process::new(Box::new(move|| { KeyStore::new_for_testing(backend) }));
 
     let bytes = vec![0u8; 128*1024];
 
@@ -594,7 +591,7 @@ mod tests {
 
       let entry = KeyEntryStub::new(None, format!("{}", i).as_bytes().to_vec(),
                                     Some(vec!(my_bytes)), None);
-      ks_p.send_reply(Msg::Insert(entry.clone(), Some(Thunk::new(move|| { Some(entry) }))));
+      ks_p.send_reply(Msg::Insert(entry.clone(), Some(Box::new(move|| { Some(entry) }))));
 
     });
 
@@ -607,7 +604,7 @@ mod tests {
   fn insert_1_key_x_16_x_128000_zeros(bench: &mut Bencher) {
     let backend = DevNullBackend;
     let ks_p : KeyStoreProcess<KeyEntryStub, KeyEntryStub>
-      = Process::new(Thunk::new(move|| { KeyStore::new_for_testing(backend) }));
+      = Process::new(Box::new(move|| { KeyStore::new_for_testing(backend) }));
 
     bench.iter(|| {
       let bytes = vec![0u8; 128*1024];
@@ -616,7 +613,7 @@ mod tests {
                                     Some(vec![bytes; 16]),
                                     None);
 
-      ks_p.send_reply(Msg::Insert(entry.clone(), Some(Thunk::new(move|| { Some(entry) }))));
+      ks_p.send_reply(Msg::Insert(entry.clone(), Some(Box::new(move|| { Some(entry) }))));
 
       match ks_p.send_reply(Msg::Flush) {
         Reply::FlushOK => (),
@@ -633,7 +630,7 @@ mod tests {
   fn insert_1_key_x_16_x_128000_unique(bench: &mut Bencher) {
     let backend = DevNullBackend;
     let ks_p : KeyStoreProcess<KeyEntryStub, KeyEntryStub>
-      = Process::new(Thunk::new(move|| { KeyStore::new_for_testing(backend) }));
+      = Process::new(Box::new(move|| { KeyStore::new_for_testing(backend) }));
 
     let bytes = vec![0u8; 128*1024];
     let mut i = 0i32;
@@ -651,7 +648,7 @@ mod tests {
       let my_bytes = my_bytes;
 
       let mut chunks = vec![];
-      for i in range(0, 16) {
+      for i in 0..16 {
         let mut local_bytes = my_bytes.clone();
         local_bytes.as_mut_slice()[3] = i as u8;
         chunks.push(local_bytes);
@@ -659,7 +656,7 @@ mod tests {
 
       let entry = KeyEntryStub::new(None, vec![1u8, 2, 3], Some(chunks), None);
 
-      ks_p.send_reply(Msg::Insert(entry.clone(), Some(Thunk::new(move|| { Some(entry) }))));
+      ks_p.send_reply(Msg::Insert(entry.clone(), Some(Box::new(move|| { Some(entry) }))));
 
       match ks_p.send_reply(Msg::Flush) {
         Reply::FlushOK => (),

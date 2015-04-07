@@ -31,10 +31,8 @@ Disclaimer: The above text describes our goal and not the current status.
 
 
 ## Building from source
-0. Install rust 0.12.0 and newest Cargo
+0. Install rust (try nightly or check commit log for compatible version)
    * Rust nighly is available from http://rust-lang.org
-   * Path for Cargo nightlies can be found at https://github.com/rust-lang/cargo
-     * Currently x86\_64 is https://static.rust-lang.org/cargo-dist/cargo-nightly-x86_64-unknown-linux-gnu.tar.gz
 1. Checkout the newest version of the source:
    * `git clone https://github.com/google/hat-backup.git`
    * `cd hat`

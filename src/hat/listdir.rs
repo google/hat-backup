@@ -61,7 +61,7 @@ pub fn iterate_recursively<P: 'static + Send + Clone, W: 'static + PathHandler<P
               if entry.is_ok() {
                 let entry = entry.unwrap();
                 let file = entry.path();
-                let path = PathBuf::new(file.to_str().unwrap());
+                let path = PathBuf::from(file.to_str().unwrap());
                 let dir_opt = _worker.handle_path(payload.clone(), path);
                 if dir_opt.is_some() {
                   _push_ch.send(Some((file.clone(), dir_opt.unwrap()))).unwrap();

@@ -47,7 +47,8 @@ impl <K: Ord> CallbackContainer<K> {
 
   pub fn flush(&mut self) {
     while self.ready.len() > 0 {
-      self.ready.pop().expect("len() > 0").invoke(());
+      let f = self.ready.pop().expect("len() > 0");
+      f();
     }
     assert_eq!(self.ready.len(), 0);
   }

@@ -149,7 +149,7 @@ pub struct HashIndex {
 impl HashIndex {
 
   pub fn new(path: String) -> HashIndex {
-    let mut hi = match open(path.as_slice()) {
+    let mut hi = match open(&path) {
       Ok(dbh) => {
         HashIndex{dbh: dbh,
                   id_counter: CumulativeCounter::new(0),
@@ -207,10 +207,10 @@ impl HashIndex {
   fn index_locate(&mut self, hash: &Hash) -> Option<QueueEntry> {
     assert!(hash.bytes.len() > 0);
 
-    let result_opt = self.select1(format!(
+    let result_opt = self.select1(&format!(
       "SELECT id, height, payload, blob_ref FROM hash_index WHERE hash=x'{}'",
-      hash.bytes.as_slice().to_hex()
-    ).as_slice());
+      hash.bytes.to_hex()
+    ));
     result_opt.map(|result| {
       let mut result = result;
       let id = result.get_int(0) as i64;
@@ -280,7 +280,7 @@ impl HashIndex {
       self.callbacks.add(hash.bytes.clone(), callback);
     } else if self.locate(hash).is_some() {
       // Hash was already committed
-      callback.invoke(());
+      callback();
     } else {
       // We cannot register this callback, since the hash doesn't exist anywhere
       return false

@@ -64,7 +64,7 @@ pub struct BlobIndex {
 impl BlobIndex {
 
   pub fn new(path: String) -> BlobIndex {
-    let mut hi = match open(path.as_slice()) {
+    let mut hi = match open(&path) {
       Ok(dbh) => BlobIndex{
         dbh: dbh,
         next_id: -1,
@@ -141,9 +141,9 @@ impl BlobIndex {
 
   fn in_air(&mut self, blob: &BlobDesc) {
     assert!(self.reserved.get(&blob.name).is_some(), "blob was not reserved!");
-    self.exec_or_die(format!(
+    self.exec_or_die(&format!(
       "INSERT INTO blob_index (id, name, tag) VALUES ({}, x'{}', {})",
-      blob.id, blob.name.as_slice().to_hex(), 1).as_slice());
+      blob.id, blob.name.to_hex(), 1));
     self.new_transaction();
   }
 
@@ -153,7 +153,7 @@ impl BlobIndex {
 
   fn commit_blob(&mut self, blob: &BlobDesc) {
     assert!(self.reserved.get(&blob.name).is_some(), "blob was not reserved!");
-    self.exec_or_die(format!("UPDATE blob_index SET tag=0 WHERE id={}", blob.id).as_slice());
+    self.exec_or_die(&format!("UPDATE blob_index SET tag=0 WHERE id={}", blob.id));
     self.new_transaction();
   }
 }

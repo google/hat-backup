@@ -14,10 +14,10 @@
 
 //! High level Hat API
 
+
 use rustc_serialize::{json};
 use rustc_serialize::json::{ToJson};
 use std::str;
-use std::thunk::Thunk;
 use std::collections::{BTreeMap};
 
 use process::{Process};
@@ -40,7 +40,6 @@ use std::fs;
 use std::io;
 use std::io::{Read, Write};
 
-use std::hash::{hash, SipHasher};
 use std::sync;
 use std::sync::atomic;
 
@@ -81,13 +80,13 @@ impl <B: 'static + BlobStoreBackend + Clone + Send> Hat<B> {
     let snapshot_index_path = snapshot_index_name(repository_root);
     let blob_index_path = blob_index_name(repository_root);
     let hash_index_path = hash_index_name(repository_root);
-    let si_p = Process::new(Thunk::new(move|| { SnapshotIndex::new(snapshot_index_path) }));
-    let bi_p = Process::new(Thunk::new(move|| { BlobIndex::new(blob_index_path) }));
-    let hi_p = Process::new(Thunk::new(move|| { HashIndex::new(hash_index_path) }));
+    let si_p = Process::new(Box::new(move|| { SnapshotIndex::new(snapshot_index_path) }));
+    let bi_p = Process::new(Box::new(move|| { BlobIndex::new(blob_index_path) }));
+    let hi_p = Process::new(Box::new(move|| { HashIndex::new(hash_index_path) }));
 
     let local_blob_index = bi_p.clone();
     let local_backend = backend.clone();
-    let bs_p = Process::new(Thunk::new(move|| {
+    let bs_p = Process::new(Box::new(move|| {
       BlobStore::new(local_blob_index, local_backend, max_blob_size) }));
 
     Hat{repository_root: repository_root.clone(),
@@ -107,10 +106,10 @@ impl <B: 'static + BlobStoreBackend + Clone + Send> Hat<B> {
     //          -> BlobStore -> BlobIndex
 
     let key_index_path = concat_filename(&self.repository_root, name.clone());
-    let ki_p = Process::new(Thunk::new(move|| { KeyIndex::new(key_index_path) }));
+    let ki_p = Process::new(Box::new(move|| { KeyIndex::new(key_index_path) }));
 
     let local_ks = KeyStore::new(ki_p.clone(), self.hash_index.clone(), self.blob_store.clone());
-    let ks_p = Process::new(Thunk::new(move|| { local_ks }));
+    let ks_p = Process::new(Box::new(move|| { local_ks }));
 
     let ks = KeyStore::new(ki_p, self.hash_index.clone(), self.blob_store.clone());
     Some(Family{name: name, key_store: ks, key_store_process: ks_p})
@@ -118,7 +117,7 @@ impl <B: 'static + BlobStoreBackend + Clone + Send> Hat<B> {
 
   pub fn commit(&self, family_name: String) {
     let mut family = self.open_family(family_name.clone()).expect(
-      format!("Could not open family '{}'", family_name).as_slice());
+      &format!("Could not open family '{}'", family_name));
 
     // Commit snapshot:
     let (hash, top_ref) = family.commit();
@@ -140,14 +139,14 @@ impl <B: 'static + BlobStoreBackend + Clone + Send> Hat<B> {
       };
 
     let family = self.open_family(family_name.clone()).expect(
-      format!("Could not open family '{}'", family_name).as_slice());
+      &format!("Could not open family '{}'", family_name));
 
     let mut output_dir = output_dir;
     self.checkout_dir_ref(&family, &mut output_dir, dir_hash, dir_ref);
   }
 
   fn checkout_dir_ref(&self, family: &Family, output: &mut PathBuf, dir_hash: Hash, dir_ref: Vec<u8>) {
-    fs::create_dir_all(output).unwrap();
+    fs::create_dir_all(&output).unwrap();
     for o in family.fetch_dir_data(dir_hash, dir_ref, self.hash_backend.clone()) {
       for d in o.as_array().unwrap().iter() {
         if let Some(ref m) = d.as_object() {
@@ -167,7 +166,7 @@ impl <B: 'static + BlobStoreBackend + Clone + Send> Hat<B> {
           if m.contains_key("dir_hash") {
             self.checkout_dir_ref(family, output, hash, pref);
           } else if m.contains_key("data_hash") {
-            let mut fd = fs::File::create(output).unwrap();
+            let mut fd = fs::File::create(&output).unwrap();
             let tree_opt = hash_tree::SimpleHashTreeReader::open(self.hash_backend.clone(), hash, pref);
             if let Some(tree) = tree_opt {
               family.write_file_chunks(&mut fd, tree);
@@ -341,17 +340,18 @@ impl listdir::PathHandler<Option<u64>> for InsertPathHandler
         let is_directory = file_entry.is_directory();
         let local_root = path;
         let local_file_entry = file_entry.clone();
-        let create_file_it = Thunk::new(move|| {
-          match local_file_entry.file_iterator() {
-            Err(e) => {println!("Skipping '{}': {}", local_root.display(), e.to_string());
-                       None},
-            Ok(it) => { Some(it) }
-          }
-        });
-        let create_file_it_opt = if is_directory { None }
-                                 else { Some(create_file_it) };
 
-        match self.key_store.send_reply(key_store::Msg::Insert(file_entry, create_file_it_opt))
+        match self.key_store.send_reply(key_store::Msg::Insert(
+          file_entry,
+          if is_directory { None }
+          else { Some(Box::new(move|| {
+            match local_file_entry.file_iterator() {
+              Err(e) => {println!("Skipping '{}': {}", local_root.display(), e.to_string());
+                         None},
+              Ok(it) => { Some(it) }
+            }
+          }))
+          }))
         {
           key_store::Reply::Id(id) => {
             if is_directory { return Some(Some(id)) }
@@ -368,7 +368,7 @@ impl listdir::PathHandler<Option<u64>> for InsertPathHandler
 
 fn try_a_few_times_then_panic<F>(f: F, msg: &str) where F: FnMut() -> bool {
   let mut f = f;
-  for _ in range(1 as i32, 5) {
+  for _ in (1 as i32..5) {
     if f() { return }
   }
   panic!(msg.to_string());
@@ -385,7 +385,7 @@ impl Family
 {
   pub fn snapshot_dir(&self, dir: PathBuf) {
     let mut handler = InsertPathHandler::new(self.key_store_process.clone());
-    listdir::iterate_recursively((PathBuf::new(&dir), None), &mut handler);
+    listdir::iterate_recursively((PathBuf::from(&dir), None), &mut handler);
   }
 
   pub fn flush(&self) {
@@ -403,7 +403,7 @@ impl Family
 
   pub fn checkout_in_dir(&self, output_dir: PathBuf, dir_id: Option<u64>) {
     let mut path = output_dir;
-    for (id, name, _, _, _, hash, _, data_res_opt) in self.listFromKeyStore(dir_id).into_iter() {
+    for (id, name, _, _, _, hash, _, data_res_opt) in self.list_from_key_store(dir_id).into_iter() {
       // Extend directory with filename:
       path.push(str::from_utf8(&name[..]).unwrap());
 
@@ -423,7 +423,7 @@ impl Family
     }
   }
 
-  pub fn listFromKeyStore(&self, dir_id: Option<u64>) -> Vec<key_store::DirElem> {
+  pub fn list_from_key_store(&self, dir_id: Option<u64>) -> Vec<key_store::DirElem> {
     let listing = match self.key_store_process.send_reply(key_store::Msg::ListDir(dir_id)) {
       key_store::Reply::ListResult(ls) => ls,
       _ => panic!("Unexpected result from key store."),
@@ -459,7 +459,7 @@ impl Family
                         dir_id: Option<u64>) {
     let mut keys = Vec::new();
 
-    for (id, name, ctime, mtime, atime, hash, data_ref, _) in self.listFromKeyStore(dir_id).into_iter() {
+    for (id, name, ctime, _mtime, atime, hash, data_ref, _) in self.list_from_key_store(dir_id).into_iter() {
       let mut m = BTreeMap::new();
       m.insert("id".to_string(), id.to_json());
       m.insert("name".to_string(), name.to_json());

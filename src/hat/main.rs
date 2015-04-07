@@ -20,21 +20,17 @@
 #![warn(non_camel_case_types)]
 #![warn(unused_qualifications)]
 
-#![feature(test)]
+// Unstable APIs:
+#![feature(convert)]
+#![feature(fs_time)]
 #![feature(std_misc)]
-#![feature(collections)]
-#![feature(core)]
-#![feature(io)]
-#![feature(path)]
-
-#![feature(unboxed_closures)]
+#![feature(test)]
 
 #![feature(custom_attribute)]
 #![feature(plugin)]
 #![plugin(quickcheck_macros)]
 
 // Standard Rust imports
-// extern crate serialize;
 extern crate rand;
 extern crate test;
 extern crate time;
@@ -43,7 +39,7 @@ extern crate time;
 extern crate sodiumoxide;
 extern crate sqlite3;
 
-extern crate "rustc-serialize" as rustc_serialize;
+extern crate rustc_serialize;
 extern crate threadpool;
 
 // Testing
@@ -78,7 +74,7 @@ mod snapshot_index;
 
 static MAX_BLOB_SIZE: usize = 4 * 1024 * 1024;
 
-fn blob_dir() -> PathBuf { PathBuf::new("blobs") }
+fn blob_dir() -> PathBuf { PathBuf::from("blobs") }
 
 
 #[cfg(not(test))]
@@ -125,12 +121,12 @@ fn main() {
 
     {
       let backend = blob_store::FileBackend::new(blob_dir());
-      let hat = hat::Hat::open_repository(&PathBuf::new("repo"), backend, MAX_BLOB_SIZE);
+      let hat = hat::Hat::open_repository(&PathBuf::from("repo"), backend, MAX_BLOB_SIZE);
 
       let family_opt = hat.open_family(name.clone());
-      let family = family_opt.expect(format!("Could not open family '{}'", name).as_slice());
+      let family = family_opt.expect(&format!("Could not open family '{}'", name));
 
-      family.snapshot_dir(PathBuf::new(path));
+      family.snapshot_dir(PathBuf::from(path));
       family.flush();
     }
 
@@ -142,16 +138,16 @@ fn main() {
     let ref path = args.next().unwrap();
 
     let backend = blob_store::FileBackend::new(blob_dir());
-    let hat = hat::Hat::open_repository(&PathBuf::new("repo"), backend, MAX_BLOB_SIZE);
+    let hat = hat::Hat::open_repository(&PathBuf::from("repo"), backend, MAX_BLOB_SIZE);
 
-    hat.checkout_in_dir(name.clone(), PathBuf::new(path));
+    hat.checkout_in_dir(name.clone(), PathBuf::from(path));
     return;
   }
   else if cmd == &"commit".to_string() && args.len() == 1 {
     let ref name = args.next().unwrap();
 
     let backend = blob_store::FileBackend::new(blob_dir());
-    let hat = hat::Hat::open_repository(&PathBuf::new("repo"), backend, MAX_BLOB_SIZE);
+    let hat = hat::Hat::open_repository(&PathBuf::from("repo"), backend, MAX_BLOB_SIZE);
 
     hat.commit(name.clone());
     return;

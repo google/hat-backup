@@ -105,7 +105,7 @@ impl BlobStoreBackend for FileBackend {
     let mut fd = fs::File::open(&path).unwrap();
     let mut buf = Vec::new();
     let res = match fd.read_to_end(&mut buf) {
-      Ok(()) => Ok(buf),
+      Ok(_) => Ok(buf),
       Err(e) => Err(e.to_string()),
     };
 
@@ -142,7 +142,7 @@ pub enum Msg {
   /// Store a new data chunk into the current blob. The callback is triggered after the blob
   /// containing the chunk has been committed to persistent storage (it is then safe to use the
   /// `BlobID` as persistent reference).
-  Store(Vec<u8>, Thunk<'static, BlobID>),
+  Store(Vec<u8>, Thunk<'static, (BlobID,)>),
   /// Retrieve the data chunk identified by `BlobID`.
   Retrieve(BlobID),
   /// Flush the current blob, independent of its size.
@@ -164,7 +164,7 @@ pub struct BlobStore<B> {
   blob_index: BlobIndexProcess,
   blob_desc: blob_index::BlobDesc,
 
-  buffer_data: Vec<(BlobID, Vec<u8>, Thunk<'static, BlobID>)>,
+  buffer_data: Vec<(BlobID, Vec<u8>, Thunk<'static, (BlobID,)>)>,
   buffer_data_len: usize,
 
   max_blob_size: usize,
@@ -194,7 +194,7 @@ impl <B: BlobStoreBackend> BlobStore<B> {
 
   #[cfg(test)]
   pub fn new_for_testing(backend: B, max_blob_size: usize) -> BlobStore<B> {
-    let bi_p = Process::new(Thunk::new(move|| { BlobIndex::new_for_testing() }));
+    let bi_p = Process::new(Box::new(move|| { BlobIndex::new_for_testing() }));
     let mut bs = BlobStore{backend: backend,
                            blob_index: bi_p,
                            blob_desc: empty_blob_desc(),
@@ -250,7 +250,9 @@ impl <B: BlobStoreBackend> BlobStore<B> {
       match self.buffer_data.pop() {
         Some((chunk_ref, chunk, cb)) => {
           ready_callback.push((chunk_ref, cb));
-          blob.push_all(chunk.as_slice());
+          for c in chunk {
+            blob.push(c);
+          }
         },
         None => break,
       }
@@ -261,8 +263,8 @@ impl <B: BlobStoreBackend> BlobStore<B> {
     self.blob_index.send_reply(blob_index::Msg::CommitDone(old_blob_desc));
 
     // Go through callbacks
-    for (blobid, cb) in ready_callback.into_iter() {
-      cb.invoke(blobid);
+    for (blobid, callback) in ready_callback.into_iter() {
+      callback(blobid);
     }
   }
 
@@ -277,11 +279,11 @@ impl <B: BlobStoreBackend> MsgHandler<Msg, Reply> for BlobStore<B> {
 
   fn handle(&mut self, msg: Msg, reply: Box<Fn(Reply)>) {
     match msg {
-      Msg::Store(blob, cb) => {
+      Msg::Store(blob, callback) => {
         if blob.len() == 0 {
           let id = BlobID{name: vec!(0), begin: 0, end: 0};
           let cb_id = id.clone();
-          thread::spawn(move|| { cb.invoke(cb_id) });
+          thread::spawn(move|| { callback(cb_id) });
           return reply(Reply::StoreOK(id));
         }
 
@@ -291,7 +293,7 @@ impl <B: BlobStoreBackend> MsgHandler<Msg, Reply> for BlobStore<B> {
                         end: new_size};
 
         self.buffer_data_len = new_size;
-        self.buffer_data.push((id.clone(), blob, cb));
+        self.buffer_data.push((id.clone(), blob, callback));
 
         // To avoid unnecessary blocking, we reply with the ID *before* possibly flushing.
         reply(Reply::StoreOK(id));
@@ -322,7 +324,6 @@ impl <B: BlobStoreBackend> MsgHandler<Msg, Reply> for BlobStore<B> {
 pub mod tests {
   use super::*;
 
-  use std::thunk::Thunk;
   use process::{Process};
 
   use std::sync::{Arc, Mutex};
@@ -383,11 +384,11 @@ pub mod tests {
 
     let local_backend = backend.clone();
     let bs_p : BlobStoreProcess =
-      Process::new(Thunk::new(move|| { BlobStore::new_for_testing(local_backend, 1024) }));
+      Process::new(Box::new(move|| { BlobStore::new_for_testing(local_backend, 1024) }));
 
     let mut ids = Vec::new();
     for chunk in chunks.iter() {
-      match bs_p.send_reply(Msg::Store(chunk.as_slice().to_vec(), Thunk::with_arg(move|_| {}))) {
+      match bs_p.send_reply(Msg::Store(chunk.as_slice().to_vec(), Box::new(move|_| {}))) {
         Reply::StoreOK(id) => { ids.push((id, chunk)); },
         _ => panic!("Unexpected reply from blob store."),
       }
@@ -422,12 +423,12 @@ pub mod tests {
     let mut backend = MemoryBackend::new();
 
     let local_backend = backend.clone();
-    let bs_p: BlobStoreProcess = Process::new(Thunk::new(move|| {
+    let bs_p: BlobStoreProcess = Process::new(Box::new(move|| {
       BlobStore::new_for_testing(local_backend, 1024) }));
 
     let mut ids = Vec::new();
     for chunk in chunks.iter() {
-      match bs_p.send_reply(Msg::Store(chunk.as_slice().to_vec(), Thunk::with_arg(move|_| {}))) {
+      match bs_p.send_reply(Msg::Store(chunk.as_slice().to_vec(), Box::new(move|_| {}))) {
         Reply::StoreOK(id) => { ids.push((id, chunk)); },
         _ => panic!("Unexpected reply from blob store."),
       }

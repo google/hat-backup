@@ -17,7 +17,6 @@
 use std::time::duration::{Duration};
 
 use periodic_timer::{PeriodicTimer};
-use sodiumoxide::randombytes::{randombytes};
 use process::{Process, MsgHandler};
 use sqlite3::database::{Database};
 
@@ -96,7 +95,7 @@ fn i64_to_u64_or_panic(x: i64) -> u64 {
 
 impl KeyIndex {
   pub fn new(path: String) -> KeyIndex {
-    let mut ki = match open(path.as_slice()) {
+    let mut ki = match open(&path) {
       Ok(dbh) => {
         KeyIndex{path: path,
                  dbh: dbh,
@@ -175,12 +174,12 @@ impl <A: KeyEntry<A>> MsgHandler<Msg<A>, Reply> for KeyIndex {
       Msg::Insert(entry) => {
         let parent = entry.parent_id().unwrap_or(0);
 
-        self.exec_or_die(format!(
+        self.exec_or_die(&format!(
           "INSERT OR REPLACE INTO key_index (parent, name, created, accessed)
            VALUES ({:?}, x'{}', {}, {})",
-          parent, entry.name().as_slice().to_hex(),
+          parent, entry.name().to_hex(),
           entry.created().unwrap_or(0),
-          entry.accessed().unwrap_or(0)).as_slice());
+          entry.accessed().unwrap_or(0)));
 
         let id = self.dbh.get_last_insert_rowid();
         return reply(Reply::Id(i64_to_u64_or_panic(id)));
@@ -188,15 +187,15 @@ impl <A: KeyEntry<A>> MsgHandler<Msg<A>, Reply> for KeyIndex {
 
       Msg::LookupExact(entry) => {
         let parent = entry.parent_id().unwrap_or(0);
-        let mut cursor = self.prepare_or_die(format!(
+        let mut cursor = self.prepare_or_die(&format!(
           "SELECT rowid FROM key_index
            WHERE parent={:?} AND name=x'{}'
            AND created={} AND modified={} AND accessed={}
            LIMIT 1",
-          parent, entry.name().as_slice().to_hex(),
+          parent, entry.name().to_hex(),
           entry.created().unwrap_or(0),
           entry.modified().unwrap_or(0),
-          entry.accessed().unwrap_or(0)).as_slice());
+          entry.accessed().unwrap_or(0)));
         if cursor.step() == SQLITE_ROW {
           assert!(cursor.step() == SQLITE_DONE);
           return reply(Reply::Id((i64_to_u64_or_panic(cursor.get_i64(0)))));
@@ -213,38 +212,38 @@ impl <A: KeyEntry<A>> MsgHandler<Msg<A>, Reply> for KeyIndex {
         if hash_opt.is_some() && persistent_ref_opt.is_some() {
           match entry.modified() {
             Some(modified) => {
-              self.exec_or_die(format!(
+              self.exec_or_die(&format!(
                 "UPDATE key_index SET hash=x'{}', persistent_ref=x'{}'
                                                   , modified={}
                   WHERE parent={:?} AND rowid={:?} AND IFNULL(modified,0)<={}",
-                hash_opt.unwrap().as_slice().to_hex(),
-                persistent_ref_opt.unwrap().as_slice().to_hex(),
+                hash_opt.unwrap().to_hex(),
+                persistent_ref_opt.unwrap().to_hex(),
                 modified, parent, entry.id().expect("UpdateDataHash"),
-                modified).as_slice());
+                modified));
             },
             None => {
-              self.exec_or_die(format!(
+              self.exec_or_die(&format!(
                 "UPDATE key_index SET hash=x'{}', persistent_ref=x'{}'
                  WHERE parent={:?} AND rowid={:?}",
-                hash_opt.unwrap().as_slice().to_hex(),
-                persistent_ref_opt.unwrap().as_slice().to_hex(),
-                parent, entry.id().expect("UpdateDataHash, None")).as_slice());
+                hash_opt.unwrap().to_hex(),
+                persistent_ref_opt.unwrap().to_hex(),
+                parent, entry.id().expect("UpdateDataHash, None")));
             }
           }
         } else {
           match entry.modified() {
             Some(modified) => {
-              self.exec_or_die(format!(
+              self.exec_or_die(&format!(
                 "UPDATE key_index SET hash=NULL, persistent_ref=NULL
                                                , modified={}
                  WHERE parent={:?} AND rowid={:?} AND IFNULL(modified, 0)<={}",
-                modified, parent, entry.id().expect("UpdateDataHash2"), modified).as_slice());
+                modified, parent, entry.id().expect("UpdateDataHash2"), modified));
             },
             None => {
-              self.exec_or_die(format!(
+              self.exec_or_die(&format!(
                 "UPDATE key_index SET hash=NULL, persistent_ref=NULL
                  WHERE parent={:?} AND rowid={}",
-                parent, entry.id().expect("UpdateDataHash2, None")).as_slice());
+                parent, entry.id().expect("UpdateDataHash2, None")));
             }
           }
         }
@@ -262,10 +261,10 @@ impl <A: KeyEntry<A>> MsgHandler<Msg<A>, Reply> for KeyIndex {
         let mut listing = Vec::new();
         let parent = parent_opt.unwrap_or(0);
 
-        let mut cursor = self.prepare_or_die(format!(
+        let mut cursor = self.prepare_or_die(&format!(
            "SELECT rowid, name, created, modified, accessed, hash, persistent_ref
             FROM key_index
-            WHERE parent={:?}", parent).as_slice());
+            WHERE parent={:?}", parent));
 
         // TODO(jos): replace get_int with something that understands usize64
         while cursor.step() == SQLITE_ROW {

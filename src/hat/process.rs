@@ -97,7 +97,7 @@ impl <Msg:'static + Send, Reply:'static + Send>
   {
     thread::spawn(move|| {
       // fork handler
-      let mut my_handler = handler_proc.invoke(());
+      let mut my_handler = handler_proc();
       loop {
         match receiver.recv() {
           Ok((msg, None)) => {
