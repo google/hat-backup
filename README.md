@@ -64,15 +64,12 @@ There are a bunch of lacking functionality needed before a feature complete rele
    * `git clone https://github.com/google/hat-backup.git`
    * `cd hat`
 2. Let Cargo build everything needed:
-   * `cargo build`
+   * `cargo build --release`
 
-## Try the hat executable using Cargo (the binary is in target/)
-   * `cargo run snapshot my_snapshot /some/path/to/dir`
-   * `cargo run checkout my_snapshot output/dir`
-
-## Generate source code documentation:
-   * `cargo doc`
-   * `${BROWSER} target/doc/hat-lib/index.html`
+## Try the hat executable using Cargo (the binary is in target/release/)
+   * `cargo run --release snapshot my_snapshot /some/path/to/dir`
+   * `cargo run --release commit my_snapshot`
+   * `cargo run --release checkout my_snapshot output/dir`
 
 
 ## License and copyright
