@@ -7,14 +7,6 @@ Warning: This is an incomplete work-in-progress.
 
 Warning: This project does currently NOT support security or privacy.
 
-
-## Status
-This software is pre-alpha and should be considered severely unstable.
-
-This software should not be considered ready for any use; the code is currently
-provided for development and experimentation purposes only.
-
-
 ## Project
 The goal of hat is to provide a backend-agnostic snapshotting backup system,
 complete with deduplication of file blocks and efficient navigation of backed up
@@ -26,9 +18,44 @@ crash is followed by quick and safe recovery.
 Further, we aim for readable and maintainable code, partly by splitting the
 system into a few sub-systems with clear responsibility.
 
-
 Disclaimer: The above text describes our goal and not the current status.
 
+
+## Status
+This software is pre-alpha and should be considered severely unstable.
+
+This software should not be considered ready for any use; the code is currently
+provided for development and experimentation purposes only.
+
+
+## Roadmap to a first stable release:
+
+**Cleanup:** 
+
+I am currently focusing on reaching a feature complete and useful state and as a result, I am skipping quickly over some implementation details. The following items will have to be revisited and cleaned up before a stable release:
+
+- Properly support non-utf8 paths.
+- Store and restore all relevant file metadata; same for symlinks.
+- Use prepared statements when communicating with SQLite.
+- Run rustfmt on the code when it is ready.
+- Reimplement argument handling in main; possibly using docopt.
+- Replace all uses of JSON with either Protocol Buffers or Cap'n Proto.
+- Go through uses of 'unwrap', 'expect' etc and remove them where possible; preferably, the caller/initiater should handle errors.
+- Think about parallelism and change the pipeline of threads to make better use of it.
+- Figure out how to battle test the code on supported platforms.
+
+
+**Functionality:**
+
+There are a bunch of lacking functionality needed before a feature complete release is in sight:
+
+- Commit hash-tree tops of known snapshots to external storage.
+- Add recovery function when all local state is gone.
+- Add book-keeping for metadata needed to identify live hashes (reference sets in each family's keyindex).
+- Add deletion and garbage-collection.
+- Have the blobstore thread(s) talk to external thread(s) to isolate communication with external storage.
+- Make the API used for talking to the external storage easy to change (put it in separate put/get/del programs).
+- Add encryption through NaCL/sodiumdioxide; preferably as late as possible.
 
 ## Building from source
 0. Install rust (try nightly or check commit log for compatible version)
