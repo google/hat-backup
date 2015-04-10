@@ -42,13 +42,19 @@ extern crate sqlite3;
 extern crate rustc_serialize;
 extern crate threadpool;
 
+// Argument parsing
+extern crate clap;
+
 // Testing
 #[cfg(test)]
 extern crate quickcheck;
 
 
-use std::env;
+// use std::env;
 use std::path::PathBuf;
+use std::borrow::ToOwned;
+
+use clap::{App, Arg, SubCommand};
 
 mod callback_container;
 mod cumulative_counter;
@@ -77,10 +83,10 @@ static MAX_BLOB_SIZE: usize = 4 * 1024 * 1024;
 fn blob_dir() -> PathBuf { PathBuf::from("blobs") }
 
 
-#[cfg(not(test))]
-fn usage() {
-  println!("Usage: {} [snapshot|commit|checkout] name path", env::args().next().unwrap());
-}
+// #[cfg(not(test))]
+// fn usage() {
+//   println!("Usage: {} [snapshot|commit|checkout] name path", env::args().next().unwrap());
+// }
 
 
 #[cfg(not(test))]
@@ -91,68 +97,93 @@ fn license() {
 
 #[cfg(not(test))]
 fn main() {
-  // Initialize sodium (must only be called once)
-  sodiumoxide::init();
-
-  let mut args = env::args();
-
-  if args.len() < 2 {
-    return usage(); // There's not even a command here.
-  }
-  args.next(); // strip called name
-
-  if args.len() == 1 {
-    let ref flag = args.next().unwrap();
-    if flag == &"--license".to_string() {
-        license();
+    // get version from Cargo.toml
+    let version = format!("{}.{}.{}{}",
+                          env!("CARGO_PKG_VERSION_MAJOR"),
+                          env!("CARGO_PKG_VERSION_MINOR"),
+                          env!("CARGO_PKG_VERSION_PATCH"),
+                          option_env!("CARGO_PKG_VERSION_PRE").unwrap_or(""));
+                          
+    // Create valid arguments
+    let matches = App::new("hat-backup")
+                        .version(&version[..])
+                        .about("Create backup snapshots")
+                        // If custom usage statement desired (instead of the auto-generated one), uncomment:
+                        //.usage("hat-backup [snapshot|commit|checkout] <name> <path>")
+                        .arg(Arg::new("lic")
+                            .long("license")
+                            .help("Display the license"))
+                        .subcommand(SubCommand::new("snapshot")
+                            .about("Create a snapshot")
+                            .arg(Arg::new("NAME")
+                                .index(1)
+                                .help("Name of the snapshot")
+                                .required(true))
+                            .arg(Arg::new("PATH")
+                                .index(2)
+                                .required(true)
+                                .help("The path of the snapshot")))
+                        .subcommand(SubCommand::new("checkout")
+                            .about("Checkout a snapshot")
+                            .arg(Arg::new("NAME")
+                                .index(1)
+                                .help("Name of the snapshot")
+                                .required(true))
+                            .arg(Arg::new("PATH")
+                                .index(2)
+                                .required(true)
+                                .help("The path of the snapshot")))
+                        .subcommand(SubCommand::new("commit")
+                            .about("Commit a snapshot")
+                            .arg(Arg::new("NAME")
+                                .index(1)
+                                .help("Name of the snapshot")
+                                .required(true)))
+                        .get_matches();
+ 
+    // Check for license flag
+    if matches.is_present("lic") { license(); std::process::exit(0); }
+    
+    // Initialize sodium (must only be called once)
+    sodiumoxide::init();
+    
+    match matches.subcommand() {
+        ("snapshot", Some(matches)) => {
+            let name = matches.value_of("NAME").unwrap().to_owned();
+            let path = matches.value_of("PATH").unwrap();
+            
+            let backend = blob_store::FileBackend::new(blob_dir());
+            let hat = hat::Hat::open_repository(&PathBuf::from("repo"), backend, MAX_BLOB_SIZE);
+        
+            let family_opt = hat.open_family(name.clone());
+            let family = family_opt.expect(&format!("Could not open family '{}'", name));
+    
+            family.snapshot_dir(PathBuf::from(path));
+            family.flush();
+    
+            println!("Waiting for final flush...");
+        },
+        ("checkout", Some(matches)) => {
+            let name = matches.value_of("NAME").unwrap().to_owned();
+            let path = matches.value_of("PATH").unwrap();
+            
+            let backend = blob_store::FileBackend::new(blob_dir());
+            let hat = hat::Hat::open_repository(&PathBuf::from("repo"), backend, MAX_BLOB_SIZE);
+    
+            hat.checkout_in_dir(name.clone(), PathBuf::from(path));
+        },
+        ("commit", Some(matches)) => {
+            let name = matches.value_of("NAME").unwrap().to_owned();
+            
+            let backend = blob_store::FileBackend::new(blob_dir());
+            let hat = hat::Hat::open_repository(&PathBuf::from("repo"), backend, MAX_BLOB_SIZE);
+    
+            hat.commit(name);
+        },
+        _       => { 
+            println!("{}\nFor more information re-run with --help", matches.usage());
+            license();
+            std::process::exit(1);
+        }
     }
-    else if flag == &"--help".to_string() {
-      usage();
-      license();
-    }
-    return;
-  }
-
-  let ref cmd = args.next().unwrap();
-
-  if cmd == &"snapshot".to_string() && args.len() == 2 {
-    let ref name = args.next().unwrap();  // used for naming the key index
-    let ref path = args.next().unwrap();
-
-    {
-      let backend = blob_store::FileBackend::new(blob_dir());
-      let hat = hat::Hat::open_repository(&PathBuf::from("repo"), backend, MAX_BLOB_SIZE);
-
-      let family_opt = hat.open_family(name.clone());
-      let family = family_opt.expect(&format!("Could not open family '{}'", name));
-
-      family.snapshot_dir(PathBuf::from(path));
-      family.flush();
-    }
-
-    println!("Waiting for final flush...");
-    return;
-  }
-  else if cmd == &"checkout".to_string() && args.len() == 2 {
-    let ref name = args.next().unwrap();  // used for naming the key index
-    let ref path = args.next().unwrap();
-
-    let backend = blob_store::FileBackend::new(blob_dir());
-    let hat = hat::Hat::open_repository(&PathBuf::from("repo"), backend, MAX_BLOB_SIZE);
-
-    hat.checkout_in_dir(name.clone(), PathBuf::from(path));
-    return;
-  }
-  else if cmd == &"commit".to_string() && args.len() == 1 {
-    let ref name = args.next().unwrap();
-
-    let backend = blob_store::FileBackend::new(blob_dir());
-    let hat = hat::Hat::open_repository(&PathBuf::from("repo"), backend, MAX_BLOB_SIZE);
-
-    hat.commit(name.clone());
-    return;
-  }
-
-  usage();
-
 }
