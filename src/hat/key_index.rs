@@ -44,7 +44,7 @@ pub trait KeyEntry<KE> {
   fn user_id(&self) -> Option<u64>;
   fn group_id(&self) -> Option<u64>;
 
-  fn with_id(&self, u64) -> KE;
+  fn with_id(self, Option<u64>) -> KE;
 }
 
 pub type KeyIndexProcess<KE> = Process<Msg<KE>, Reply>;
@@ -334,10 +334,10 @@ mod tests {
     fn group_id(&self) -> Option<u64> {
       None
     }
-    fn with_id(&self, id: u64) -> TestEntry {
-      TestEntry{id:Some(id),
-                parent: self.parent_id(),
-                name: self.name()}
+    fn with_id(self, id: Option<u64>) -> TestEntry {
+      let mut x = self;
+      x.id = id;
+      return x;
     }
   }
 

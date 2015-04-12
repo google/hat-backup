@@ -247,7 +247,7 @@ impl
             // The bounded input-channel will prevent the client from overflowing us.
             reply(Reply::Id(id.clone()));
 
-            let new_entry = org_entry.with_id(id);
+            let new_entry = org_entry.clone().with_id(Some(id));
             assert!(new_entry.id().is_some());
 
             // Setup hash tree structure
@@ -367,9 +367,9 @@ mod tests {
       None
     }
 
-    fn with_id(&self, id: u64) -> KeyEntryStub {
-      let mut x = self.clone();
-      x.id = Some(id);
+    fn with_id(self, id: Option<u64>) -> KeyEntryStub {
+      let mut x = self;
+      x.id = id;
       return x;
     }
 

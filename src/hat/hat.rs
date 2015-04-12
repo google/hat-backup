@@ -263,9 +263,9 @@ impl KeyEntry<FileEntry> for FileEntry {
   fn group_id(&self) -> Option<u64> {
     None
   }
-  fn with_id(&self, id: u64) -> FileEntry {
-    let mut x = self.clone();
-    x.id = Some(id);
+  fn with_id(self, id: Option<u64>) -> FileEntry {
+    let mut x = self;
+    x.id = id;
     return x;
   }
 }
