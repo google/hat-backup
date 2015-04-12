@@ -200,8 +200,9 @@ impl <A: KeyEntry<A>> MsgHandler<Msg<A>, Reply> for KeyIndex {
           entry.modified().unwrap_or(0),
           entry.accessed().unwrap_or(0)));
         if cursor.step() == SQLITE_ROW {
+          let id = i64_to_u64_or_panic(cursor.get_i64(0));
           assert!(cursor.step() == SQLITE_DONE);
-          return reply(Reply::Id((i64_to_u64_or_panic(cursor.get_i64(0)))));
+          return reply(Reply::Id(id));
         } else {
           return reply(Reply::NotFound);
         }
