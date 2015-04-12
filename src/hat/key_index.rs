@@ -34,6 +34,8 @@ pub trait KeyEntry<KE> {
   fn name(&self) -> Vec<u8>;
   fn size(&self) -> Option<u64>;
 
+  // TODO(jos): SQLite3 supports only i64 precisely. Do we propagate this type or convert to it?
+  // Currently, values larger than 1<<63 gets converted to doubles silently and breaks.
   fn created(&self) -> Option<u64>;
   fn modified(&self) -> Option<u64>;
   fn accessed(&self) -> Option<u64>;
@@ -267,13 +269,12 @@ impl <A: KeyEntry<A>> MsgHandler<Msg<A>, Reply> for KeyIndex {
             FROM key_index
             WHERE parent={:?}", parent));
 
-        // TODO(jos): replace get_int with something that understands usize64
         while cursor.step() == SQLITE_ROW {
           let id = i64_to_u64_or_panic(cursor.get_i64(0));
           let name = cursor.get_blob(1).expect("name").iter().map(|&x| x).collect();
-          let created = cursor.get_int(2);
-          let modified = cursor.get_int(3);
-          let accessed = cursor.get_int(4);
+          let created = cursor.get_i64(2);
+          let modified = cursor.get_i64(3);
+          let accessed = cursor.get_i64(4);
           let hash = cursor.get_blob(5).unwrap_or(&[]).iter().map(|&x| x).collect();
           let persistent_ref = cursor.get_blob(6).unwrap_or(&[]).iter().map(|&x| x).collect();
 

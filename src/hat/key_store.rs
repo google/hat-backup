@@ -320,20 +320,9 @@ mod tests {
 
     data: Option<Vec<Vec<u8>>>,
 
+    created: Option<u64>,
     modified: Option<u64>,
-  }
-
-  impl KeyEntryStub {
-    fn new(parent: Option<u64>, name: Vec<u8>, data: Option<Vec<Vec<u8>>>,
-           modified: Option<u64>) ->
-      KeyEntryStub
-    {
-      KeyEntryStub{parent_id: parent,
-                   id: None,
-                   name: name,
-                   data: data,
-                   modified: modified}
-    }
+    accessed: Option<u64>,
   }
 
   impl KeyEntry<KeyEntryStub> for KeyEntryStub {
@@ -359,11 +348,11 @@ mod tests {
     }
 
     fn created(&self) -> Option<u64> {
-      None
+      self.created
     }
 
     fn accessed(&self) -> Option<u64> {
-      None
+      self.accessed
     }
 
     fn modified(&self) -> Option<u64> {
@@ -405,7 +394,7 @@ mod tests {
 
   fn rng_filesystem(size: usize) -> FileSystem
   {
-    fn create_files(parent_id: Option<u64>, size: usize) -> Vec<FileSystem> {
+    fn create_files(size: usize) -> Vec<FileSystem> {
       let children = size as f32 / 10.0;
 
       // dist_factor * i for i in range(children) + children == size
@@ -424,29 +413,39 @@ mod tests {
           Some(v)
          };
 
-        let modified: u64 = thread_rng().gen();
-        let new_root = KeyEntryStub::new(
-          parent_id.clone(),
-          random_ascii_bytes(),
-          data_opt,
-          Some(modified % 2147483648)
-        );
+        // TODO(jos): Either deny values outside the supported range or make them supported.
+        // Currently, values larger than 1<<63 gets converted to doubles silently and breaks.
+        let created: u64 = thread_rng().gen_range(0, 1<<63);
+        let modified: u64 = thread_rng().gen_range(0, 1<<63);
+        let accessed: u64 = thread_rng().gen_range(0, 1<<63);
+        let new_root = KeyEntryStub{
+          id: None, parent_id: None,  // updated by insert_and_update_fs()
 
-        let new_root_id = new_root.id();
+          name: random_ascii_bytes(),
+          data: data_opt,
+
+          created: Some(created),
+          modified: Some(accessed),
+          accessed: Some(modified),
+        };
 
         files.push(FileSystem{file: new_root,
-                              filelist: create_files(new_root_id, child_size as usize)});
+                              filelist: create_files(child_size as usize)});
         child_size += dist_factor;
       }
       files
     }
 
-    let root = KeyEntryStub::new(None,
-                                 b"root".to_vec(),
-                                 None, Some(123));
-    let root_id = root.id();
-    FileSystem{file: root,
-               filelist: create_files(root_id, size)}
+    let created: u64 = thread_rng().gen_range(0, 1<<63);
+    let modified: u64 = thread_rng().gen_range(0, 1<<63);
+    let accessed: u64 = thread_rng().gen_range(0, 1<<63);
+    let root = KeyEntryStub{
+      parent_id: None, id: None, //  updated by insert_and_update_fs()
+      name: b"root".to_vec(),
+      data: None,
+      created: Some(created), modified: Some(modified), accessed: Some(accessed)};
+
+    FileSystem{file: root, filelist: create_files(size)}
   }
 
   fn insert_and_update_fs(fs: &mut FileSystem, ks_p: KeyStoreProcess<KeyEntryStub, KeyEntryStub>)
@@ -557,8 +556,12 @@ mod tests {
     bench.iter(|| {
       i += 1;
 
-      let entry = KeyEntryStub::new(None, format!("{}", i).as_bytes().to_vec(),
-                                    Some(vec![bytes.clone()]), None);
+      let entry = KeyEntryStub{
+        parent_id: None,
+        id: None,
+        name: format!("{}", i).as_bytes().to_vec(),
+        data: Some(vec![bytes.clone()]),
+        created: None, modified: None, accessed: None};
       ks_p.send_reply(Msg::Insert(entry.clone(), Some(Box::new(move|| { Some(entry) }))));
 
     });
@@ -589,8 +592,12 @@ mod tests {
       }
       let my_bytes = my_bytes;
 
-      let entry = KeyEntryStub::new(None, format!("{}", i).as_bytes().to_vec(),
-                                    Some(vec!(my_bytes)), None);
+      let entry = KeyEntryStub{
+        parent_id: None,
+        id: None,
+        name: format!("{}", i).as_bytes().to_vec(),
+        data: Some(vec!(my_bytes)),
+        created: None, modified: None, accessed: None};
       ks_p.send_reply(Msg::Insert(entry.clone(), Some(Box::new(move|| { Some(entry) }))));
 
     });
@@ -608,10 +615,12 @@ mod tests {
 
     bench.iter(|| {
       let bytes = vec![0u8; 128*1024];
-      let entry = KeyEntryStub::new(None,
-                                    vec![1u8, 2, 3].to_vec(),
-                                    Some(vec![bytes; 16]),
-                                    None);
+      let entry = KeyEntryStub{
+        parent_id: None,
+        id: None,
+        name: vec![1u8, 2, 3].to_vec(),
+        data: Some(vec![bytes; 16]),
+        created: None, modified: None, accessed: None};
 
       ks_p.send_reply(Msg::Insert(entry.clone(), Some(Box::new(move|| { Some(entry) }))));
 
@@ -654,7 +663,12 @@ mod tests {
         chunks.push(local_bytes);
       }
 
-      let entry = KeyEntryStub::new(None, vec![1u8, 2, 3], Some(chunks), None);
+      let entry = KeyEntryStub{
+        parent_id: None,
+        id: None,
+        name: vec![1u8, 2, 3],
+        data: Some(chunks),
+        created: None, modified: None, accessed: None};
 
       ks_p.send_reply(Msg::Insert(entry.clone(), Some(Box::new(move|| { Some(entry) }))));
 
