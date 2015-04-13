@@ -54,7 +54,7 @@ extern crate quickcheck;
 use std::path::PathBuf;
 use std::borrow::ToOwned;
 
-use clap::{App, Arg, SubCommand};
+use clap::{App, SubCommand};
 
 mod callback_container;
 mod cumulative_counter;
@@ -103,46 +103,31 @@ fn main() {
                           env!("CARGO_PKG_VERSION_MINOR"),
                           env!("CARGO_PKG_VERSION_PATCH"),
                           option_env!("CARGO_PKG_VERSION_PRE").unwrap_or(""));
-                          
+    // Because "snapshot" and "checkout" use the exact same type of arguments, we can make a template
+    // This template defines two positional arguments, both are required
+    let arg_template = "<NAME> 'Name of the snapshot'
+                        <PATH> 'The path of the snapshot'";
+
     // Create valid arguments
     let matches = App::new("hat-backup")
                         .version(&version[..])
                         .about("Create backup snapshots")
                         // If custom usage statement desired (instead of the auto-generated one), uncomment:
                         //.usage("hat-backup [snapshot|commit|checkout] <name> <path>")
-                        .arg(Arg::new("lic")
-                            .long("license")
-                            .help("Display the license"))
+                        .arg_from_usage("--license 'Display the license'")
                         .subcommand(SubCommand::new("snapshot")
                             .about("Create a snapshot")
-                            .arg(Arg::new("NAME")
-                                .index(1)
-                                .help("Name of the snapshot")
-                                .required(true))
-                            .arg(Arg::new("PATH")
-                                .index(2)
-                                .required(true)
-                                .help("The path of the snapshot")))
+                            .args_from_usage(arg_template))
                         .subcommand(SubCommand::new("checkout")
                             .about("Checkout a snapshot")
-                            .arg(Arg::new("NAME")
-                                .index(1)
-                                .help("Name of the snapshot")
-                                .required(true))
-                            .arg(Arg::new("PATH")
-                                .index(2)
-                                .required(true)
-                                .help("The path of the snapshot")))
+                            .args_from_usage(arg_template))
                         .subcommand(SubCommand::new("commit")
                             .about("Commit a snapshot")
-                            .arg(Arg::new("NAME")
-                                .index(1)
-                                .help("Name of the snapshot")
-                                .required(true)))
+                            .arg_from_usage("<NAME> 'Name of the snapshot'"))
                         .get_matches();
  
     // Check for license flag
-    if matches.is_present("lic") { license(); std::process::exit(0); }
+    if matches.is_present("license") { license(); std::process::exit(0); }
     
     // Initialize sodium (must only be called once)
     sodiumoxide::init();
@@ -181,8 +166,7 @@ fn main() {
             hat.commit(name);
         },
         _       => { 
-            println!("{}\nFor more information re-run with --help", matches.usage());
-            license();
+            println!("No subcommand specified\n{}\nFor more information re-run with --help", matches.usage());
             std::process::exit(1);
         }
     }
