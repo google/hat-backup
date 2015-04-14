@@ -58,6 +58,10 @@ There are a bunch of lacking functionality needed before a feature complete rele
 - Add encryption through NaCL/sodiumdioxide; preferably as late as possible.
 
 ## Building from source
+First, make sure you have the required system libraries installed:
+* libsodium
+* libsqlite3
+
 0. Install rust (try nightly or check commit log for compatible version)
    * Rust nighly is available from http://rust-lang.org
 1. Checkout the newest version of the source:
