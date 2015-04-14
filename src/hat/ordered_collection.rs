@@ -15,26 +15,23 @@
 use std::collections::{BTreeMap};
 use std::collections::btree_map;
 
-
-pub struct OrderedCollection<K, V> {
-  map: BTreeMap<K, V>
-}
-
-impl <K: Clone + Ord, V> OrderedCollection<K, V> {
-
-  pub fn new() -> OrderedCollection<K, V> {
-    OrderedCollection{map: BTreeMap::new()}
-  }
-
-  pub fn insert(&mut self, k: K, v: V) {
+pub trait OrderedCollection<K: Clone + Ord, V> {
+  fn insert_unique(&mut self, k: K, v: V) {
     self.update_value(k, move|v_opt| match v_opt {
       Some(_) => panic!("Key already exists."),
       None => v,
     });
   }
 
-  pub fn update_value<F>(&mut self, k: K, f: F) where F: FnOnce(Option<&V>) -> V {
-    match self.map.entry(k) {
+  fn pop_min_when<F>(&mut self, ready: F) -> Option<(K, V)>
+    where F: Fn(&K, &V) -> bool;
+  fn update_value<F>(&mut self, k: K, f: F) where F: FnOnce(Option<&V>) -> V;
+  fn find_min<'a>(&'a self) -> Option<(&'a K, &'a V)>;
+}
+
+impl <K: Clone + Ord, V> OrderedCollection<K, V> for BTreeMap<K, V> {
+  fn update_value<F>(&mut self, k: K, f: F) where F: FnOnce(Option<&V>) -> V {
+    match self.entry(k) {
       btree_map::Entry::Occupied(mut entry) => {
         let new_v = f(Some(entry.get()));
         entry.insert(new_v);
@@ -45,28 +42,15 @@ impl <K: Clone + Ord, V> OrderedCollection<K, V> {
     }
   }
 
-  pub fn pop(&mut self, k: &K) -> Option<V> {
-    self.map.remove(k)
-  }
-
-  pub fn find<'a>(&'a self, k: &K) -> Option<&'a V> {
-    self.map.get(k)
-  }
-
-  pub fn find_min<'a>(&'a self) -> Option<(&'a K, &'a V)> {
-    self.map.iter().next()
-  }
-
-  pub fn pop_min_when<F>(&mut self, ready: F) -> Option<(K, V)>
+  fn pop_min_when<F>(&mut self, ready: F) -> Option<(K, V)>
     where F: Fn(&K, &V) -> bool
   {
     let k_opt = self.find_min().and_then(|(k, v)| if ready(k, v) { Some(k.clone()) } else { None });
-    k_opt.map(|k| { let v = self.pop(&k).unwrap();
+    k_opt.map(|k| { let v = self.remove(&k).unwrap();
                     (k, v) })
   }
 
-  pub fn len(&self) -> usize {
-    self.map.len()
+  fn find_min<'a>(&'a self) -> Option<(&'a K, &'a V)> {
+    self.iter().next()
   }
-
 }

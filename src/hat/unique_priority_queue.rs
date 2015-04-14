@@ -28,7 +28,7 @@ enum Status<K> {
 
 
 pub struct UniquePriorityQueue<P, K, V> {
-  priority: OrderedCollection<P, (Status<K>, Option<V>)>,
+  priority: BTreeMap<P, (Status<K>, Option<V>)>,
   key_to_priority: BTreeMap<K, P>,
 }
 
@@ -36,15 +36,15 @@ impl <P: Debug + Clone + Ord, K: Debug + Ord + Clone, V: Clone>
   UniquePriorityQueue<P, K, V> {
 
   pub fn new() -> UniquePriorityQueue<P, K, V> {
-    UniquePriorityQueue{priority: OrderedCollection::new(),
+    UniquePriorityQueue{priority: BTreeMap::new(),
                         key_to_priority: BTreeMap::new()}
   }
 
   pub fn reserve_priority(&mut self, p: P, k: K) -> Result<(), ()> {
-    if self.priority.find(&p).is_some() || self.key_to_priority.contains_key(&k) {
+    if self.priority.get(&p).is_some() || self.key_to_priority.contains_key(&k) {
       return Err(());
     }
-    self.priority.insert(p.clone(), (Status::Pending(k.clone()), None));
+    self.priority.insert_unique(p.clone(), (Status::Pending(k.clone()), None));
     self.key_to_priority.insert(k, p);
     return Ok(());
   }
@@ -63,7 +63,7 @@ impl <P: Debug + Clone + Ord, K: Debug + Ord + Clone, V: Clone>
 
   pub fn find_value_of_key<'a>(&'a self, k: &K) -> Option<V> {
     let prio_opt = self.key_to_priority.get(k);
-    prio_opt.and_then(|prio| self.priority.find(prio).and_then(|&(_, ref v_opt)| v_opt.clone()))
+    prio_opt.and_then(|prio| self.priority.get(prio).and_then(|&(_, ref v_opt)| v_opt.clone()))
   }
 
   pub fn update_value<F>(&mut self, k: &K, f: F) where F: Fn(&V) -> V {
