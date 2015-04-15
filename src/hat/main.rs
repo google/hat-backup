@@ -92,6 +92,8 @@ fn blob_dir() -> PathBuf { PathBuf::from("blobs") }
 #[cfg(not(test))]
 fn license() {
   println!(include_str!("../../LICENSE"));
+  println!("CLAP (Command Line Argument Parser) License:");
+  println!(include_str!("../../LICENSE-CLAP"));
 }
 
 
