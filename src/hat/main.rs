@@ -43,6 +43,7 @@ extern crate rustc_serialize;
 extern crate threadpool;
 
 // Argument parsing
+#[macro_use]
 extern crate clap;
 
 // Testing
@@ -92,19 +93,13 @@ fn blob_dir() -> PathBuf { PathBuf::from("blobs") }
 #[cfg(not(test))]
 fn license() {
   println!(include_str!("../../LICENSE"));
-  println!("CLAP (Command Line Argument Parser) License:");
+  println!("clap (Command Line Argument Parser) License:");
   println!(include_str!("../../LICENSE-CLAP"));
 }
 
 
 #[cfg(not(test))]
 fn main() {
-    // get version from Cargo.toml
-    let version = format!("{}.{}.{}{}",
-                          env!("CARGO_PKG_VERSION_MAJOR"),
-                          env!("CARGO_PKG_VERSION_MINOR"),
-                          env!("CARGO_PKG_VERSION_PATCH"),
-                          option_env!("CARGO_PKG_VERSION_PRE").unwrap_or(""));
     // Because "snapshot" and "checkout" use the exact same type of arguments, we can make a template
     // This template defines two positional arguments, both are required
     let arg_template = "<NAME> 'Name of the snapshot'
@@ -112,7 +107,8 @@ fn main() {
 
     // Create valid arguments
     let matches = App::new("hat-backup")
-                        .version(&version[..])
+                        // get version from Cargo.toml
+                        .version(&crate_version!()[..])
                         .about("Create backup snapshots")
                         // If custom usage statement desired (instead of the auto-generated one), uncomment:
                         //.usage("hat-backup [snapshot|commit|checkout] <name> <path>")
