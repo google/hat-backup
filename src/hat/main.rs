@@ -106,9 +106,9 @@ fn main() {
                         <PATH> 'The path of the snapshot'";
 
     // Create valid arguments
-    let matches = App::new("hat-backup")
+    let matches = App::new("hat")
                         // get version from Cargo.toml
-                        .version(&crate_version!()[..])
+                        .version(&format!("v{}",crate_version!())[..])
                         .about("Create backup snapshots")
                         // If custom usage statement desired (instead of the auto-generated one), uncomment:
                         //.usage("hat-backup [snapshot|commit|checkout] <name> <path>")
