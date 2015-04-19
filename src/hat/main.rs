@@ -42,13 +42,19 @@ extern crate sqlite3;
 extern crate rustc_serialize;
 extern crate threadpool;
 
+// Argument parsing
+#[macro_use]
+extern crate clap;
+
 // Testing
 #[cfg(test)]
 extern crate quickcheck;
 
 
-use std::env;
 use std::path::PathBuf;
+use std::borrow::ToOwned;
+
+use clap::{App, SubCommand};
 
 mod callback_container;
 mod cumulative_counter;
@@ -76,83 +82,80 @@ static MAX_BLOB_SIZE: usize = 4 * 1024 * 1024;
 
 fn blob_dir() -> PathBuf { PathBuf::from("blobs") }
 
-
-#[cfg(not(test))]
-fn usage() {
-  println!("Usage: {} [snapshot|commit|checkout] name path", env::args().next().unwrap());
-}
-
-
 #[cfg(not(test))]
 fn license() {
   println!(include_str!("../../LICENSE"));
+  println!("clap (Command Line Argument Parser) License:");
+  println!(include_str!("../../LICENSE-CLAP"));
 }
 
 
 #[cfg(not(test))]
 fn main() {
-  // Initialize sodium (must only be called once)
-  sodiumoxide::init();
+    // Because "snapshot" and "checkout" use the exact same type of arguments, we can make a template
+    // This template defines two positional arguments, both are required
+    let arg_template = "<NAME> 'Name of the snapshot'
+                        <PATH> 'The path of the snapshot'";
 
-  let mut args = env::args();
-
-  if args.len() < 2 {
-    return usage(); // There's not even a command here.
-  }
-  args.next(); // strip called name
-
-  if args.len() == 1 {
-    let ref flag = args.next().unwrap();
-    if flag == &"--license".to_string() {
-        license();
+    // Create valid arguments
+    let matches = App::new("hat")
+                        // get version from Cargo.toml
+                        .version(&format!("v{}",crate_version!())[..])
+                        .about("Create backup snapshots")
+                        .arg_from_usage("--license 'Display the license'")
+                        .subcommand(SubCommand::new("snapshot")
+                            .about("Create a snapshot")
+                            .args_from_usage(arg_template))
+                        .subcommand(SubCommand::new("checkout")
+                            .about("Checkout a snapshot")
+                            .args_from_usage(arg_template))
+                        .subcommand(SubCommand::new("commit")
+                            .about("Commit a snapshot")
+                            .arg_from_usage("<NAME> 'Name of the snapshot'"))
+                        .get_matches();
+ 
+    // Check for license flag
+    if matches.is_present("license") { license(); std::process::exit(0); }
+    
+    // Initialize sodium (must only be called once)
+    sodiumoxide::init();
+    
+    match matches.subcommand() {
+        ("snapshot", Some(matches)) => {
+            let name = matches.value_of("NAME").unwrap().to_owned();
+            let path = matches.value_of("PATH").unwrap();
+            
+            let backend = blob_store::FileBackend::new(blob_dir());
+            let hat = hat::Hat::open_repository(&PathBuf::from("repo"), backend, MAX_BLOB_SIZE);
+        
+            let family_opt = hat.open_family(name.clone());
+            let family = family_opt.expect(&format!("Could not open family '{}'", name));
+    
+            family.snapshot_dir(PathBuf::from(path));
+            family.flush();
+    
+            println!("Waiting for final flush...");
+        },
+        ("checkout", Some(matches)) => {
+            let name = matches.value_of("NAME").unwrap().to_owned();
+            let path = matches.value_of("PATH").unwrap();
+            
+            let backend = blob_store::FileBackend::new(blob_dir());
+            let hat = hat::Hat::open_repository(&PathBuf::from("repo"), backend, MAX_BLOB_SIZE);
+    
+            hat.checkout_in_dir(name.clone(), PathBuf::from(path));
+        },
+        ("commit", Some(matches)) => {
+            let name = matches.value_of("NAME").unwrap().to_owned();
+            
+            let backend = blob_store::FileBackend::new(blob_dir());
+            let hat = hat::Hat::open_repository(&PathBuf::from("repo"), backend, MAX_BLOB_SIZE);
+    
+            hat.commit(name);
+        },
+        _       => { 
+            println!("No subcommand specified\n{}\nFor more information re-run with --help", matches.usage());
+            std::process::exit(1);
+        }
     }
-    else if flag == &"--help".to_string() {
-      usage();
-      license();
-    }
-    return;
-  }
-
-  let ref cmd = args.next().unwrap();
-
-  if cmd == &"snapshot".to_string() && args.len() == 2 {
-    let ref name = args.next().unwrap();  // used for naming the key index
-    let ref path = args.next().unwrap();
-
-    {
-      let backend = blob_store::FileBackend::new(blob_dir());
-      let hat = hat::Hat::open_repository(&PathBuf::from("repo"), backend, MAX_BLOB_SIZE);
-
-      let family_opt = hat.open_family(name.clone());
-      let family = family_opt.expect(&format!("Could not open family '{}'", name));
-
-      family.snapshot_dir(PathBuf::from(path));
-      family.flush();
-    }
-
-    println!("Waiting for final flush...");
-    return;
-  }
-  else if cmd == &"checkout".to_string() && args.len() == 2 {
-    let ref name = args.next().unwrap();  // used for naming the key index
-    let ref path = args.next().unwrap();
-
-    let backend = blob_store::FileBackend::new(blob_dir());
-    let hat = hat::Hat::open_repository(&PathBuf::from("repo"), backend, MAX_BLOB_SIZE);
-
-    hat.checkout_in_dir(name.clone(), PathBuf::from(path));
-    return;
-  }
-  else if cmd == &"commit".to_string() && args.len() == 1 {
-    let ref name = args.next().unwrap();
-
-    let backend = blob_store::FileBackend::new(blob_dir());
-    let hat = hat::Hat::open_repository(&PathBuf::from("repo"), backend, MAX_BLOB_SIZE);
-
-    hat.commit(name.clone());
-    return;
-  }
-
-  usage();
-
 }

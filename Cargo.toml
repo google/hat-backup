@@ -11,6 +11,7 @@ path = "src/hat/main.rs"
 rand = "*"
 quickcheck = "*"
 quickcheck_macros = "*"
+clap = "*"
 
 [dependencies.rustc-serialize]
 git = "https://github.com/rust-lang/rustc-serialize"
