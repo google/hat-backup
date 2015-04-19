@@ -33,7 +33,7 @@ impl PeriodicTimer {
       self.start = SteadyTime::now();
       return true;
     } else {
-      return true;
+      return false;
     }
   }
 
