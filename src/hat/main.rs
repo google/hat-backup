@@ -51,7 +51,6 @@ extern crate clap;
 extern crate quickcheck;
 
 
-// use std::env;
 use std::path::PathBuf;
 use std::borrow::ToOwned;
 
@@ -83,13 +82,6 @@ static MAX_BLOB_SIZE: usize = 4 * 1024 * 1024;
 
 fn blob_dir() -> PathBuf { PathBuf::from("blobs") }
 
-
-// #[cfg(not(test))]
-// fn usage() {
-//   println!("Usage: {} [snapshot|commit|checkout] name path", env::args().next().unwrap());
-// }
-
-
 #[cfg(not(test))]
 fn license() {
   println!(include_str!("../../LICENSE"));
@@ -110,8 +102,6 @@ fn main() {
                         // get version from Cargo.toml
                         .version(&format!("v{}",crate_version!())[..])
                         .about("Create backup snapshots")
-                        // If custom usage statement desired (instead of the auto-generated one), uncomment:
-                        //.usage("hat-backup [snapshot|commit|checkout] <name> <path>")
                         .arg_from_usage("--license 'Display the license'")
                         .subcommand(SubCommand::new("snapshot")
                             .about("Create a snapshot")
