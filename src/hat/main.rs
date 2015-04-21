@@ -113,47 +113,47 @@ fn main() {
                             .about("Commit a snapshot")
                             .arg_from_usage("<NAME> 'Name of the snapshot'"))
                         .get_matches();
- 
+
     // Check for license flag
     if matches.is_present("license") { license(); std::process::exit(0); }
-    
+
     // Initialize sodium (must only be called once)
     sodiumoxide::init();
-    
+
     match matches.subcommand() {
         ("snapshot", Some(matches)) => {
             let name = matches.value_of("NAME").unwrap().to_owned();
             let path = matches.value_of("PATH").unwrap();
-            
+
             let backend = blob_store::FileBackend::new(blob_dir());
             let hat = hat::Hat::open_repository(&PathBuf::from("repo"), backend, MAX_BLOB_SIZE);
-        
+
             let family_opt = hat.open_family(name.clone());
             let family = family_opt.expect(&format!("Could not open family '{}'", name));
-    
+
             family.snapshot_dir(PathBuf::from(path));
             family.flush();
-    
+
             println!("Waiting for final flush...");
         },
         ("checkout", Some(matches)) => {
             let name = matches.value_of("NAME").unwrap().to_owned();
             let path = matches.value_of("PATH").unwrap();
-            
+
             let backend = blob_store::FileBackend::new(blob_dir());
             let hat = hat::Hat::open_repository(&PathBuf::from("repo"), backend, MAX_BLOB_SIZE);
-    
+
             hat.checkout_in_dir(name.clone(), PathBuf::from(path));
         },
         ("commit", Some(matches)) => {
             let name = matches.value_of("NAME").unwrap().to_owned();
-            
+
             let backend = blob_store::FileBackend::new(blob_dir());
             let hat = hat::Hat::open_repository(&PathBuf::from("repo"), backend, MAX_BLOB_SIZE);
-    
+
             hat.commit(name);
         },
-        _       => { 
+        _       => {
             println!("No subcommand specified\n{}\nFor more information re-run with --help", matches.usage());
             std::process::exit(1);
         }
