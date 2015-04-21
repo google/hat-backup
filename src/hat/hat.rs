@@ -134,7 +134,7 @@ impl <B: 'static + BlobStoreBackend + Clone + Send> Hat<B> {
       match self.snapshot_index.send_reply(snapshot_index::Msg::Latest(family_name.clone())) {
         snapshot_index::Reply::Latest(Some((h, r))) => (h, r),
         snapshot_index::Reply::Latest(None) =>
-          panic!("Tries to checkout family '{}' before first commit", family_name),
+          panic!("Tried to checkout family '{}' before first commit", family_name),
         _ => panic!("Unexpected result from snapshot index"),
       };
 
