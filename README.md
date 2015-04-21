@@ -38,7 +38,7 @@ I am currently focusing on reaching a feature complete and useful state and as a
 - Store and restore all relevant file metadata; same for symlinks.
 - Use prepared statements when communicating with SQLite.
 - Run rustfmt on the code when it is ready.
-- Reimplement argument handling in main; possibly using docopt.
+- ~~Reimplement argument handling in main; possibly using docopt.~~ [thanks kbknapp]
 - Replace all uses of JSON with either Protocol Buffers or Cap'n Proto.
 - Go through uses of 'unwrap', 'expect' etc and remove them where possible; preferably, the caller/initiater should handle errors.
 - Think about parallelism and change the pipeline of threads to make better use of it.
