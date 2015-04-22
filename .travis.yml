@@ -5,7 +5,7 @@ before_install:
   - sudo apt-get update -qq
   - wget https://download.libsodium.org/libsodium/releases/LATEST.tar.gz
   - tar xzf LATEST.tar.gz
-  - cd libsodium-* && ./configure && make && sudo make install
+  - cd libsodium-* && ./configure && make && sudo make install && sudo ldconfig
   - sudo apt-get install -y libsqlite3-dev
 
 script:
