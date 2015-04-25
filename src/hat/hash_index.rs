@@ -43,6 +43,12 @@ pub struct Hash{
   pub bytes: Vec<u8>,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct GcData{
+  pub num: i64,
+  pub bytes: Vec<u8>,
+}
+
 impl Hash {
   /// Computes `hash(text)` and stores this digest as the `bytes` field in a new `Hash` structure.
   pub fn new(text: &[u8]) -> Hash {
@@ -117,6 +123,10 @@ pub enum Msg {
   GetIDsByTag(i64),
 
 
+  // APIs related to garbage collector metadata tied to (hash id, family id) pairs.
+  ReadGcData(i64, i64),
+  UpdateGcData(i64, i64, Thunk<'static, (GcData,), Option<GcData>>),
+
   /// Flush the hash index to clear internal buffers and commit the underlying database.
   Flush,
 }
@@ -135,8 +145,9 @@ pub enum Reply {
   CallbackRegistered,
 
   HashTag(Option<i64>),
-
   HashIDs(Vec<i64>),
+
+  CurrentGcData(GcData),
 
   OK,
   Retry,
@@ -184,6 +195,12 @@ impl HashIndex {
                                 height    INTEGER,
                                 payload   BLOB,
                                 blob_ref  BLOB)");
+
+    hi.exec_or_die("CREATE TABLE IF NOT EXISTS
+                    gc_metadata (hash_id    INTEGER,
+                                 family_id  INTEGER,
+                                 gc_int     INTEGER,
+                                 gc_vec     BLOB)");
 
     hi.exec_or_die("CREATE UNIQUE INDEX IF NOT EXISTS
                     HashIndex_UniqueHash
@@ -365,6 +382,30 @@ impl HashIndex {
     return out;
   }
 
+  fn read_gc_data(&mut self, hash_id: i64, family_id: i64) -> GcData {
+    match self.select1(&format!("SELECT gc_int, gc_vec FROM gc_metadata
+                                 WHERE hash_id={:?} AND family_id={:?}", hash_id, family_id)[..])
+              .as_mut() {
+      None => GcData{num: 0, bytes: vec![]},
+      Some(row) => GcData{num: row.get_i64(0), bytes: row.get_blob(1).unwrap_or(&[]).to_vec()},
+    }
+  }
+
+  fn set_gc_data(&mut self, hash_id: i64, family_id: i64, data: GcData) {
+    let mut insert_stm = self.prepare_or_die("INSERT OR REPLACE INTO gc_metadata
+                                              (hash_id, family_id, gc_int, gc_vec)
+                                              VALUES (?, ?, ?, ?)");
+    assert_eq!(SQLITE_OK, insert_stm.bind_param(1, &Integer64(hash_id)));
+    assert_eq!(SQLITE_OK, insert_stm.bind_param(2, &Integer64(family_id)));
+    assert_eq!(SQLITE_OK, insert_stm.bind_param(3, &Integer64(data.num)));
+    assert_eq!(SQLITE_OK, insert_stm.bind_param(4, &Blob(data.bytes)));
+  }
+
+  fn delete_gc_data(&mut self, hash_id: i64, family_id: i64) {
+    self.exec_or_die(&format!("DELETE FROM gc_metadata WHERE hash_id={:?} AND family_id={:?}",
+                              hash_id, family_id)[..]);
+  }
+
   fn commit(&mut self, hash: &Hash, blob_ref: &Vec<u8>) {
     // Update persistent reference for ready hash
     let queue_entry = self.locate(hash).expect("hash was committed");
@@ -492,6 +533,25 @@ impl MsgHandler<Msg, Reply> for HashIndex {
 
       Msg::GetIDsByTag(tag) => {
         return reply(Reply::HashIDs(self.list_ids_by_tag(tag)));
+      },
+
+      Msg::ReadGcData(hash_id, family_id) => {
+        reply(Reply::CurrentGcData(self.read_gc_data(hash_id, family_id)));
+      },
+
+      Msg::UpdateGcData(hash_id, family_id, update_fn) => {
+        let data = self.read_gc_data(hash_id, family_id);
+        let current = match update_fn(data.clone()) {
+          None => {
+            self.delete_gc_data(hash_id, family_id);
+            data
+          },
+          Some(new) => {
+            self.set_gc_data(hash_id,family_id, new.clone());
+            new
+          },
+        };
+        reply(Reply::CurrentGcData(current));
       },
 
       Msg::Flush => {
