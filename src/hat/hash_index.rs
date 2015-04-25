@@ -77,9 +77,12 @@ pub enum Msg {
   /// Returns `HashKnown` or `HashNotKnown`.
   HashExists(Hash),
 
-  /// Locate the local payload of the `Hash`. This is currently not used.
+  /// Locate the local payload of the `Hash`.
   /// Returns `Payload` or `HashNotKnown`.
   FetchPayload(Hash),
+
+  /// Locate the local ID of this hash.
+  GetID(Hash),
 
   /// Locate the persistent reference (external blob reference) for this `Hash`.
   /// Returns `PersistentRef` or `HashNotKnown`.
@@ -105,11 +108,21 @@ pub enum Msg {
   /// Returns `CallbackRegistered` or `HashNotKnown`.
   CallAfterHashIsComitted(Hash, Thunk<'static>),
 
+
+  // APIs related to tagging, which is useful to indicate state during operation stages.
+  // These operate directly on the underlying IDs.
+  SetTag(i64, i64),
+  SetAllTags(i64),
+  GetTag(i64),
+  GetIDsByTag(i64),
+
+
   /// Flush the hash index to clear internal buffers and commit the underlying database.
   Flush,
 }
 
 pub enum Reply {
+  HashID(i64),
   HashKnown,
   HashNotKnown,
   Entry(HashEntry),
@@ -121,6 +134,11 @@ pub enum Reply {
   CommitOK,
   CallbackRegistered,
 
+  HashTag(Option<i64>),
+
+  HashIDs(Vec<i64>),
+
+  OK,
   Retry,
 }
 
@@ -143,7 +161,6 @@ pub struct HashIndex {
   callbacks: CallbackContainer<Vec<u8>>,
 
   flush_timer: PeriodicTimer,
-
 }
 
 impl HashIndex {
@@ -161,15 +178,16 @@ impl HashIndex {
       Err(err) => panic!("{:?}", err),
     };
     hi.exec_or_die("CREATE TABLE IF NOT EXISTS
-                  hash_index (id        INTEGER PRIMARY KEY,
-                              hash      BLOB,
-                              height    INTEGER,
-                              payload   BLOB,
-                              blob_ref  BLOB)");
+                    hash_index (id        INTEGER PRIMARY KEY,
+                                hash      BLOB,
+                                tag       INTEGER,
+                                height    INTEGER,
+                                payload   BLOB,
+                                blob_ref  BLOB)");
 
     hi.exec_or_die("CREATE UNIQUE INDEX IF NOT EXISTS
-                  HashIndex_UniqueHash
-                  ON hash_index(hash)");
+                    HashIndex_UniqueHash
+                    ON hash_index(hash)");
 
     hi.exec_or_die("BEGIN");
 
@@ -213,7 +231,7 @@ impl HashIndex {
     ));
     result_opt.map(|result| {
       let mut result = result;
-      let id = result.get_int(0) as i64;
+      let id = result.get_i64(0);
       let level = result.get_int(1) as i64;
       let payload: Vec<u8> = result.get_blob(2).unwrap_or(&[]).iter().map(|&x| x).collect();
       let persistent_ref: Vec<u8> = result.get_blob(3).unwrap_or(&[]).iter().map(|&x| x).collect();
@@ -230,8 +248,8 @@ impl HashIndex {
   }
 
   fn refresh_id_counter(&mut self) {
-    let id = self.select1("SELECT MAX(id) FROM hash_index").expect("id").get_int(0);
-    self.id_counter = CumulativeCounter::new(id as i64);
+    let id = self.select1("SELECT MAX(id) FROM hash_index").expect("id").get_i64(0);
+    self.id_counter = CumulativeCounter::new(id);
   }
 
   fn next_id(&mut self) -> i64 {
@@ -322,6 +340,31 @@ impl HashIndex {
     }
   }
 
+  fn set_tag(&mut self, id_opt: Option<i64>, tag: i64) {
+    let condition = id_opt.map(|id| format!("WHERE id={:?}", id)).unwrap_or("".to_string());
+    self.exec_or_die(&format!("UPDATE hash_index SET tag={:?} {}", tag, condition)[..]);
+  }
+
+  fn get_tag(&mut self, id: i64) -> Option<i64> {
+    let id_opt = self.select1(&format!("SELECT tag FROM hash_index WHERE id={:?}", id)[..])
+                     .as_mut().map(|row| row.get_i64(0));
+    match id_opt {
+      Some(id) if id == 0 => None,
+      positive => positive,
+    }
+  }
+
+  fn list_ids_by_tag(&mut self, tag: i64) -> Vec<i64> {
+    let mut cursor = self.prepare_or_die(
+      &format!("SELECT id FROM hash_index WHERE tag={:?}", tag)[..]);
+
+    let mut out = vec![];
+    while cursor.step() == SQLITE_ROW {
+      out.push(cursor.get_i64(0));
+    }
+    return out;
+  }
+
   fn commit(&mut self, hash: &Hash, blob_ref: &Vec<u8>) {
     // Update persistent reference for ready hash
     let queue_entry = self.locate(hash).expect("hash was committed");
@@ -366,6 +409,14 @@ impl HashIndex {
 impl MsgHandler<Msg, Reply> for HashIndex {
   fn handle(&mut self, msg: Msg, reply: Box<Fn(Reply)>) {
     match msg {
+
+      Msg::GetID(hash) => {
+        assert!(hash.bytes.len() > 0);
+        return reply(match self.locate(&hash) {
+          Some(entry) => Reply::HashID(entry.id),
+          None => Reply::HashNotKnown,
+        });
+      },
 
       Msg::HashExists(hash) => {
         assert!(hash.bytes.len() > 0);
@@ -423,6 +474,24 @@ impl MsgHandler<Msg, Reply> for HashIndex {
         } else {
           return reply(Reply::HashNotKnown);
         }
+      },
+
+      Msg::SetTag(id, tag) => {
+        self.set_tag(Some(id), tag);
+        return reply(Reply::OK);
+      },
+
+      Msg::SetAllTags(tag) => {
+        self.set_tag(None, tag);
+        return reply(Reply::OK);
+      },
+
+      Msg::GetTag(id) => {
+        return reply(Reply::HashTag(self.get_tag(id)));
+      }
+
+      Msg::GetIDsByTag(tag) => {
+        return reply(Reply::HashIDs(self.list_ids_by_tag(tag)));
       },
 
       Msg::Flush => {
