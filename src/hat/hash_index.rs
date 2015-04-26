@@ -196,6 +196,10 @@ impl HashIndex {
                                 payload   BLOB,
                                 blob_ref  BLOB)");
 
+    hi.exec_or_die("CREATE UNIQUE INDEX IF NOT EXISTS
+                    HashIndex_UniqueHash
+                    ON hash_index(hash)");
+
     hi.exec_or_die("CREATE TABLE IF NOT EXISTS
                     gc_metadata (hash_id    INTEGER,
                                  family_id  INTEGER,
@@ -203,8 +207,8 @@ impl HashIndex {
                                  gc_vec     BLOB)");
 
     hi.exec_or_die("CREATE UNIQUE INDEX IF NOT EXISTS
-                    HashIndex_UniqueHash
-                    ON hash_index(hash)");
+                    gc_metadata_UniqueHashFamily
+                    ON gc_metadata(hash_id, family_id)");
 
     hi.exec_or_die("BEGIN");
 
