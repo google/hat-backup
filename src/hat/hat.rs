@@ -25,7 +25,8 @@ use process::{Process};
 use blob_index::{BlobIndex};
 use blob_store::{BlobStore, BlobStoreProcess, BlobStoreBackend};
 
-use hash_index::{Hash, HashIndex, HashIndexProcess};
+use hash_index;
+use hash_index::{GcData, Hash, HashIndex, HashIndexProcess};
 use key_index::{KeyIndex, KeyEntry};
 use key_store::{KeyStore, KeyStoreProcess};
 use key_store;
@@ -34,6 +35,8 @@ use snapshot_index;
 
 use hash_tree;
 use listdir;
+use gc;
+use gc_noop;
 
 use std::path::PathBuf;
 use std::fs;
@@ -41,9 +44,70 @@ use std::io;
 use std::io::{Read, Write};
 
 use std::sync;
+use std::sync::mpsc;
 use std::sync::atomic;
 
 use time;
+
+
+struct GcBackend{
+  hash_index: HashIndexProcess,
+}
+
+impl gc::GcBackend for GcBackend {
+  fn get_data(&self, hash_id: i64, family_id: i64) -> GcData {
+    match self.hash_index.send_reply(hash_index::Msg::ReadGcData(hash_id, family_id)) {
+      hash_index::Reply::CurrentGcData(data) => data,
+      _ => panic!("Unexpected reply from hash index."),
+    }
+  }
+  fn update_data(&self, hash_id: i64, family_id: i64, f: gc::UpdateFn) -> GcData {
+    match self.hash_index.send_reply(hash_index::Msg::UpdateGcData(hash_id, family_id, f)) {
+      hash_index::Reply::CurrentGcData(data) => data,
+      _ => panic!("Unexpected reply from hash index."),
+    }
+  }
+  fn update_all_data_by_family(&self, family_id: i64, fs: mpsc::Receiver<gc::UpdateFn>)
+  {
+    match self.hash_index.send_reply(hash_index::Msg::UpdateFamilyGcData(family_id, fs)) {
+      hash_index::Reply::OK => (),
+      _ => panic!("Unexpected reply from hash index."),
+    }
+  }
+
+  fn get_tag(&self, hash_id: i64) -> Option<i64> {
+    match self.hash_index.send_reply(hash_index::Msg::GetTag(hash_id)) {
+      hash_index::Reply::HashTag(tag) => tag,
+      _ => panic!("Unexpected reply from hash index."),
+    }
+  }
+
+  fn set_tag(&self, hash_id: i64, tag_opt: Option<i64>) {
+    match self.hash_index.send_reply(hash_index::Msg::SetTag(hash_id, tag_opt)) {
+      hash_index::Reply::OK => (),
+      _ => panic!("Unexpected reply from hash index."),
+    }
+  }
+
+  fn set_all_tags(&self, tag_opt: Option<i64>) {
+    match self.hash_index.send_reply(hash_index::Msg::SetAllTags(tag_opt)) {
+      hash_index::Reply::OK => (),
+      _ => panic!("Unexpected reply from hash index."),
+    }
+  }
+
+  fn reverse_refs(&self, hash_id: i64) -> Vec<i64> {
+    panic!("Not implemented yet")
+  }
+
+  fn list_ids_by_tag(&self, tag: i64) -> mpsc::Receiver<i64> {
+    panic!("Not implemented yet")
+  }
+
+  fn list_snapshot_refs(&self, snapshot: gc::SnapshotInfo) -> mpsc::Receiver<i64> {
+    panic!("Not implemented yet")
+  }
+}
 
 
 pub struct Hat<B> {
@@ -53,6 +117,7 @@ pub struct Hat<B> {
   hash_index: HashIndexProcess,
   blob_backend: B,
   hash_backend: key_store::HashStoreBackend,
+  gc: Box<gc::Gc>,
   max_blob_size: usize,
 }
 
@@ -89,12 +154,16 @@ impl <B: 'static + BlobStoreBackend + Clone + Send> Hat<B> {
     let bs_p = Process::new(Box::new(move|| {
       BlobStore::new(local_blob_index, local_backend, max_blob_size) }));
 
+    let gc_backend = GcBackend{hash_index: hi_p.clone()};
+    let gc = gc_noop::GcNoop::new(Box::new(gc_backend));
+
     Hat{repository_root: repository_root.clone(),
         snapshot_index: si_p,
         hash_index: hi_p.clone(),
         blob_store: bs_p.clone(),
         blob_backend: backend.clone(),
         hash_backend: key_store::HashStoreBackend::new(hi_p, bs_p),
+        gc: Box::new(gc),
         max_blob_size: max_blob_size,
     }
   }

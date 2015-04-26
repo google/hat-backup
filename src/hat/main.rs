@@ -75,6 +75,9 @@ mod blob_store;
 mod key_index;
 mod key_store;
 
+mod gc;
+mod gc_noop;
+
 mod snapshot_index;
 
 

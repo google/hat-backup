@@ -14,6 +14,7 @@
 
 //! Local state for known hashes and their external location (blob reference).
 
+use std::sync::mpsc;
 use std::thunk::Thunk;
 use std::time::duration::{Duration};
 use rustc_serialize::hex::{ToHex};
@@ -117,8 +118,8 @@ pub enum Msg {
 
   // APIs related to tagging, which is useful to indicate state during operation stages.
   // These operate directly on the underlying IDs.
-  SetTag(i64, i64),
-  SetAllTags(i64),
+  SetTag(i64, Option<i64>),
+  SetAllTags(Option<i64>),
   GetTag(i64),
   GetIDsByTag(i64),
 
@@ -126,6 +127,7 @@ pub enum Msg {
   // APIs related to garbage collector metadata tied to (hash id, family id) pairs.
   ReadGcData(i64, i64),
   UpdateGcData(i64, i64, Thunk<'static, (GcData,), Option<GcData>>),
+  UpdateFamilyGcData(i64, mpsc::Receiver<Thunk<'static, (GcData,), Option<GcData>>>),
 
   /// Flush the hash index to clear internal buffers and commit the underlying database.
   Flush,
@@ -361,9 +363,10 @@ impl HashIndex {
     }
   }
 
-  fn set_tag(&mut self, id_opt: Option<i64>, tag: i64) {
+  fn set_tag(&mut self, id_opt: Option<i64>, tag_opt: Option<i64>) {
     let condition = id_opt.map(|id| format!("WHERE id={:?}", id)).unwrap_or("".to_string());
-    self.exec_or_die(&format!("UPDATE hash_index SET tag={:?} {}", tag, condition)[..]);
+    self.exec_or_die(&format!("UPDATE hash_index SET tag={:?} {}",
+                              tag_opt.unwrap_or(0), condition)[..]);
   }
 
   fn get_tag(&mut self, id: i64) -> Option<i64> {
@@ -403,6 +406,44 @@ impl HashIndex {
     assert_eq!(SQLITE_OK, insert_stm.bind_param(2, &Integer64(family_id)));
     assert_eq!(SQLITE_OK, insert_stm.bind_param(3, &Integer64(data.num)));
     assert_eq!(SQLITE_OK, insert_stm.bind_param(4, &Blob(data.bytes)));
+  }
+
+  fn update_gc_data(&mut self, hash_id: i64, family_id: i64,
+                    f: Thunk<'static, (GcData,), Option<GcData>>) -> GcData
+  {
+    let data = self.read_gc_data(hash_id, family_id);
+    match f(data.clone()) {
+      None => {
+        self.delete_gc_data(hash_id, family_id);
+        data
+      },
+      Some(new) => {
+        self.set_gc_data(hash_id,family_id, new.clone());
+        new
+      },
+    }
+  }
+
+  fn update_family_gc_data(&mut self, family_id: i64,
+                           fs: mpsc::Receiver<Thunk<'static, (GcData,), Option<GcData>>>)
+  {
+    let mut hash_ids = Vec::new();
+
+    {
+      let mut select_stm = self.prepare_or_die(
+        "SELECT hash_id FROM gc_metadata WHERE family_id=?");
+
+      assert_eq!(SQLITE_OK, select_stm.bind_param(1, &Integer64(family_id)));
+
+      while SQLITE_ROW == select_stm.step() {
+        hash_ids.push(select_stm.get_i64(0));
+      }
+    }
+
+    for hash_id in hash_ids {
+      let f = fs.recv().unwrap();
+      self.update_gc_data(hash_id, family_id, f);
+    }
   }
 
   fn delete_gc_data(&mut self, hash_id: i64, family_id: i64) {
@@ -544,18 +585,12 @@ impl MsgHandler<Msg, Reply> for HashIndex {
       },
 
       Msg::UpdateGcData(hash_id, family_id, update_fn) => {
-        let data = self.read_gc_data(hash_id, family_id);
-        let current = match update_fn(data.clone()) {
-          None => {
-            self.delete_gc_data(hash_id, family_id);
-            data
-          },
-          Some(new) => {
-            self.set_gc_data(hash_id,family_id, new.clone());
-            new
-          },
-        };
-        reply(Reply::CurrentGcData(current));
+        reply(Reply::CurrentGcData(self.update_gc_data(hash_id, family_id, update_fn)));
+      },
+
+      Msg::UpdateFamilyGcData(family_id, update_fs) => {
+        self.update_family_gc_data(family_id, update_fs);
+        return reply(Reply::OK);
       },
 
       Msg::Flush => {
