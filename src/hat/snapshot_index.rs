@@ -33,8 +33,10 @@ pub struct SnapshotInfo{
 pub type SnapshotIndexProcess = process::Process<Msg, Reply>;
 
 pub enum Msg {
+  Reserve(String),
+    
   /// Register a new snapshot by its family name, hash and persistent reference.
-  Add(String, hash_index::Hash, Vec<u8>),
+  Commit(SnapshotInfo, hash_index::Hash, Vec<u8>),
 
   /// Extract latest snapshot data for family.
   Latest(String),
@@ -44,7 +46,8 @@ pub enum Msg {
 }
 
 pub enum Reply {
-  AddOK,
+  Reserved(SnapshotInfo),
+  CommitOK,
   Latest(Option<(hash_index::Hash, Vec<u8>)>),
   FlushOK,
 }
@@ -65,7 +68,8 @@ impl SnapshotIndex {
                     family (id    INTEGER PRIMARY KEY,
                             name  BLOB)");
     si.exec_or_die("CREATE TABLE IF NOT EXISTS
-                    snapshot_index (family_id    INTEGER,
+                    snapshot_index (rowid        INTEGER PRIMARY KEY,
+                                    family_id    INTEGER,
                                     snapshot_id  INTEGER,
                                     msg          BLOB,
                                     hash         BLOB,
@@ -130,22 +134,37 @@ impl SnapshotIndex {
     return id;
   }
 
-  fn add_snapshot(&mut self, family: String, msg: String, hash: hash_index::Hash, tree_ref: Vec<u8>)
+  fn reserve_snapshot(&mut self, family: String) -> SnapshotInfo
   {
     let family_id = self.get_or_create_family_id(&family);
     let snapshot_id = 1 + self.get_latest_snapshot_id(family_id);
 
     let mut insert_stm = self.prepare_or_die(
-      "INSERT INTO snapshot_index (family_id, snapshot_id, msg, hash, tree_ref)
-       VALUES (?, ?, ?, ?, ?)");
+      "INSERT INTO snapshot_index (family_id, snapshot_id)
+       VALUES (?, ?)");
 
     assert_eq!(SQLITE_OK, insert_stm.bind_param(1, &Integer64(family_id)));
     assert_eq!(SQLITE_OK, insert_stm.bind_param(2, &Integer64(snapshot_id)));
-    assert_eq!(SQLITE_OK, insert_stm.bind_param(3, &Blob(msg.as_bytes().to_vec())));
-    assert_eq!(SQLITE_OK, insert_stm.bind_param(4, &Blob(hash.bytes.clone())));
-    assert_eq!(SQLITE_OK, insert_stm.bind_param(5, &Blob(tree_ref)));
 
     assert_eq!(SQLITE_DONE, insert_stm.step());
+
+    let unique_id = self.dbh.get_last_insert_rowid();
+    return SnapshotInfo{
+      unique_id: unique_id, 
+      family_id: family_id,
+      snapshot_id: snapshot_id};
+  }
+
+  fn commit_snapshot(&mut self, info: SnapshotInfo, msg: String, hash: hash_index::Hash, tree_ref: Vec<u8>) {
+    let mut update_stm = self.prepare_or_die(
+      "UPDATE snapshot_index SET msg=?, hash=?, tree_ref=? WHERE rowid=?");
+
+    assert_eq!(SQLITE_OK, update_stm.bind_param(1, &Blob(msg.as_bytes().to_vec())));
+    assert_eq!(SQLITE_OK, update_stm.bind_param(2, &Blob(hash.bytes.clone())));
+    assert_eq!(SQLITE_OK, update_stm.bind_param(3, &Blob(tree_ref)));
+    assert_eq!(SQLITE_OK, update_stm.bind_param(4, &Integer64(info.unique_id)));
+;
+    assert_eq!(SQLITE_DONE, update_stm.step());
   }
 
   fn latest_snapshot(&mut self, family: String) -> Option<(hash_index::Hash, Vec<u8>)> {
@@ -175,9 +194,13 @@ impl process::MsgHandler<Msg, Reply> for SnapshotIndex {
   fn handle(&mut self, msg: Msg, reply: Box<Fn(Reply)>) {
     match msg {
 
-      Msg::Add(family, hash, tree_ref) => {
-        self.add_snapshot(family, "anonymous".to_string(), hash, tree_ref);
-        return reply(Reply::AddOK);
+      Msg::Reserve(family) => {
+        reply(Reply::Reserved(self.reserve_snapshot(family)));
+      },
+
+      Msg::Commit(info, hash, tree_ref) => {
+        self.commit_snapshot(info, "anonymous".to_string(), hash, tree_ref);
+        return reply(Reply::CommitOK);
       },
 
       Msg::Latest(name) => {

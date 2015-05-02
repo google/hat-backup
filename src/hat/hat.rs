@@ -188,13 +188,25 @@ impl <B: 'static + BlobStoreBackend + Clone + Send> Hat<B> {
     let mut family = self.open_family(family_name.clone()).expect(
       &format!("Could not open family '{}'", family_name));
 
-    // Commit snapshot:
+    // Reserve snapshot.
+    let snapshot_info = match self.snapshot_index.send_reply(snapshot_index::Msg::Reserve(family_name.clone())) {
+      snapshot_index::Reply::Reserved(info) => info,
+      _ => panic!("Invalid reply from snapshot index"),
+    };
+
+    // Commit externally.
     let (hash, top_ref) = family.commit();
     family.flush();
 
-    // Update to snapshot index:
-    self.snapshot_index.send_reply(snapshot_index::Msg::Add(family_name, hash, top_ref));
-    self.snapshot_index.send_reply(snapshot_index::Msg::Flush);
+    // Commit locally.
+    match self.snapshot_index.send_reply(snapshot_index::Msg::Commit(snapshot_info, hash, top_ref)) {
+      snapshot_index::Reply::CommitOK => (),
+      _ => panic!("Invalid reply from snapshot index"),
+    };
+    match self.snapshot_index.send_reply(snapshot_index::Msg::Flush) {
+      snapshot_index::Reply::FlushOK => (),
+      _ => panic!("Invalid reply from snapshot index"),
+    };
   }
 
   pub fn checkout_in_dir(&self, family_name: String, output_dir: PathBuf) {
