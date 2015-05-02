@@ -14,6 +14,7 @@
 
 
 use std::sync::mpsc;
+use snapshot_index::{SnapshotInfo};
 use gc;
 
 
@@ -30,12 +31,12 @@ impl GcNoop {
 
 impl gc::Gc for GcNoop {
 
-  fn register(&self, _snapshot: gc::SnapshotInfo, refs: mpsc::Receiver<gc::Id>) {
+  fn register(&self, _snapshot: SnapshotInfo, refs: mpsc::Receiver<gc::Id>) {
     // It is an error to ignore the provided refereces, so we consume them here.
     refs.iter().last();
   }
 
-  fn deregister(&self, _snapshot: gc::SnapshotInfo) {}
+  fn deregister(&self, _snapshot: SnapshotInfo) {}
 
   fn list_unused_ids(&self, _refs: mpsc::Sender<gc::Id>) {}
 

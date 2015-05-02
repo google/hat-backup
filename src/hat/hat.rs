@@ -30,7 +30,7 @@ use hash_index::{GcData, Hash, HashIndex, HashIndexProcess};
 use key_index::{KeyIndex, KeyEntry};
 use key_store::{KeyStore, KeyStoreProcess};
 use key_store;
-use snapshot_index::{SnapshotIndex, SnapshotIndexProcess};
+use snapshot_index::{SnapshotInfo, SnapshotIndex, SnapshotIndexProcess};
 use snapshot_index;
 
 use hash_tree;
@@ -104,7 +104,7 @@ impl gc::GcBackend for GcBackend {
     panic!("Not implemented yet")
   }
 
-  fn list_snapshot_refs(&self, snapshot: gc::SnapshotInfo) -> mpsc::Receiver<i64> {
+  fn list_snapshot_refs(&self, snapshot: SnapshotInfo) -> mpsc::Receiver<i64> {
     panic!("Not implemented yet")
   }
 }

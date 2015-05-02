@@ -17,16 +17,11 @@ use std::sync::mpsc;
 use std::thunk::{Thunk};
 
 use hash_index::{GcData};
-
+use snapshot_index::{SnapshotInfo};
 
 pub type Id = i64;
 pub type UpdateFn = Thunk<'static, (GcData,), Option<GcData>>;
 
-pub struct SnapshotInfo{
-  unique_id: i64,
-  family_id: i64,
-  snapshot_id: i64
-}
 
 
 pub trait GcBackend {

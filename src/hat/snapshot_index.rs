@@ -24,6 +24,11 @@ use sqlite3::{open};
 
 use hash_index;
 
+pub struct SnapshotInfo{
+  unique_id: i64,
+  family_id: i64,
+  snapshot_id: i64
+}
 
 pub type SnapshotIndexProcess = process::Process<Msg, Reply>;
 
