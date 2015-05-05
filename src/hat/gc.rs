@@ -45,6 +45,9 @@ pub trait GcBackend {
 
 pub trait Gc {
   fn register(&self, snapshot: SnapshotInfo, refs: mpsc::Receiver<Id>);
+  fn register_final(&self, snapshot: SnapshotInfo, final_ref: Id);
+  fn register_cleanup(&self, snapshot: SnapshotInfo, final_ref: Id);
+
   fn deregister(&self, snapshot: SnapshotInfo);
 
   fn list_unused_ids(&self, refs: mpsc::Sender<Id>);

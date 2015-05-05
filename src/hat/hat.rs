@@ -46,6 +46,7 @@ use std::io::{Read, Write};
 use std::sync;
 use std::sync::mpsc;
 use std::sync::atomic;
+use std::thread;
 
 use time;
 
@@ -185,24 +186,90 @@ impl <B: 'static + BlobStoreBackend + Clone + Send> Hat<B> {
   }
 
   pub fn commit(&self, family_name: String) {
-    let mut family = self.open_family(family_name.clone()).expect(
+    let family = self.open_family(family_name.clone()).expect(
       &format!("Could not open family '{}'", family_name));
 
-    // Reserve snapshot.
-    let snapshot_info = match self.snapshot_index.send_reply(snapshot_index::Msg::Reserve(family_name.clone())) {
-      snapshot_index::Reply::Reserved(info) => info,
-      _ => panic!("Invalid reply from snapshot index"),
+    //  Tag 1:
+    //  Reserve the snapshot and commit the reservation.
+    //  Register all but the last hashes.
+    //  (the last hash is a special-case, as the GC use it to save meta-data for resuming)
+    let snapshot_info = match self.snapshot_index.send_reply(
+      snapshot_index::Msg::Reserve(family_name.clone())) {
+        snapshot_index::Reply::Reserved(info) => info,
+        _ => panic!("Invalid reply from snapshot index"),
+    };
+    self.flush_snapshot_index();
+
+    fn get_hash_id(index: &HashIndexProcess, hash: Hash) -> Result<i64, String> {
+      match index.send_reply(hash_index::Msg::GetID(hash)) {
+        hash_index::Reply::HashID(id) => return Ok(id),
+        _ => return Err("Tried to register an unknown hash".to_string()),
+      }
+    }
+
+    // Prepare.
+    let (hash_sender, hash_receiver) = mpsc::channel();
+    let (hash_id_sender, hash_id_receiver) = mpsc::channel();
+
+    let local_hash_index = self.hash_index.clone();
+    thread::spawn(move|| {
+      for hash in hash_receiver.iter() {
+        hash_id_sender.send(get_hash_id(&local_hash_index, hash).unwrap()).unwrap();
+      }
+    });
+
+    // Commit meta data-while registering needed data-hashes (files and dirs).
+    let (hash, top_ref) = {
+      let mut local_family = family.clone();
+      let mut fut = sync::Future::spawn(move|| local_family.commit(hash_sender));
+
+      self.gc.register(snapshot_info.clone(), hash_id_receiver);
+
+      fut.get()
     };
 
-    // Commit externally.
-    let (hash, top_ref) = family.commit();
-    family.flush();
+    // Tag 2:
+    // We update the snapshot entry with the tree hash, which we then register.
+    // When the GC has seen the final hash, we flush everything so far.
+    match self.snapshot_index.send_reply(
+      snapshot_index::Msg::Update(snapshot_info.clone(), hash.clone(), top_ref)) {
+        snapshot_index::Reply::UpdateOK => (),
+        _ => panic!("Snapshot index update failed"),
+    };
+    self.flush_snapshot_index();
 
-    // Commit locally.
-    match self.snapshot_index.send_reply(snapshot_index::Msg::Commit(snapshot_info, hash, top_ref)) {
+    // Register the final hash.
+    // At this point, the GC should still be able to either resume or rollback safely.
+    // After a successful flush, all GC work is done.
+    // The GC must be able to tell if it has completed or not.
+    let hash_id = get_hash_id(&self.hash_index, hash).unwrap();
+    self.gc.register_final(snapshot_info.clone(), hash_id);
+    family.flush();
+    self.flush_snapshot_index();
+
+    // Tag 3:
+    // Commit locally. Let the GC perform any needed cleanup.
+    // If we resume at this stage, we know that commit was successful and all work was completed.
+    // Only cleanup remains.
+    match self.snapshot_index.send_reply(snapshot_index::Msg::ReadyCommit(snapshot_info.clone())) {
+      snapshot_index::Reply::UpdateOK => (),
+      _ => panic!("Invalid reply from snapshot index"),
+    };
+    self.flush_snapshot_index();
+
+    self.gc.register_cleanup(snapshot_info.clone(), hash_id);
+    family.flush();
+    self.flush_snapshot_index();
+
+    // Tag 0: All is done.
+    match self.snapshot_index.send_reply(snapshot_index::Msg::Commit(snapshot_info)) {
       snapshot_index::Reply::CommitOK => (),
       _ => panic!("Invalid reply from snapshot index"),
     };
+    self.flush_snapshot_index();
+  }
+
+  pub fn flush_snapshot_index(&self) {
     match self.snapshot_index.send_reply(snapshot_index::Msg::Flush) {
       snapshot_index::Reply::FlushOK => (),
       _ => panic!("Invalid reply from snapshot index"),
@@ -456,6 +523,7 @@ fn try_a_few_times_then_panic<F>(f: F, msg: &str) where F: FnMut() -> bool {
 }
 
 
+#[derive(Clone)]
 struct Family {
   name: String,
   key_store: KeyStore<FileEntry>,
@@ -529,15 +597,15 @@ impl Family
     return out;
   }
 
-  pub fn commit(&mut self) -> (Hash, Vec<u8>) {
+  pub fn commit(&mut self, hash_ch: mpsc::Sender<Hash>)  -> (Hash, Vec<u8>) {
     let mut top_tree = self.key_store.hash_tree_writer();
-    self.commit_to_tree(&mut top_tree, None);
+    self.commit_to_tree(&mut top_tree, None, hash_ch);
     return top_tree.hash();
   }
 
   pub fn commit_to_tree(&mut self,
                         tree: &mut hash_tree::SimpleHashTreeWriter<key_store::HashStoreBackend>,
-                        dir_id: Option<u64>) {
+                        dir_id: Option<u64>, hash_ch: mpsc::Sender<Hash>) {
     let mut keys = Vec::new();
 
     for (id, name, ctime, _mtime, atime, hash, data_ref, _) in self.list_from_key_store(dir_id).into_iter() {
@@ -551,16 +619,18 @@ impl Family
         // This is a file, store its data hash:
         m.insert("data_hash".to_string(), hash.to_json());
         m.insert("data_ref".to_string(), data_ref.to_json());
+        hash_ch.send(Hash{bytes: hash}).unwrap();
       } else if hash.len() == 0 {
         drop(hash);
         drop(data_ref);
         // This is a directory, recurse!
         let mut inner_tree = self.key_store.hash_tree_writer();
-        self.commit_to_tree(&mut inner_tree, Some(id));
+        self.commit_to_tree(&mut inner_tree, Some(id), hash_ch.clone());
         // Store a reference for the sub-tree in our tree:
         let (dir_hash, dir_ref) = inner_tree.hash();
         m.insert("dir_hash".to_string(), dir_hash.bytes.to_json());
         m.insert("dir_ref".to_string(), dir_ref.to_json());
+        hash_ch.send(dir_hash).unwrap();
       }
 
       keys.push(json::Json::Object(m).to_json());

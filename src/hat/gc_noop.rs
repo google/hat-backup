@@ -36,6 +36,12 @@ impl gc::Gc for GcNoop {
     refs.iter().last();
   }
 
+  fn register_final(&self, _snapshot: SnapshotInfo, _ref_final: gc::Id) {
+  }
+
+  fn register_cleanup(&self, _snapshot: SnapshotInfo, _ref_final: gc::Id) {
+  }
+
   fn deregister(&self, _snapshot: SnapshotInfo) {}
 
   fn list_unused_ids(&self, _refs: mpsc::Sender<gc::Id>) {}

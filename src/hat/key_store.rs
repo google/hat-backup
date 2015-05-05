@@ -59,7 +59,8 @@ pub enum Reply {
   FlushOK,
 }
 
-pub struct KeyStore<KE> {
+#[derive(Clone)]
+pub struct KeyStore<KE: Send> {
   index: KeyIndexProcess<KE>,
   hash_index: hash_index::HashIndexProcess,
   blob_store: blob_store::BlobStoreProcess,
