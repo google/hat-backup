@@ -21,6 +21,7 @@ use std::str;
 use std::collections::{BTreeMap};
 
 use process::{Process};
+use tags;
 
 use blob_index::{BlobIndex};
 use blob_store::{BlobStore, BlobStoreProcess, BlobStoreBackend};
@@ -76,22 +77,22 @@ impl gc::GcBackend for GcBackend {
     }
   }
 
-  fn get_tag(&self, hash_id: i64) -> Option<i64> {
+  fn get_tag(&self, hash_id: i64) -> Option<tags::Tag> {
     match self.hash_index.send_reply(hash_index::Msg::GetTag(hash_id)) {
       hash_index::Reply::HashTag(tag) => tag,
       _ => panic!("Unexpected reply from hash index."),
     }
   }
 
-  fn set_tag(&self, hash_id: i64, tag_opt: Option<i64>) {
-    match self.hash_index.send_reply(hash_index::Msg::SetTag(hash_id, tag_opt)) {
+  fn set_tag(&self, hash_id: i64, tag: tags::Tag) {
+    match self.hash_index.send_reply(hash_index::Msg::SetTag(hash_id, tag)) {
       hash_index::Reply::Ok => (),
       _ => panic!("Unexpected reply from hash index."),
     }
   }
 
-  fn set_all_tags(&self, tag_opt: Option<i64>) {
-    match self.hash_index.send_reply(hash_index::Msg::SetAllTags(tag_opt)) {
+  fn set_all_tags(&self, tag: tags::Tag) {
+    match self.hash_index.send_reply(hash_index::Msg::SetAllTags(tag)) {
       hash_index::Reply::Ok => (),
       _ => panic!("Unexpected reply from hash index."),
     }
@@ -101,7 +102,7 @@ impl gc::GcBackend for GcBackend {
     panic!("Not implemented yet")
   }
 
-  fn list_ids_by_tag(&self, tag: i64) -> mpsc::Receiver<i64> {
+  fn list_ids_by_tag(&self, tag: tags::Tag) -> mpsc::Receiver<i64> {
     panic!("Not implemented yet")
   }
 

@@ -15,6 +15,7 @@
 //! Local state for known snapshots.
 
 use process;
+use tags;
 
 use sqlite3::cursor::{Cursor};
 use sqlite3::database::{Database};
@@ -149,11 +150,12 @@ impl SnapshotIndex {
     let snapshot_id = 1 + self.get_latest_snapshot_id(family_id);
 
     let mut insert_stm = self.prepare_or_die(
-      "INSERT INTO snapshot_index (family_id, tag, snapshot_id)
-       VALUES (?, 1, ?)");
+      "INSERT INTO snapshot_index (family_id, snapshot_id, tag)
+       VALUES (?, ?, ?)");
 
     assert_eq!(SQLITE_OK, insert_stm.bind_param(1, &Integer64(family_id)));
     assert_eq!(SQLITE_OK, insert_stm.bind_param(2, &Integer64(snapshot_id)));
+    assert_eq!(SQLITE_OK, insert_stm.bind_param(3, &Integer64(tags::Tag::Reserved as i64)));
 
     assert_eq!(SQLITE_DONE, insert_stm.step());
 
@@ -176,11 +178,11 @@ impl SnapshotIndex {
     assert_eq!(SQLITE_DONE, update_stm.step());
   }
 
-  fn set_tag(&mut self, snapshot: SnapshotInfo, tag: i64) {
+  fn set_tag(&mut self, snapshot: SnapshotInfo, tag: tags::Tag) {
     let mut update_stm = self.prepare_or_die(
       "UPDATE snapshot_index SET tag=? WHERE rowid=?");
 
-    assert_eq!(SQLITE_OK, update_stm.bind_param(1, &Integer64(tag)));
+    assert_eq!(SQLITE_OK, update_stm.bind_param(1, &Integer64(tag as i64)));
     assert_eq!(SQLITE_OK, update_stm.bind_param(2, &Integer64(snapshot.unique_id)));
     assert_eq!(SQLITE_DONE, update_stm.step());
   }
@@ -222,12 +224,12 @@ impl process::MsgHandler<Msg, Reply> for SnapshotIndex {
       },
 
       Msg::ReadyCommit(snapshot) => {
-        self.set_tag(snapshot, 2);
+        self.set_tag(snapshot, tags::Tag::Complete);
         return reply(Reply::UpdateOk);
       }
 
       Msg::Commit(snapshot) => {
-        self.set_tag(snapshot, 0);
+        self.set_tag(snapshot, tags::Tag::Done);
         return reply(Reply::CommitOk);
       },
 

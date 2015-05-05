@@ -20,8 +20,9 @@ use std::collections::{HashMap};
 use rustc_serialize::hex::{ToHex};
 
 use process::{Process, MsgHandler};
-use sqlite3::database::{Database};
+use tags;
 
+use sqlite3::database::{Database};
 use sqlite3::cursor::{Cursor};
 use sqlite3::types::ResultCode::{SQLITE_ROW};
 use sqlite3::{open};
@@ -143,7 +144,7 @@ impl BlobIndex {
     assert!(self.reserved.get(&blob.name).is_some(), "blob was not reserved!");
     self.exec_or_die(&format!(
       "INSERT INTO blob_index (id, name, tag) VALUES ({}, x'{}', {})",
-      blob.id, blob.name.to_hex(), 1));
+      blob.id, blob.name.to_hex(), tags::Tag::InProgress as i64));
     self.new_transaction();
   }
 
@@ -153,7 +154,7 @@ impl BlobIndex {
 
   fn commit_blob(&mut self, blob: &BlobDesc) {
     assert!(self.reserved.get(&blob.name).is_some(), "blob was not reserved!");
-    self.exec_or_die(&format!("UPDATE blob_index SET tag=0 WHERE id={}", blob.id));
+    self.exec_or_die(&format!("UPDATE blob_index SET tag={} WHERE id={}", tags::Tag::Done as i64, blob.id));
     self.new_transaction();
   }
 }

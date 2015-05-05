@@ -18,10 +18,10 @@ use std::thunk::{Thunk};
 
 use hash_index::{GcData};
 use snapshot_index::{SnapshotInfo};
+use tags;
 
 pub type Id = i64;
 pub type UpdateFn = Thunk<'static, (GcData,), Option<GcData>>;
-
 
 
 pub trait GcBackend {
@@ -32,13 +32,13 @@ pub trait GcBackend {
                  -> GcData;
   fn update_all_data_by_family(&self, family_id: Id, fs: mpsc::Receiver<UpdateFn>);
 
-  fn set_tag(&self, hash_id: Id, tag: Option<i64>);
-  fn get_tag(&self, hash_id: Id) -> Option<i64>;
+  fn set_tag(&self, hash_id: Id, tag: tags::Tag);
+  fn get_tag(&self, hash_id: Id) -> Option<tags::Tag>;
 
-  fn set_all_tags(&self, tag: Option<i64>);
+  fn set_all_tags(&self, tag: tags::Tag);
   fn reverse_refs(&self, hash_id: Id) -> Vec<Id>;
 
-  fn list_ids_by_tag(&self, tag: i64) -> mpsc::Receiver<Id>;
+  fn list_ids_by_tag(&self, tag: tags::Tag) -> mpsc::Receiver<Id>;
   fn list_snapshot_refs(&self, snapshot: SnapshotInfo) -> mpsc::Receiver<Id>;
 }
 

@@ -14,6 +14,7 @@
 
 //! Local state for known hashes and their external location (blob reference).
 
+use num::FromPrimitive;
 use std::sync::mpsc;
 use std::thunk::Thunk;
 use std::time::duration::{Duration};
@@ -23,6 +24,7 @@ use callback_container::{CallbackContainer};
 use cumulative_counter::{CumulativeCounter};
 use unique_priority_queue::{UniquePriorityQueue};
 use process::{Process, MsgHandler};
+use tags;
 
 use sqlite3::database::{Database};
 use sqlite3::cursor::{Cursor};
@@ -118,8 +120,8 @@ pub enum Msg {
 
   // APIs related to tagging, which is useful to indicate state during operation stages.
   // These operate directly on the underlying IDs.
-  SetTag(i64, Option<i64>),
-  SetAllTags(Option<i64>),
+  SetTag(i64, tags::Tag),
+  SetAllTags(tags::Tag),
   GetTag(i64),
   GetIDsByTag(i64),
 
@@ -146,7 +148,7 @@ pub enum Reply {
   CommitOk,
   CallbackRegistered,
 
-  HashTag(Option<i64>),
+  HashTag(Option<tags::Tag>),
   HashIDs(Vec<i64>),
 
   CurrentGcData(GcData),
@@ -363,19 +365,16 @@ impl HashIndex {
     }
   }
 
-  fn set_tag(&mut self, id_opt: Option<i64>, tag_opt: Option<i64>) {
+  fn set_tag(&mut self, id_opt: Option<i64>, tag: tags::Tag) {
     let condition = id_opt.map(|id| format!("WHERE id={:?}", id)).unwrap_or("".to_string());
     self.exec_or_die(&format!("UPDATE hash_index SET tag={:?} {}",
-                              tag_opt.unwrap_or(0), condition)[..]);
+                              tag as i64, condition)[..]);
   }
 
-  fn get_tag(&mut self, id: i64) -> Option<i64> {
-    let id_opt = self.select1(&format!("SELECT tag FROM hash_index WHERE id={:?}", id)[..])
-                     .as_mut().map(|row| row.get_i64(0));
-    match id_opt {
-      Some(id) if id == 0 => None,
-      positive => positive,
-    }
+  fn get_tag(&mut self, id: i64) -> Option<tags::Tag> {
+    let tag_opt = self.select1(&format!("SELECT tag FROM hash_index WHERE id={:?}", id)[..])
+                      .as_mut().map(|row| row.get_i64(0));
+    return tag_opt.and_then(|i| FromPrimitive::from_i64(i));
   }
 
   fn list_ids_by_tag(&mut self, tag: i64) -> Vec<i64> {

@@ -27,10 +27,14 @@
 #![feature(test)]
 
 #![feature(custom_attribute)]
+#![feature(custom_derive)]
 #![feature(plugin)]
+
+#![plugin(num_macros)]
 #![plugin(quickcheck_macros)]
 
 // Standard Rust imports
+extern crate num;
 extern crate rand;
 extern crate test;
 extern crate time;
@@ -77,6 +81,7 @@ mod key_store;
 
 mod gc;
 mod gc_noop;
+mod tags;
 
 mod snapshot_index;
 

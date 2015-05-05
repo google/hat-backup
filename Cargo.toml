@@ -12,6 +12,8 @@ rand = "*"
 quickcheck = "*"
 quickcheck_macros = "*"
 clap = "*"
+num = "*"
+num-macros = "*"
 
 [dependencies.rustc-serialize]
 git = "https://github.com/rust-lang/rustc-serialize"
