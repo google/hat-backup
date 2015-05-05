@@ -152,9 +152,9 @@ pub enum Msg {
 
 #[derive(Eq, PartialEq, Debug)]
 pub enum Reply {
-  StoreOK(BlobID),
-  RetrieveOK(Vec<u8>),
-  FlushOK,
+  StoreOk(BlobID),
+  RetrieveOk(Vec<u8>),
+  FlushOk,
 }
 
 
@@ -284,7 +284,7 @@ impl <B: BlobStoreBackend> MsgHandler<Msg, Reply> for BlobStore<B> {
           let id = BlobID{name: vec!(0), begin: 0, end: 0};
           let cb_id = id.clone();
           thread::spawn(move|| { callback(cb_id) });
-          return reply(Reply::StoreOK(id));
+          return reply(Reply::StoreOk(id));
         }
 
         let new_size = self.buffer_data_len + blob.len();
@@ -296,22 +296,22 @@ impl <B: BlobStoreBackend> MsgHandler<Msg, Reply> for BlobStore<B> {
         self.buffer_data.push((id.clone(), blob, callback));
 
         // To avoid unnecessary blocking, we reply with the ID *before* possibly flushing.
-        reply(Reply::StoreOK(id));
+        reply(Reply::StoreOk(id));
 
         // Flushing can be expensive, so try not block on it.
         self.maybe_flush();
        },
       Msg::Retrieve(id) => {
         if id.begin == 0 && id.end == 0 {
-          return reply(Reply::RetrieveOK(vec![]));
+          return reply(Reply::RetrieveOk(vec![]));
         }
         let blob = self.backend_read(id.name.as_slice());
         let chunk = &blob[id.begin .. id.end];
-        return reply(Reply::RetrieveOK(chunk.to_vec()));
+        return reply(Reply::RetrieveOk(chunk.to_vec()));
       },
       Msg::Flush => {
         self.flush();
-        return reply(Reply::FlushOK)
+        return reply(Reply::FlushOk)
       },
 
     }
@@ -389,12 +389,12 @@ pub mod tests {
     let mut ids = Vec::new();
     for chunk in chunks.iter() {
       match bs_p.send_reply(Msg::Store(chunk.as_slice().to_vec(), Box::new(move|_| {}))) {
-        Reply::StoreOK(id) => { ids.push((id, chunk)); },
+        Reply::StoreOk(id) => { ids.push((id, chunk)); },
         _ => panic!("Unexpected reply from blob store."),
       }
     }
 
-    assert_eq!(bs_p.send_reply(Msg::Flush), Reply::FlushOK);
+    assert_eq!(bs_p.send_reply(Msg::Flush), Reply::FlushOk);
 
     // Non-empty chunks must be in the backend now:
     for &(ref id, chunk) in ids.iter() {
@@ -409,7 +409,7 @@ pub mod tests {
     // All chunks must be available through the blob store:
     for &(ref id, chunk) in ids.iter() {
       match bs_p.send_reply(Msg::Retrieve(id.clone())) {
-        Reply::RetrieveOK(found_chunk) => assert_eq!(found_chunk,
+        Reply::RetrieveOk(found_chunk) => assert_eq!(found_chunk,
                                               chunk.as_slice().to_vec()),
         _ => panic!("Unexpected reply from blob store."),
       }
@@ -429,12 +429,12 @@ pub mod tests {
     let mut ids = Vec::new();
     for chunk in chunks.iter() {
       match bs_p.send_reply(Msg::Store(chunk.as_slice().to_vec(), Box::new(move|_| {}))) {
-        Reply::StoreOK(id) => { ids.push((id, chunk)); },
+        Reply::StoreOk(id) => { ids.push((id, chunk)); },
         _ => panic!("Unexpected reply from blob store."),
       }
-      assert_eq!(bs_p.send_reply(Msg::Flush), Reply::FlushOK);
+      assert_eq!(bs_p.send_reply(Msg::Flush), Reply::FlushOk);
       let &(ref id, chunk) = ids.last().unwrap();
-      assert_eq!(bs_p.send_reply(Msg::Retrieve(id.clone())), Reply::RetrieveOK(chunk.clone()));
+      assert_eq!(bs_p.send_reply(Msg::Retrieve(id.clone())), Reply::RetrieveOk(chunk.clone()));
     }
 
     // Non-empty chunks must be in the backend now:
@@ -450,7 +450,7 @@ pub mod tests {
     // All chunks must be available through the blob store:
     for &(ref id, chunk) in ids.iter() {
       match bs_p.send_reply(Msg::Retrieve(id.clone())) {
-        Reply::RetrieveOK(found_chunk) => assert_eq!(found_chunk,
+        Reply::RetrieveOk(found_chunk) => assert_eq!(found_chunk,
                                                      chunk.as_slice().to_vec()),
         _ => panic!("Unexpected reply from blob store."),
       }

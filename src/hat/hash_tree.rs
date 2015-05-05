@@ -159,7 +159,7 @@ impl <B: HashTreeBackend + Clone> SimpleHashTreeWriter<B> {
   /// Retrieve the hash and backend persistent reference that identified this tree.
   ///
   /// This also flushes and finalizes the tree. It should be considered frozen after calling
-  /// `hash()`, i.e. it's OK to call `hash()` multiple times, but it's **not OK** to call `append()`
+  /// `hash()`, i.e. it's Ok to call `hash()` multiple times, but it's **not Ok** to call `append()`
   /// after `hash()`.
   pub fn hash(&mut self) -> (Hash, Vec<u8>) {
     // Empty hash tree is equivalent to hash tree of one empty block:

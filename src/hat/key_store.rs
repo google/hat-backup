@@ -49,14 +49,14 @@ pub enum Msg<KE, IT> {
   ListDir(Option<u64>),
 
   /// Flush this key store and its dependencies.
-  /// Returns `FlushOK`.
+  /// Returns `FlushOk`.
   Flush,
 }
 
 pub enum Reply {
   Id(u64),
   ListResult(Vec<DirElem>),
-  FlushOK,
+  FlushOk,
 }
 
 #[derive(Clone)]
@@ -121,7 +121,7 @@ impl HashStoreBackend {
 
   fn fetch_chunk_from_persistent_ref(&mut self, chunk_ref: blob_store::BlobID) -> Option<Vec<u8>> {
     match self.blob_store.send_reply(blob_store::Msg::Retrieve(chunk_ref)) {
-      blob_store::Reply::RetrieveOK(chunk) => Some(chunk),
+      blob_store::Reply::RetrieveOk(chunk) => Some(chunk),
       _ => None
     }
   }
@@ -167,7 +167,7 @@ impl HashTreeBackend for HashStoreBackend
         return self.fetch_persistent_ref(hash).expect(
           "Could not find persistent_ref for known chunk.");
       },
-      hash_index::Reply::ReserveOK => {
+      hash_index::Reply::ReserveOk => {
         // We came first: this data-chunk is ours to process.
         let local_hash_index = self.hash_index.clone();
 
@@ -175,7 +175,7 @@ impl HashTreeBackend for HashStoreBackend
           local_hash_index.send_reply(hash_index::Msg::Commit(hash, blobid.as_bytes()));
         });
         match self.blob_store.send_reply(blob_store::Msg::Store(chunk, callback)) {
-          blob_store::Reply::StoreOK(blob_ref) => {
+          blob_store::Reply::StoreOk(blob_ref) => {
             hash_entry.persistent_ref = Some(blob_ref.as_bytes());
             self.hash_index.send_reply(hash_index::Msg::UpdateReserved(hash_entry));
             return blob_ref.as_bytes();
@@ -205,7 +205,7 @@ impl
     match msg {
       Msg::Flush => {
         self.flush();
-        return reply(Reply::FlushOK);
+        return reply(Reply::FlushOk);
       },
 
       Msg::ListDir(parent) => {
@@ -535,7 +535,7 @@ mod tests {
     let fs = fs;
 
     match ks_p.send_reply(Msg::Flush) {
-      Reply::FlushOK => (),
+      Reply::FlushOk => (),
       _ => panic!("Unexpected result from key store."),
     }
 
@@ -626,7 +626,7 @@ mod tests {
       ks_p.send_reply(Msg::Insert(entry.clone(), Some(Box::new(move|| { Some(entry) }))));
 
       match ks_p.send_reply(Msg::Flush) {
-        Reply::FlushOK => (),
+        Reply::FlushOk => (),
         _ => panic!("Unexpected result from key store."),
       }
     });
@@ -674,7 +674,7 @@ mod tests {
       ks_p.send_reply(Msg::Insert(entry.clone(), Some(Box::new(move|| { Some(entry) }))));
 
       match ks_p.send_reply(Msg::Flush) {
-        Reply::FlushOK => (),
+        Reply::FlushOk => (),
         _ => panic!("Unexpected result from key store."),
       }
     });

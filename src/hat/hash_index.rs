@@ -97,18 +97,18 @@ pub enum Msg {
 
   /// Reserve a `Hash` in the index, while sending its content to external storage.
   /// This is used to ensure that each `Hash` is stored only once.
-  /// Returns `ReserveOK` or `HashKnown`.
+  /// Returns `ReserveOk` or `HashKnown`.
   Reserve(HashEntry),
 
   /// Update the info for a reserved `Hash`. The `Hash` remains reserved. This is used to update
   /// the persistent reference (external blob reference) as soon as it is available (to allow new
   /// references to the `Hash` to be created before it is committed).
-  /// Returns ReserveOK.
+  /// Returns ReserveOk.
   UpdateReserved(HashEntry),
 
   /// A `Hash` is committed when it has been `finalized` in the external storage. `Commit` includes
   /// the persistent reference that the content is available at.
-  /// Returns CommitOK.
+  /// Returns CommitOk.
   Commit(Hash, Vec<u8>),
 
   /// Install a "on-commit" handler to be called after `Hash` is committed.
@@ -142,8 +142,8 @@ pub enum Reply {
   Payload(Option<Vec<u8>>),
   PersistentRef(Vec<u8>),
 
-  ReserveOK,
-  CommitOK,
+  ReserveOk,
+  CommitOk,
   CallbackRegistered,
 
   HashTag(Option<i64>),
@@ -151,7 +151,7 @@ pub enum Reply {
 
   CurrentGcData(GcData),
 
-  OK,
+  Ok,
   Retry,
 }
 
@@ -537,20 +537,20 @@ impl MsgHandler<Msg, Reply> for HashIndex {
         // uncommitted entries.
         return reply(match self.locate(&hash_entry.hash) {
           Some(_) => Reply::HashKnown,
-          None => { self.reserve(hash_entry); Reply::ReserveOK },
+          None => { self.reserve(hash_entry); Reply::ReserveOk },
         });
       },
 
       Msg::UpdateReserved(hash_entry) => {
         assert!(hash_entry.hash.bytes.len() > 0);
         self.update_reserved(hash_entry);
-        return reply(Reply::ReserveOK);
+        return reply(Reply::ReserveOk);
       }
 
       Msg::Commit(hash, persistent_ref) => {
         assert!(hash.bytes.len() > 0);
         self.commit(&hash, &persistent_ref);
-        return reply(Reply::CommitOK);
+        return reply(Reply::CommitOk);
       },
 
       Msg::CallAfterHashIsComitted(hash, callback) => {
@@ -564,12 +564,12 @@ impl MsgHandler<Msg, Reply> for HashIndex {
 
       Msg::SetTag(id, tag) => {
         self.set_tag(Some(id), tag);
-        return reply(Reply::OK);
+        return reply(Reply::Ok);
       },
 
       Msg::SetAllTags(tag) => {
         self.set_tag(None, tag);
-        return reply(Reply::OK);
+        return reply(Reply::Ok);
       },
 
       Msg::GetTag(id) => {
@@ -590,12 +590,12 @@ impl MsgHandler<Msg, Reply> for HashIndex {
 
       Msg::UpdateFamilyGcData(family_id, update_fs) => {
         self.update_family_gc_data(family_id, update_fs);
-        return reply(Reply::OK);
+        return reply(Reply::Ok);
       },
 
       Msg::Flush => {
         self.flush();
-        return reply(Reply::CommitOK);
+        return reply(Reply::CommitOk);
       }
     }
   }

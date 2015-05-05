@@ -60,7 +60,7 @@ pub enum Msg<KeyEntryT> {
   LookupExact(KeyEntryT),
 
   /// Update the `payload` and `persistent_ref` of an entry.
-  /// Returns `UpdateOK`.
+  /// Returns `UpdateOk`.
   UpdateDataHash(KeyEntryT, Option<Vec<u8>>, Option<Vec<u8>>),
 
   /// List a directory (aka. `level`) in the index.
@@ -74,9 +74,9 @@ pub enum Msg<KeyEntryT> {
 pub enum Reply {
   Id(u64),
   NotFound,
-  UpdateOK,
+  UpdateOk,
   ListResult(Vec<(u64, Vec<u8>, u64, u64, u64, Vec<u8>, Vec<u8>)>),
-  FlushOK,
+  FlushOk,
 }
 
 
@@ -253,12 +253,12 @@ impl <A: KeyEntry<A>> MsgHandler<Msg<A>, Reply> for KeyIndex {
         }
 
         self.maybe_flush();
-        return reply(Reply::UpdateOK);
+        return reply(Reply::UpdateOk);
       },
 
       Msg::Flush => {
         self.flush();
-        return reply(Reply::FlushOK);
+        return reply(Reply::FlushOk);
       },
 
       Msg::ListDir(parent_opt) => {

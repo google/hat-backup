@@ -71,7 +71,7 @@ impl gc::GcBackend for GcBackend {
   fn update_all_data_by_family(&self, family_id: i64, fs: mpsc::Receiver<gc::UpdateFn>)
   {
     match self.hash_index.send_reply(hash_index::Msg::UpdateFamilyGcData(family_id, fs)) {
-      hash_index::Reply::OK => (),
+      hash_index::Reply::Ok => (),
       _ => panic!("Unexpected reply from hash index."),
     }
   }
@@ -85,14 +85,14 @@ impl gc::GcBackend for GcBackend {
 
   fn set_tag(&self, hash_id: i64, tag_opt: Option<i64>) {
     match self.hash_index.send_reply(hash_index::Msg::SetTag(hash_id, tag_opt)) {
-      hash_index::Reply::OK => (),
+      hash_index::Reply::Ok => (),
       _ => panic!("Unexpected reply from hash index."),
     }
   }
 
   fn set_all_tags(&self, tag_opt: Option<i64>) {
     match self.hash_index.send_reply(hash_index::Msg::SetAllTags(tag_opt)) {
-      hash_index::Reply::OK => (),
+      hash_index::Reply::Ok => (),
       _ => panic!("Unexpected reply from hash index."),
     }
   }
@@ -233,7 +233,7 @@ impl <B: 'static + BlobStoreBackend + Clone + Send> Hat<B> {
     // When the GC has seen the final hash, we flush everything so far.
     match self.snapshot_index.send_reply(
       snapshot_index::Msg::Update(snapshot_info.clone(), hash.clone(), top_ref)) {
-        snapshot_index::Reply::UpdateOK => (),
+        snapshot_index::Reply::UpdateOk => (),
         _ => panic!("Snapshot index update failed"),
     };
     self.flush_snapshot_index();
@@ -252,7 +252,7 @@ impl <B: 'static + BlobStoreBackend + Clone + Send> Hat<B> {
     // If we resume at this stage, we know that commit was successful and all work was completed.
     // Only cleanup remains.
     match self.snapshot_index.send_reply(snapshot_index::Msg::ReadyCommit(snapshot_info.clone())) {
-      snapshot_index::Reply::UpdateOK => (),
+      snapshot_index::Reply::UpdateOk => (),
       _ => panic!("Invalid reply from snapshot index"),
     };
     self.flush_snapshot_index();
@@ -263,7 +263,7 @@ impl <B: 'static + BlobStoreBackend + Clone + Send> Hat<B> {
 
     // Tag 0: All is done.
     match self.snapshot_index.send_reply(snapshot_index::Msg::Commit(snapshot_info)) {
-      snapshot_index::Reply::CommitOK => (),
+      snapshot_index::Reply::CommitOk => (),
       _ => panic!("Invalid reply from snapshot index"),
     };
     self.flush_snapshot_index();
@@ -271,7 +271,7 @@ impl <B: 'static + BlobStoreBackend + Clone + Send> Hat<B> {
 
   pub fn flush_snapshot_index(&self) {
     match self.snapshot_index.send_reply(snapshot_index::Msg::Flush) {
-      snapshot_index::Reply::FlushOK => (),
+      snapshot_index::Reply::FlushOk => (),
       _ => panic!("Invalid reply from snapshot index"),
     };
   }

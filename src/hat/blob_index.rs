@@ -51,7 +51,7 @@ pub enum Msg {
 
 pub enum Reply {
   Reserved(BlobDesc),
-  CommitOK,
+  CommitOk,
 }
 
 pub struct BlobIndex {
@@ -172,11 +172,11 @@ impl MsgHandler<Msg, Reply> for BlobIndex {
       },
       Msg::InAir(blob) => {
         self.in_air(&blob);
-        return reply(Reply::CommitOK);
+        return reply(Reply::CommitOk);
       },
       Msg::CommitDone(blob) => {
         self.commit_blob(&blob);
-        return reply(Reply::CommitOK);
+        return reply(Reply::CommitOk);
       }
     }
   }

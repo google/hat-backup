@@ -54,10 +54,10 @@ pub enum Msg {
 
 pub enum Reply {
   Reserved(SnapshotInfo),
-  UpdateOK,
-  CommitOK,
+  UpdateOk,
+  CommitOk,
   Latest(Option<(hash_index::Hash, Vec<u8>)>),
-  FlushOK,
+  FlushOk,
 }
 
 
@@ -218,17 +218,17 @@ impl process::MsgHandler<Msg, Reply> for SnapshotIndex {
 
       Msg::Update(snapshot, hash, tree_ref) => {
         self.update(snapshot, "anonymous".to_string(), hash, tree_ref);
-        return reply(Reply::UpdateOK);
+        return reply(Reply::UpdateOk);
       },
 
       Msg::ReadyCommit(snapshot) => {
         self.set_tag(snapshot, 2);
-        return reply(Reply::UpdateOK);
+        return reply(Reply::UpdateOk);
       }
 
       Msg::Commit(snapshot) => {
         self.set_tag(snapshot, 0);
-        return reply(Reply::CommitOK);
+        return reply(Reply::CommitOk);
       },
 
       Msg::Latest(name) => {
@@ -238,7 +238,7 @@ impl process::MsgHandler<Msg, Reply> for SnapshotIndex {
 
       Msg::Flush => {
         self.flush();
-        return reply(Reply::FlushOK);
+        return reply(Reply::FlushOk);
       }
     }
   }
