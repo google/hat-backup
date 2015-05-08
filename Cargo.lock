@@ -2,7 +2,7 @@
 name = "hat-backup"
 version = "0.0.1-pre"
 dependencies = [
- "clap 0.6.6 (registry+https://github.com/rust-lang/crates.io-index)",
+ "clap 0.8.3 (registry+https://github.com/rust-lang/crates.io-index)",
  "num 0.1.23 (registry+https://github.com/rust-lang/crates.io-index)",
  "num-macros 0.1.22 (registry+https://github.com/rust-lang/crates.io-index)",
  "quickcheck 0.2.14 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -16,9 +16,18 @@ dependencies = [
 ]
 
 [[package]]
-name = "clap"
-version = "0.6.6"
+name = "ansi_term"
+version = "0.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[package]]
+name = "clap"
+version = "0.8.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+dependencies = [
+ "ansi_term 0.5.1 (registry+https://github.com/rust-lang/crates.io-index)",
+ "strsim 0.3.0 (registry+https://github.com/rust-lang/crates.io-index)",
+]
 
 [[package]]
 name = "gcc"
@@ -113,6 +122,11 @@ dependencies = [
  "libc 0.1.6 (registry+https://github.com/rust-lang/crates.io-index)",
  "log 0.3.1 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
+
+[[package]]
+name = "strsim"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
 
 [[package]]
 name = "threadpool"
