@@ -14,13 +14,10 @@ quickcheck_macros = "*"
 clap = "*"
 num = "*"
 num-macros = "*"
+time = "*"
 
 [dependencies.rustc-serialize]
 git = "https://github.com/rust-lang/rustc-serialize"
-
-[dependencies.time]
-git = "https://github.com/rust-lang/time"
-features = ["std-duration"]
 
 [dependencies.sodiumoxide]
 git = "https://github.com/dnaq/sodiumoxide"
