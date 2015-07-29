@@ -22,9 +22,9 @@
 
 // Unstable APIs:
 #![feature(convert)]
-#![feature(fs_time)]
-#![feature(std_misc)]
 #![feature(test)]
+#![feature(thunk)]
+#![feature(future)]
 
 #![feature(custom_attribute)]
 #![feature(custom_derive)]

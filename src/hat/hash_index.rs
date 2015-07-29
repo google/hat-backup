@@ -17,7 +17,7 @@
 use num::FromPrimitive;
 use std::sync::mpsc;
 use std::thunk::Thunk;
-use std::time::duration::{Duration};
+use time::Duration;
 use rustc_serialize::hex::{ToHex};
 
 use callback_container::{CallbackContainer};

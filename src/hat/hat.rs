@@ -41,12 +41,10 @@ use gc_noop;
 
 use std::path::PathBuf;
 use std::fs;
-use std::io;
-use std::io::{Read, Write};
+use std::os::unix::fs::MetadataExt;
+use std::io::{self, Read, Write};
 
-use std::sync;
-use std::sync::mpsc;
-use std::sync::atomic;
+use std::sync::{self, mpsc, atomic};
 use std::thread;
 
 use time;
@@ -397,10 +395,10 @@ impl KeyEntry<FileEntry> for FileEntry {
     None
   }
   fn modified(&self) -> Option<u64> {
-    Some(self.metadata.modified())
+    Some(self.metadata.mtime() as u64)
   }
   fn accessed(&self) -> Option<u64> {
-    Some(self.metadata.accessed())
+    Some(self.metadata.atime() as u64)
   }
 
   fn permissions(&self) -> Option<u64> {
