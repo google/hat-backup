@@ -41,6 +41,7 @@ use gc_noop;
 
 use std::path::PathBuf;
 use std::fs;
+use std::os::unix::fs::MetadataExt;
 use std::io;
 use std::io::{Read, Write};
 
@@ -63,13 +64,13 @@ impl gc::GcBackend for GcBackend {
       _ => panic!("Unexpected reply from hash index."),
     }
   }
-  fn update_data(&self, hash_id: i64, family_id: i64, f: gc::UpdateFn) -> GcData {
+  fn update_data(&mut self, hash_id: i64, family_id: i64, f: gc::UpdateFn) -> GcData {
     match self.hash_index.send_reply(hash_index::Msg::UpdateGcData(hash_id, family_id, f)) {
       hash_index::Reply::CurrentGcData(data) => data,
       _ => panic!("Unexpected reply from hash index."),
     }
   }
-  fn update_all_data_by_family(&self, family_id: i64, fs: mpsc::Receiver<gc::UpdateFn>)
+  fn update_all_data_by_family(&mut self, family_id: i64, fs: mpsc::Receiver<gc::UpdateFn>)
   {
     match self.hash_index.send_reply(hash_index::Msg::UpdateFamilyGcData(family_id, fs)) {
       hash_index::Reply::Ok => (),
@@ -84,14 +85,14 @@ impl gc::GcBackend for GcBackend {
     }
   }
 
-  fn set_tag(&self, hash_id: i64, tag: tags::Tag) {
+  fn set_tag(&mut self, hash_id: i64, tag: tags::Tag) {
     match self.hash_index.send_reply(hash_index::Msg::SetTag(hash_id, tag)) {
       hash_index::Reply::Ok => (),
       _ => panic!("Unexpected reply from hash index."),
     }
   }
 
-  fn set_all_tags(&self, tag: tags::Tag) {
+  fn set_all_tags(&mut self, tag: tags::Tag) {
     match self.hash_index.send_reply(hash_index::Msg::SetAllTags(tag)) {
       hash_index::Reply::Ok => (),
       _ => panic!("Unexpected reply from hash index."),
@@ -394,13 +395,13 @@ impl KeyEntry<FileEntry> for FileEntry {
   }
 
   fn created(&self) -> Option<u64> {
-    None
+    Some(self.metadata.ctime_nsec() as u64)
   }
   fn modified(&self) -> Option<u64> {
-    Some(self.metadata.modified())
+    Some(self.metadata.mtime_nsec() as u64)
   }
   fn accessed(&self) -> Option<u64> {
-    Some(self.metadata.accessed())
+    Some(self.metadata.atime_nsec() as u64)
   }
 
   fn permissions(&self) -> Option<u64> {

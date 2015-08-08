@@ -50,7 +50,7 @@
 /// A handler is allowed to call `reply()` **exactly** once. Not calling it or calling it multiple
 /// times will likely cause runtime panicure when using `send_reply()`.
 
-use std::thunk::Thunk;
+use std::boxed::FnBox;
 use std::thread;
 use std::sync::mpsc;
 
@@ -79,7 +79,7 @@ impl <Msg:'static + Send, Reply:'static + Send>
 {
 
   /// Create and start a new process using `handler`.
-  pub fn new<H>(handler_proc: Thunk<'static, (), H>) -> Process<Msg, Reply>
+  pub fn new<H>(handler_proc: Box<FnBox() -> H + Send>) -> Process<Msg, Reply>
     where H: 'static + MsgHandler<Msg, Reply>
   {
     let (sender, receiver) = mpsc::sync_channel(10);
@@ -92,7 +92,7 @@ impl <Msg:'static + Send, Reply:'static + Send>
 
 
   fn start<H>(&self, receiver: mpsc::Receiver<(Msg, Option<mpsc::Sender<Reply>>)>,
-              handler_proc: Thunk<'static, (), H>)
+              handler_proc: Box<FnBox() -> H + Send>)
     where H: 'static + MsgHandler<Msg, Reply>
   {
     thread::spawn(move|| {

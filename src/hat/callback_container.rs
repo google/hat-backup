@@ -12,14 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::thunk::Thunk;
+
+use std::boxed::FnBox;
 use std::collections::{BTreeMap};
 use std::collections::btree_map;
 
 
 pub struct CallbackContainer<K> {
-  callbacks: BTreeMap<K, Vec<Thunk<'static>>>,
-  ready: Vec<Thunk<'static>>,
+  callbacks: BTreeMap<K, Vec<Box<FnBox()>>>,
+  ready: Vec<Box<FnBox()>>,
 }
 
 
@@ -30,7 +31,7 @@ impl <K: Ord> CallbackContainer<K> {
                       ready: vec!()}
   }
 
-  pub fn add(&mut self, k: K, callback: Thunk<'static>) {
+  pub fn add(&mut self, k: K, callback: Box<FnBox()>) {
     match self.callbacks.entry(k) {
       btree_map::Entry::Occupied(mut entry) => {
         entry.get_mut().push(callback);

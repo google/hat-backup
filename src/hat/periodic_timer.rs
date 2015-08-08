@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use time::SteadyTime;
-use std::time::duration::{Duration};
+use time::Duration;
 
 
 pub struct PeriodicTimer {

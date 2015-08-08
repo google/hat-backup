@@ -9,27 +9,20 @@ path = "src/hat/main.rs"
 
 [dependencies]
 rand = "*"
-quickcheck = "*"
-quickcheck_macros = "*"
+quickcheck = "0.2.19"
+quickcheck_macros = "0.2.19"
 clap = "*"
-num = "*"
-num-macros = "*"
+num = "0.1.24"
+num-macros = "0.1.24"
+rustc-serialize = "*"
+time = "*"
 
-[dependencies.rustc-serialize]
-git = "https://github.com/rust-lang/rustc-serialize"
-
-[dependencies.time]
-git = "https://github.com/rust-lang/time"
-features = ["std-duration"]
-
-[dependencies.sodiumoxide]
-git = "https://github.com/dnaq/sodiumoxide"
+sodiumoxide = "*"
+threadpool = "*"
 
 [dependencies.sqlite3]
 git = "https://github.com/linuxfood/rustsqlite"
 
-[dependencies.threadpool]
-git = "https://github.com/rust-lang/threadpool"
 
 [profile.dev]
 opt-level = 0

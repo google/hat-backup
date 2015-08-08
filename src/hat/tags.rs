@@ -12,15 +12,22 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![plugin(num_macros)]
 
-extern crate num;
-
-#[derive(Debug, PartialEq, NumFromPrimitive)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum Tag {
   Done = 0,
 
   Reserved = 1,
   InProgress = 2,
   Complete = 3,
+}
+
+pub fn tag_from_num(n: i64) -> Option<Tag> {
+  match n {
+    0 => Some(Tag::Done),
+    1 => Some(Tag::Reserved),
+    2 => Some(Tag::InProgress),
+    3 => Some(Tag::Complete),
+    _ => None,
+  }
 }

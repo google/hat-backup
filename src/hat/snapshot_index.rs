@@ -27,9 +27,9 @@ use hash_index;
 
 #[derive(Clone)]
 pub struct SnapshotInfo{
-  unique_id: i64,
-  family_id: i64,
-  snapshot_id: i64
+  pub unique_id: i64,
+  pub family_id: i64,
+  pub snapshot_id: i64
 }
 
 pub type SnapshotIndexProcess = process::Process<Msg, Reply>;

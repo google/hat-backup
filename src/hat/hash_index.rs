@@ -14,10 +14,9 @@
 
 //! Local state for known hashes and their external location (blob reference).
 
-use num::FromPrimitive;
+use std::boxed::FnBox;
 use std::sync::mpsc;
-use std::thunk::Thunk;
-use std::time::duration::{Duration};
+use time::Duration;
 use rustc_serialize::hex::{ToHex};
 
 use callback_container::{CallbackContainer};
@@ -115,7 +114,7 @@ pub enum Msg {
 
   /// Install a "on-commit" handler to be called after `Hash` is committed.
   /// Returns `CallbackRegistered` or `HashNotKnown`.
-  CallAfterHashIsComitted(Hash, Thunk<'static>),
+  CallAfterHashIsComitted(Hash, Box<FnBox() + Send>),
 
 
   // APIs related to tagging, which is useful to indicate state during operation stages.
@@ -128,8 +127,8 @@ pub enum Msg {
 
   // APIs related to garbage collector metadata tied to (hash id, family id) pairs.
   ReadGcData(i64, i64),
-  UpdateGcData(i64, i64, Thunk<'static, (GcData,), Option<GcData>>),
-  UpdateFamilyGcData(i64, mpsc::Receiver<Thunk<'static, (GcData,), Option<GcData>>>),
+  UpdateGcData(i64, i64, Box<FnBox(GcData) -> Option<GcData> + Send>),
+  UpdateFamilyGcData(i64, mpsc::Receiver<Box<FnBox(GcData) -> Option<GcData> + Send>>),
 
   /// Flush the hash index to clear internal buffers and commit the underlying database.
   Flush,
@@ -316,7 +315,7 @@ impl HashIndex {
     }
   }
 
-  fn register_hash_callback(&mut self, hash: &Hash, callback: Thunk<'static>) -> bool {
+  fn register_hash_callback(&mut self, hash: &Hash, callback: Box<FnBox() + Send>) -> bool {
     assert!(hash.bytes.len() > 0);
 
     if self.queue.find_value_of_key(&hash.bytes).is_some() {
@@ -374,7 +373,7 @@ impl HashIndex {
   fn get_tag(&mut self, id: i64) -> Option<tags::Tag> {
     let tag_opt = self.select1(&format!("SELECT tag FROM hash_index WHERE id={:?}", id)[..])
                       .as_mut().map(|row| row.get_i64(0));
-    return tag_opt.and_then(|i| FromPrimitive::from_i64(i));
+    return tag_opt.and_then(|i| tags::tag_from_num(i));
   }
 
   fn list_ids_by_tag(&mut self, tag: i64) -> Vec<i64> {
@@ -408,7 +407,7 @@ impl HashIndex {
   }
 
   fn update_gc_data(&mut self, hash_id: i64, family_id: i64,
-                    f: Thunk<'static, (GcData,), Option<GcData>>) -> GcData
+                    f: Box<FnBox(GcData) -> Option<GcData> + Send>) -> GcData
   {
     let data = self.read_gc_data(hash_id, family_id);
     match f(data.clone()) {
@@ -424,7 +423,7 @@ impl HashIndex {
   }
 
   fn update_family_gc_data(&mut self, family_id: i64,
-                           fs: mpsc::Receiver<Thunk<'static, (GcData,), Option<GcData>>>)
+                           fs: mpsc::Receiver<Box<FnBox(GcData) -> Option<GcData> + Send>>)
   {
     let mut hash_ids = Vec::new();
 

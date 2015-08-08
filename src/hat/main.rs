@@ -22,19 +22,18 @@
 
 // Unstable APIs:
 #![feature(convert)]
-#![feature(fs_time)]
-#![feature(std_misc)]
 #![feature(test)]
 
 #![feature(custom_attribute)]
 #![feature(custom_derive)]
 #![feature(plugin)]
 
-#![plugin(num_macros)]
+#![feature(fnbox)]
+#![feature(future)]
+
 #![plugin(quickcheck_macros)]
 
 // Standard Rust imports
-extern crate num;
 extern crate rand;
 extern crate test;
 extern crate time;
@@ -111,13 +110,13 @@ fn main() {
                         .version(&format!("v{}",crate_version!())[..])
                         .about("Create backup snapshots")
                         .arg_from_usage("--license 'Display the license'")
-                        .subcommand(SubCommand::new("snapshot")
+                        .subcommand(SubCommand::with_name("snapshot")
                             .about("Create a snapshot")
                             .args_from_usage(arg_template))
-                        .subcommand(SubCommand::new("checkout")
+                        .subcommand(SubCommand::with_name("checkout")
                             .about("Checkout a snapshot")
                             .args_from_usage(arg_template))
-                        .subcommand(SubCommand::new("commit")
+                        .subcommand(SubCommand::with_name("commit")
                             .about("Commit a snapshot")
                             .arg_from_usage("<NAME> 'Name of the snapshot'"))
                         .get_matches();

@@ -14,7 +14,7 @@
 
 //! External API for creating and manipulating snapshots.
 
-use std::thunk::Thunk;
+use std::boxed::FnBox;
 
 use blob_store;
 use hash_tree::{SimpleHashTreeWriter, HashTreeBackend,
@@ -42,7 +42,7 @@ pub enum Msg<KE, IT> {
   /// passed along with it. If the data turns out to be unreadable, this iterator proc can return
   /// `None`.
   /// Returns `Id` with the new entry ID.
-  Insert(KE, Option<Thunk<'static, (), Option<IT>>>),
+  Insert(KE, Option<Box<FnBox() -> Option<IT> + Send>>),
 
   /// List a "directory" (aka. a `level`) in the index.
   /// Returns `ListResult` with all the entries under the given parent.

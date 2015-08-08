@@ -14,7 +14,7 @@
 
 //! Local state for keys in the snapshot in progress (the "index").
 
-use std::time::duration::{Duration};
+use time::Duration;
 
 use periodic_timer::{PeriodicTimer};
 use process::{Process, MsgHandler};

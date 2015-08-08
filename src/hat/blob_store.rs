@@ -14,7 +14,7 @@
 
 //! Combines data chunks into larger blobs to be stored externally.
 
-use std::thunk::Thunk;
+use std::boxed::FnBox;
 use std::sync::{Arc, Mutex};
 use std::thread;
 
@@ -142,7 +142,7 @@ pub enum Msg {
   /// Store a new data chunk into the current blob. The callback is triggered after the blob
   /// containing the chunk has been committed to persistent storage (it is then safe to use the
   /// `BlobID` as persistent reference).
-  Store(Vec<u8>, Thunk<'static, (BlobID,)>),
+  Store(Vec<u8>, Box<FnBox(BlobID) + Send>),
   /// Retrieve the data chunk identified by `BlobID`.
   Retrieve(BlobID),
   /// Flush the current blob, independent of its size.
@@ -164,7 +164,7 @@ pub struct BlobStore<B> {
   blob_index: BlobIndexProcess,
   blob_desc: blob_index::BlobDesc,
 
-  buffer_data: Vec<(BlobID, Vec<u8>, Thunk<'static, (BlobID,)>)>,
+  buffer_data: Vec<(BlobID, Vec<u8>, Box<FnBox(BlobID) + Send>)>,
   buffer_data_len: usize,
 
   max_blob_size: usize,
