@@ -18,18 +18,18 @@ use snapshot_index::{SnapshotInfo};
 use gc;
 
 
-pub struct GcNoop{
-  backend: Box<gc::GcBackend>,
+pub struct GcNoop<B> {
+  backend: Box<B>,
 }
 
-impl GcNoop {
-  pub fn new(backend: Box<gc::GcBackend>) -> GcNoop {
+impl <B: gc::GcBackend> GcNoop<B> {
+  pub fn new(backend: Box<B>) -> GcNoop<B> where B: gc::GcBackend {
     GcNoop{backend: backend}
   }
 }
 
 
-impl gc::Gc for GcNoop {
+impl <B: gc::GcBackend> gc::Gc for GcNoop<B> {
 
   fn register(&self, _snapshot: SnapshotInfo, refs: mpsc::Receiver<gc::Id>) {
     // It is an error to ignore the provided refereces, so we consume them here.
@@ -46,4 +46,11 @@ impl gc::Gc for GcNoop {
 
   fn list_unused_ids(&self, _refs: mpsc::Sender<gc::Id>) {}
 
+}
+
+#[test]
+fn gc_noop_test() {
+  gc::gc_test(vec![vec![1], vec![2], vec![1,2,3]],
+              Box::new(move|backend| Box::new(GcNoop::new(Box::new(backend)))),
+              gc::GcType::InExact);
 }
