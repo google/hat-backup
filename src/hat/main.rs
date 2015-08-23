@@ -80,6 +80,7 @@ mod key_store;
 
 mod gc;
 mod gc_noop;
+mod gc_rc;
 mod tags;
 
 mod snapshot_index;

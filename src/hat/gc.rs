@@ -52,7 +52,7 @@ pub trait Gc {
 
   fn deregister(&mut self, snapshot: SnapshotInfo);
 
-  fn list_unused_ids(&self, refs: mpsc::Sender<Id>);
+  fn list_unused_ids(&mut self, refs: mpsc::Sender<Id>);
 }
 
 
@@ -127,8 +127,11 @@ impl GcBackend for SafeMemoryBackend {
   }
 
   fn set_all_tags(&mut self, tag: tags::Tag) {
-    for (_k, v) in self.backend.lock().unwrap().tags.iter_mut() {
-      *v = tag.clone();
+    let mut backend = self.backend.lock().unwrap();
+    for (_snapshot, refs) in backend.snapshot_refs.clone() {
+      for r in refs.iter() {
+        backend.tags.insert(r.clone(), tag.clone());
+      }
     }
   }
 
@@ -198,6 +201,7 @@ pub fn gc_test<GC>(snapshots: Vec<Vec<u8>>,
   }
 
   let mut all_refs: Vec<u8> = snapshots.iter().flat_map(|v| v.clone().into_iter()).collect();
+  all_refs.sort();
   all_refs.dedup();
 
   match gc_type {
@@ -205,7 +209,10 @@ pub fn gc_test<GC>(snapshots: Vec<Vec<u8>>,
       // Check that all IDs were eventually marked unused.
       let (sender, receiver) = mpsc::channel();
       gc.list_unused_ids(sender);
-      assert_eq!(receiver.iter().count(), all_refs.len());
+      let unused: Vec<Id> = receiver.iter().collect();
+      if unused.len() != all_refs.len() {
+        panic!("Did not mark all IDs as unused. Wanted {:?}, got {:?}.", all_refs, unused);
+      }
     },
     GcType::InExact => {},
   }

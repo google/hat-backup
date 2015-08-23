@@ -44,7 +44,7 @@ impl <B: gc::GcBackend> gc::Gc for GcNoop<B> {
 
   fn deregister(&mut self, _snapshot: SnapshotInfo) {}
 
-  fn list_unused_ids(&self, _refs: mpsc::Sender<gc::Id>) {}
+  fn list_unused_ids(&mut self, _refs: mpsc::Sender<gc::Id>) {}
 
 }
 
