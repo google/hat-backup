@@ -187,7 +187,7 @@ impl <B: 'static + BlobStoreBackend + Clone + Send> Hat<B> {
     Some(Family{name: name, key_store: ks, key_store_process: ks_p})
   }
 
-  pub fn commit(&self, family_name: String) {
+  pub fn commit(&mut self, family_name: String) {
     let family = self.open_family(family_name.clone()).expect(
       &format!("Could not open family '{}'", family_name));
 

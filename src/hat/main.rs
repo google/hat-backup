@@ -156,7 +156,7 @@ fn main() {
             let name = matches.value_of("NAME").unwrap().to_owned();
 
             let backend = blob_store::FileBackend::new(blob_dir());
-            let hat = hat::Hat::open_repository(&PathBuf::from("repo"), backend, MAX_BLOB_SIZE);
+            let mut hat = hat::Hat::open_repository(&PathBuf::from("repo"), backend, MAX_BLOB_SIZE);
 
             hat.commit(name);
         },

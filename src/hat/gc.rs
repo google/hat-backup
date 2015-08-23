@@ -46,11 +46,11 @@ pub trait GcBackend {
 
 
 pub trait Gc {
-  fn register(&self, snapshot: SnapshotInfo, refs: mpsc::Receiver<Id>);
-  fn register_final(&self, snapshot: SnapshotInfo, final_ref: Id);
-  fn register_cleanup(&self, snapshot: SnapshotInfo, final_ref: Id);
+  fn register(&mut self, snapshot: SnapshotInfo, refs: mpsc::Receiver<Id>);
+  fn register_final(&mut self, snapshot: SnapshotInfo, final_ref: Id);
+  fn register_cleanup(&mut self, snapshot: SnapshotInfo, final_ref: Id);
 
-  fn deregister(&self, snapshot: SnapshotInfo);
+  fn deregister(&mut self, snapshot: SnapshotInfo);
 
   fn list_unused_ids(&self, refs: mpsc::Sender<Id>);
 }
@@ -167,7 +167,7 @@ pub fn gc_test<GC>(snapshots: Vec<Vec<u8>>,
                    mk_gc: Box<FnBox(SafeMemoryBackend) -> Box<GC>>,
                    gc_type: GcType) where GC: Gc {
   let mut backend = SafeMemoryBackend::new();
-  let gc = mk_gc(backend.clone());
+  let mut gc = mk_gc(backend.clone());
 
   let mut infos = vec![];
   for (i, refs) in snapshots.iter().enumerate() {

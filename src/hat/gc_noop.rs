@@ -31,18 +31,18 @@ impl <B: gc::GcBackend> GcNoop<B> {
 
 impl <B: gc::GcBackend> gc::Gc for GcNoop<B> {
 
-  fn register(&self, _snapshot: SnapshotInfo, refs: mpsc::Receiver<gc::Id>) {
+  fn register(&mut self, _snapshot: SnapshotInfo, refs: mpsc::Receiver<gc::Id>) {
     // It is an error to ignore the provided refereces, so we consume them here.
     refs.iter().last();
   }
 
-  fn register_final(&self, _snapshot: SnapshotInfo, _ref_final: gc::Id) {
+  fn register_final(&mut self, _snapshot: SnapshotInfo, _ref_final: gc::Id) {
   }
 
-  fn register_cleanup(&self, _snapshot: SnapshotInfo, _ref_final: gc::Id) {
+  fn register_cleanup(&mut self, _snapshot: SnapshotInfo, _ref_final: gc::Id) {
   }
 
-  fn deregister(&self, _snapshot: SnapshotInfo) {}
+  fn deregister(&mut self, _snapshot: SnapshotInfo) {}
 
   fn list_unused_ids(&self, _refs: mpsc::Sender<gc::Id>) {}
 
