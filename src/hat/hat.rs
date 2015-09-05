@@ -104,7 +104,14 @@ impl gc::GcBackend for GcBackend {
   }
 
   fn list_ids_by_tag(&self, tag: tags::Tag) -> mpsc::Receiver<i64> {
-    panic!("Not implemented yet")
+    let (sender, receiver) = mpsc::channel();
+    match self.hash_index.send_reply(hash_index::Msg::GetIDsByTag(tag as i64)) {
+      hash_index::Reply::HashIDs(ids) => {
+        ids.iter().map(|i| sender.send(*i)).last();
+      },
+      _ => panic!("Unexpected reply from hash index."),
+    }
+    return receiver;
   }
 }
 
