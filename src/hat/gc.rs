@@ -44,6 +44,20 @@ pub trait GcBackend {
 }
 
 
+pub fn mark_tree<B>(backend: &mut Box<B>, root: Id, tag: tags::Tag) where B: GcBackend {
+  backend.set_tag(root, tag.clone());
+  for r in backend.reverse_refs(root) {
+    if let Some(current) = backend.get_tag(r.clone()) {
+      if current == tag {
+        continue;
+      }
+    }
+    backend.set_tag(r.clone(), tag.clone());
+    mark_tree(backend, r, tag.clone());
+  }
+}
+
+
 pub trait Gc {
   fn register(&mut self, snapshot: SnapshotInfo, refs: mpsc::Receiver<Id>);
   fn register_final(&mut self, snapshot: SnapshotInfo, final_ref: Id);

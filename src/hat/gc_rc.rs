@@ -35,19 +35,6 @@ impl <B: gc::GcBackend> GcRc<B> {
   pub fn new(backend: Box<B>) -> GcRc<B> where B: gc::GcBackend {
     GcRc{backend: backend}
   }
-
-  fn mark_tree(&mut self, root: gc::Id, tag: tags::Tag) {
-    self.backend.set_tag(root, tag.clone());
-    for r in self.backend.reverse_refs(root) {
-      if let Some(current) = self.backend.get_tag(r.clone()) {
-        if current == tag {
-          continue;
-        }
-      }
-      self.backend.set_tag(r.clone(), tag.clone());
-      self.mark_tree(r, tag.clone());
-    }
-  }
 }
 
 
@@ -86,7 +73,7 @@ impl <B: gc::GcBackend> gc::Gc for GcRc<B> {
     for r in self.backend.list_ids_by_tag(tags::Tag::Done) {
       let data = self.backend.get_data(r, DATA_FAMILY);
       if data.num > 0 {
-        self.mark_tree(r, tags::Tag::Reserved);
+        gc::mark_tree(&mut self.backend, r, tags::Tag::Reserved);
       }
     }
     // Everything that is still 'Done' is unused.
