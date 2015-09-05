@@ -13,8 +13,10 @@
 // limitations under the License.
 
 
-use hash_index::{GcData};
+use std::boxed::{FnBox};
 use std::sync::mpsc;
+
+use hash_index::{GcData};
 use snapshot_index::{SnapshotInfo};
 use gc;
 use tags;
@@ -71,8 +73,8 @@ impl <B: gc::GcBackend> gc::Gc for GcRc<B> {
     self.backend.set_tag(ref_final, tags::Tag::Done);
   }
 
-  fn deregister(&mut self, snapshot: SnapshotInfo) {
-    for r in self.backend.list_snapshot_refs(snapshot).iter() {
+  fn deregister(&mut self, _snapshot: SnapshotInfo, refs: Box<FnBox() -> mpsc::Receiver<gc::Id>>) {
+    for r in refs().iter() {
       self.backend.update_data(r, DATA_FAMILY,
                                Box::new(move|GcData{num, bytes}| Some(GcData{num:num - 1, bytes:bytes})));
     }

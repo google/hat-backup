@@ -13,7 +13,9 @@
 // limitations under the License.
 
 
+use std::boxed::{FnBox};
 use std::sync::mpsc;
+
 use snapshot_index::{SnapshotInfo};
 use gc;
 
@@ -42,7 +44,7 @@ impl <B: gc::GcBackend> gc::Gc for GcNoop<B> {
   fn register_cleanup(&mut self, _snapshot: SnapshotInfo, _ref_final: gc::Id) {
   }
 
-  fn deregister(&mut self, _snapshot: SnapshotInfo) {}
+  fn deregister(&mut self, _snapshot: SnapshotInfo, _refs: Box<FnBox() -> mpsc::Receiver<gc::Id>>) {}
 
   fn list_unused_ids(&mut self, _refs: mpsc::Sender<gc::Id>) {}
 

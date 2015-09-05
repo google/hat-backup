@@ -106,10 +106,6 @@ impl gc::GcBackend for GcBackend {
   fn list_ids_by_tag(&self, tag: tags::Tag) -> mpsc::Receiver<i64> {
     panic!("Not implemented yet")
   }
-
-  fn list_snapshot_refs(&self, snapshot: SnapshotInfo) -> mpsc::Receiver<i64> {
-    panic!("Not implemented yet")
-  }
 }
 
 

@@ -41,7 +41,6 @@ pub trait GcBackend {
   fn reverse_refs(&self, hash_id: Id) -> Vec<Id>;
 
   fn list_ids_by_tag(&self, tag: tags::Tag) -> mpsc::Receiver<Id>;
-  fn list_snapshot_refs(&self, snapshot: SnapshotInfo) -> mpsc::Receiver<Id>;
 }
 
 
@@ -50,7 +49,7 @@ pub trait Gc {
   fn register_final(&mut self, snapshot: SnapshotInfo, final_ref: Id);
   fn register_cleanup(&mut self, snapshot: SnapshotInfo, final_ref: Id);
 
-  fn deregister(&mut self, snapshot: SnapshotInfo);
+  fn deregister(&mut self, snapshot: SnapshotInfo, Box<FnBox() -> mpsc::Receiver<Id>>);
 
   fn list_unused_ids(&mut self, refs: mpsc::Sender<Id>);
 }
@@ -91,6 +90,14 @@ impl SafeMemoryBackend {
 
   fn insert_snapshot(&mut self, info: &SnapshotInfo, refs: Vec<Id>) {
     self.backend.lock().unwrap().snapshot_refs.insert(info.unique_id, refs);
+  }
+
+  fn list_snapshot_refs(&self, info: SnapshotInfo) -> mpsc::Receiver<Id> {
+    let (sender, receiver) = mpsc::channel();
+    let refs = self.backend.lock().unwrap()
+                   .snapshot_refs.get(&info.unique_id).unwrap_or(&vec![]).clone();
+    refs.iter().map(|id| sender.send(*id)).last();
+    return receiver;
   }
 }
 
@@ -151,15 +158,8 @@ impl GcBackend for SafeMemoryBackend {
     ids.iter().map(|id| sender.send(*id)).last();
     return receiver;
   }
-
-  fn list_snapshot_refs(&self, info: SnapshotInfo) -> mpsc::Receiver<Id> {
-    let (sender, receiver) = mpsc::channel();
-    let refs = self.backend.lock().unwrap()
-                   .snapshot_refs.get(&info.unique_id).unwrap_or(&vec![]).clone();
-    refs.iter().map(|id| sender.send(*id)).last();
-    return receiver;
-  }
 }
+
 
 pub enum GcType {
   Exact,
@@ -197,7 +197,8 @@ pub fn gc_test<GC>(snapshots: Vec<Vec<u8>>,
     receiver.iter().filter(|i:&i64| refs.contains(&(*i as u8))).map(|i| {
         panic!("ID prematurely deleted by GC: {}", i) }).last();
     // Deregister snapshot.
-    gc.deregister(infos[i].clone());
+    let refs = backend.list_snapshot_refs(infos[i].clone());
+    gc.deregister(infos[i].clone(), Box::new(|| refs));
   }
 
   let mut all_refs: Vec<u8> = snapshots.iter().flat_map(|v| v.clone().into_iter()).collect();
