@@ -49,6 +49,12 @@ pub enum Msg {
   /// Extract latest snapshot data for family.
   Latest(String),
 
+  /// Lookup exact snapshot info from family and snapshot id.
+  Lookup(String, i64),
+
+  /// Delete snapshot.
+  Delete(SnapshotInfo),
+
   /// Flush the hash index to clear internal buffers and commit the underlying database.
   Flush,
 }
@@ -57,7 +63,7 @@ pub enum Reply {
   Reserved(SnapshotInfo),
   UpdateOk,
   CommitOk,
-  Latest(Option<(hash_index::Hash, Vec<u8>)>),
+  Snapshot(Option<(SnapshotInfo, hash_index::Hash, Vec<u8>)>),
   FlushOk,
 }
 
@@ -121,6 +127,15 @@ impl SnapshotIndex {
     }
   }
 
+  fn delete_snapshot(&mut self, info: SnapshotInfo) {
+    let mut stm = self.prepare_or_die("DELETE FROM snapshot_index WHERE rowid=? AND family_id=? AND snapshot_id=? LIMIT 1");
+    assert_eq!(SQLITE_OK, stm.bind_param(1, &Integer64(info.unique_id)));
+    assert_eq!(SQLITE_OK, stm.bind_param(2, &Integer64(info.family_id)));
+    assert_eq!(SQLITE_OK, stm.bind_param(3, &Integer64(info.snapshot_id)));
+
+    assert_eq!(SQLITE_DONE, stm.step());
+  }
+
   fn get_or_create_family_id(&mut self, family: &String) -> i64 {
     let id_opt = self.get_family_id(family);
     match id_opt {
@@ -144,8 +159,24 @@ impl SnapshotIndex {
     return id;
   }
 
-  fn reserve_snapshot(&mut self, family: String) -> SnapshotInfo
-  {
+  fn get_snapshot_info(&mut self, family_name: String, snapshot_id: i64) -> Option<(SnapshotInfo, hash_index::Hash, Vec<u8>)> {
+    let family_id = self.get_family_id(&family_name).expect(&format!("No such family: {}", family_name));
+    let mut lookup = self.prepare_or_die(
+      "SELECT rowid, hash, tree_ref FROM snapshot_index WHERE family_id=? AND snapshot_id=? LIMIT 1");
+    assert_eq!(SQLITE_OK, lookup.bind_param(1, &Integer64(family_id)));
+    assert_eq!(SQLITE_OK, lookup.bind_param(2, &Integer64(snapshot_id)));
+    let status = lookup.step();
+    if status == SQLITE_ROW {
+      let id = lookup.get_i64(0);
+      return Some((SnapshotInfo{unique_id: id, family_id: family_id, snapshot_id: snapshot_id},
+                   hash_index::Hash{bytes: lookup.get_blob(1).unwrap().to_vec()},
+                   lookup.get_blob(2).unwrap().to_vec()));
+    }
+    assert_eq!(SQLITE_DONE, status);
+    return None
+  }
+
+  fn reserve_snapshot(&mut self, family: String) -> SnapshotInfo {
     let family_id = self.get_or_create_family_id(&family);
     let snapshot_id = 1 + self.get_latest_snapshot_id(family_id);
 
@@ -187,18 +218,20 @@ impl SnapshotIndex {
     assert_eq!(SQLITE_DONE, update_stm.step());
   }
 
-  fn latest_snapshot(&mut self, family: String) -> Option<(hash_index::Hash, Vec<u8>)> {
+  fn latest_snapshot(&mut self, family: String) -> Option<(SnapshotInfo, hash_index::Hash, Vec<u8>)> {
     let family_id_opt = self.get_family_id(&family);
     family_id_opt.and_then(|family_id| {
 
     let mut lookup_stm = self.prepare_or_die(
-      "SELECT hash, tree_ref FROM snapshot_index WHERE family_id=? ORDER BY snapshot_id DESC");
+      "SELECT id, snapshot_id, hash, tree_ref FROM snapshot_index WHERE family_id=? ORDER BY snapshot_id DESC");
 
     assert_eq!(SQLITE_OK, lookup_stm.bind_param(1, &Integer64(family_id)));
 
     if lookup_stm.step() == SQLITE_ROW {
-      return Some((hash_index::Hash{bytes: lookup_stm.get_blob(0).unwrap().to_vec()},
-                   lookup_stm.get_blob(1).unwrap().to_vec()));
+      return Some((
+              SnapshotInfo{unique_id: lookup_stm.get_i64(0), family_id: family_id, snapshot_id: lookup_stm.get_i64(1)},
+              hash_index::Hash{bytes: lookup_stm.get_blob(2).unwrap().to_vec()},
+              lookup_stm.get_blob(3).unwrap().to_vec()));
     }
     return None;
     })
@@ -235,7 +268,17 @@ impl process::MsgHandler<Msg, Reply> for SnapshotIndex {
 
       Msg::Latest(name) => {
         let res_opt = self.latest_snapshot(name);
-        return reply(Reply::Latest(res_opt));
+        return reply(Reply::Snapshot(res_opt));
+      }
+
+      Msg::Lookup(name, id) => {
+        let res_opt = self.get_snapshot_info(name, id);
+        return reply(Reply::Snapshot(res_opt));
+      }
+
+      Msg::Delete(info) => {
+        self.delete_snapshot(info);
+        return reply(Reply::UpdateOk);
       }
 
       Msg::Flush => {

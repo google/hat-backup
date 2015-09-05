@@ -419,6 +419,7 @@ impl HashIndex {
     assert_eq!(SQLITE_OK, insert_stm.bind_param(2, &Integer64(family_id)));
     assert_eq!(SQLITE_OK, insert_stm.bind_param(3, &Integer64(data.num)));
     assert_eq!(SQLITE_OK, insert_stm.bind_param(4, &Blob(data.bytes)));
+    assert_eq!(SQLITE_DONE, insert_stm.step());
   }
 
   fn update_gc_data(&mut self, hash_id: i64, family_id: i64,
@@ -431,7 +432,7 @@ impl HashIndex {
         data
       },
       Some(new) => {
-        self.set_gc_data(hash_id,family_id, new.clone());
+        self.set_gc_data(hash_id, family_id, new.clone());
         new
       },
     }

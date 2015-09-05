@@ -37,7 +37,7 @@ use snapshot_index;
 use hash_tree;
 use listdir;
 use gc;
-use gc_noop;
+use gc_rc;
 
 use std::path::PathBuf;
 use std::fs;
@@ -159,6 +159,26 @@ fn hash_index_name(root: &PathBuf) -> String {
   concat_filename(root, "hash_index.sqlite3".to_string())
 }
 
+fn list_snapshot(backend: &key_store::HashStoreBackend, out: &mpsc::Sender<BTreeMap<String, json::Json>>, 
+                 family: &Family, dir_hash: Hash, dir_ref: Vec<u8>) {
+  for o in family.fetch_dir_data(dir_hash, dir_ref, backend.clone()) {
+    for d in o.as_array().unwrap().into_iter() {
+      if let Some(m) = d.as_object() {
+        out.send(m.clone()).unwrap();
+
+        if let Some(pref_raw) = m.get("dir_ref").and_then(|x| x.as_array()) {
+          let pref = pref_raw.iter().map(|x| x.as_i64().unwrap() as u8).collect();
+          let bytes = m.get("dir_hash").and_then(|x| x.as_array()).unwrap().iter().map(|y| y.as_i64().unwrap() as u8);
+          let hash = Hash{bytes: bytes.collect()};
+          list_snapshot(backend, out, family, hash, pref);
+        }
+      }
+    }
+  }
+}
+
+
+
 impl <B: 'static + BlobStoreBackend + Clone + Send> Hat<B> {
   pub fn open_repository(repository_root: &PathBuf, backend: B, max_blob_size: usize)
                         -> Hat<B> {
@@ -175,7 +195,7 @@ impl <B: 'static + BlobStoreBackend + Clone + Send> Hat<B> {
       BlobStore::new(local_blob_index, local_backend, max_blob_size) }));
 
     let gc_backend = GcBackend{hash_index: hi_p.clone()};
-    let gc = gc_noop::GcNoop::new(Box::new(gc_backend));
+    let gc = gc_rc::GcRc::new(Box::new(gc_backend));
 
     Hat{repository_root: repository_root.clone(),
         snapshot_index: si_p,
@@ -237,7 +257,7 @@ impl <B: 'static + BlobStoreBackend + Clone + Send> Hat<B> {
       }
     });
 
-    // Commit meta data-while registering needed data-hashes (files and dirs).
+    // Commit metadata while registering needed data-hashes (files and dirs).
     let (hash, top_ref) = {
       let mut local_family = family.clone();
       let mut fut = sync::Future::spawn(move|| local_family.commit(hash_sender));
@@ -297,10 +317,10 @@ impl <B: 'static + BlobStoreBackend + Clone + Send> Hat<B> {
 
   pub fn checkout_in_dir(&self, family_name: String, output_dir: PathBuf) {
     // Extract latest snapshot info:
-    let (dir_hash, dir_ref) =
+    let (_info, dir_hash, dir_ref) =
       match self.snapshot_index.send_reply(snapshot_index::Msg::Latest(family_name.clone())) {
-        snapshot_index::Reply::Latest(Some((h, r))) => (h, r),
-        snapshot_index::Reply::Latest(None) =>
+        snapshot_index::Reply::Snapshot(Some((i, h, r))) => (i, h, r),
+        snapshot_index::Reply::Snapshot(None) =>
           panic!("Tried to checkout family '{}' before first commit", family_name),
         _ => panic!("Unexpected result from snapshot index"),
       };
@@ -343,6 +363,53 @@ impl <B: 'static + BlobStoreBackend + Clone + Send> Hat<B> {
         }
       }
     }
+  }
+
+  pub fn deregister(&mut self, family_name: String, snapshot_id: i64) {
+     let family = self.open_family(family_name.clone()).expect(
+               &format!("Could not open family '{}'", family_name));
+
+     let (info, dir_hash, dir_ref) = match self.snapshot_index.send_reply(
+         snapshot_index::Msg::Lookup(family_name.clone(), snapshot_id)) {
+             snapshot_index::Reply::Snapshot(opt) => {
+                 match opt {
+                     Some((i, h, r)) => (i, h, r),
+                     None => panic!("No such snapshot: {} with id {:?}", family_name, snapshot_id),
+                 }
+             },
+             _ => panic!("Unexpected reply from snapshot index."),
+         };
+
+     let local_family = family.clone();
+     let local_hash_index = self.hash_index.clone();
+     let local_hash_backend = self.hash_backend.clone();
+     let listing = Box::new(move|| {
+         let (sender, receiver) = mpsc::channel();
+         list_snapshot(&local_hash_backend, &sender, &local_family, dir_hash.clone(), dir_ref);
+         drop(sender);
+
+         let (id_sender, id_receiver) = mpsc::channel();
+         for m in receiver.iter() {
+           let hash = m.get("dir_hash").or(m.get("data_hash")).and_then(|x| x.as_array())
+               .unwrap().iter().map(|y| y.as_i64().unwrap() as u8).collect();
+           match local_hash_index.send_reply(hash_index::Msg::GetID(Hash{bytes:hash})) {
+               hash_index::Reply::HashID(id) => id_sender.send(id).unwrap(),
+               _ => panic!("Unexpected reply from hash index."),
+           }
+         }
+         match local_hash_index.send_reply(hash_index::Msg::GetID(dir_hash)) {
+               hash_index::Reply::HashID(id) => id_sender.send(id).unwrap(),
+               _ => panic!("Unexpected reply from hash index."),
+         }
+         return id_receiver;
+     });
+     self.gc.deregister(info.clone(), listing);
+     self.snapshot_index.send_reply(snapshot_index::Msg::Delete(info));
+     family.flush();
+     match self.snapshot_index.send_reply(snapshot_index::Msg::Flush) {
+         snapshot_index::Reply::FlushOk => (),
+         _ => panic!("Unexpected reply from snapshot index."),
+     };
   }
 }
 

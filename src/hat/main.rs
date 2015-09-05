@@ -54,6 +54,7 @@ extern crate clap;
 extern crate quickcheck;
 
 
+use std::convert::From;
 use std::path::PathBuf;
 use std::borrow::ToOwned;
 
@@ -120,6 +121,10 @@ fn main() {
                         .subcommand(SubCommand::with_name("commit")
                             .about("Commit a snapshot")
                             .arg_from_usage("<NAME> 'Name of the snapshot'"))
+                        .subcommand(SubCommand::with_name("delete")
+                            .about("Delete a snapshot")
+                            .args_from_usage("<NAME> 'Name of the snapshot family'
+                                              <ID> 'The snapshot id to delete'"))
                         .get_matches();
 
     // Check for license flag
@@ -160,6 +165,15 @@ fn main() {
             let mut hat = hat::Hat::open_repository(&PathBuf::from("repo"), backend, MAX_BLOB_SIZE);
 
             hat.commit(name);
+        },
+        ("delete", Some(matches)) => {
+            let name = matches.value_of("NAME").unwrap().to_owned();
+            let id = matches.value_of("ID").unwrap().to_owned();
+
+            let backend = blob_store::FileBackend::new(blob_dir());
+            let mut hat = hat::Hat::open_repository(&PathBuf::from("repo"), backend, MAX_BLOB_SIZE);
+
+            hat.deregister(name, id.parse::<i64>().unwrap());
         },
         _       => {
             println!("No subcommand specified\n{}\nFor more information re-run with --help", matches.usage());
