@@ -36,6 +36,8 @@ use periodic_timer::{PeriodicTimer};
 use sodiumoxide::crypto::hash::{sha512};
 
 
+pub static HASHBYTES:usize = sha512::HASHBYTES;
+
 pub type HashIndexProcess = Process<Msg, Reply>;
 
 
@@ -55,7 +57,7 @@ impl Hash {
   /// Computes `hash(text)` and stores this digest as the `bytes` field in a new `Hash` structure.
   pub fn new(text: &[u8]) -> Hash {
     let sha512::Digest(digest_bytes) = sha512::hash(text);
-    Hash{bytes: digest_bytes[0 .. sha512::HASHBYTES].iter().map(|&x| x).collect()}
+    Hash{bytes: digest_bytes[0 .. HASHBYTES].to_vec()}
   }
 }
 
@@ -91,6 +93,9 @@ pub enum Msg {
 
   /// Locate the local ID of this hash.
   GetID(Hash),
+
+  /// Locate hash entry from its ID.
+  GetHash(i64),
 
   /// Locate the persistent reference (external blob reference) for this `Hash`.
   /// Returns `PersistentRef` or `HashNotKnown`.
@@ -253,12 +258,11 @@ impl HashIndex {
       "SELECT id, height, payload, blob_ref FROM hash_index WHERE hash=x'{}'",
       hash.bytes.to_hex()
     ));
-    result_opt.map(|result| {
-      let mut result = result;
+    result_opt.map(|mut result| {
       let id = result.get_i64(0);
       let level = result.get_int(1) as i64;
-      let payload: Vec<u8> = result.get_blob(2).unwrap_or(&[]).iter().map(|&x| x).collect();
-      let persistent_ref: Vec<u8> = result.get_blob(3).unwrap_or(&[]).iter().map(|&x| x).collect();
+      let payload: Vec<u8> = result.get_blob(2).unwrap_or(&[]).to_vec();
+      let persistent_ref: Vec<u8> = result.get_blob(3).unwrap_or(&[]).to_vec();
       QueueEntry{id: id, level: level,
                  payload: if payload.len() == 0 { None }
                           else {Some(payload) },
@@ -269,6 +273,17 @@ impl HashIndex {
   fn locate(&mut self, hash: &Hash) -> Option<QueueEntry> {
     let result_opt = self.queue.find_value_of_key(&hash.bytes);
     result_opt.map(|x| x).or_else(|| self.index_locate(hash))
+  }
+
+  fn locate_by_id(&mut self, id: i64) -> Option<HashEntry> {
+    let result_opt = self.select1(&format!(
+        "SELECT hash, height, payload, blob_ref FROM hash_index WHERE id='{:?}'", id));
+    return result_opt.map(|mut result|
+               HashEntry{hash: Hash{bytes: result.get_blob(0).unwrap_or(&[]).to_vec()},
+                         level: result.get_int(1) as i64,
+                         payload: result.get_blob(2).and_then(|p| if p.len() == 0 { None } else { Some(p.to_vec()) }),
+                         persistent_ref: result.get_blob(3).map(|p| p.to_vec())
+        });
   }
 
   fn refresh_id_counter(&mut self) {
@@ -499,6 +514,13 @@ impl MsgHandler<Msg, Reply> for HashIndex {
         return reply(match self.locate(&hash) {
           Some(entry) => Reply::HashID(entry.id),
           None => Reply::HashNotKnown,
+        });
+      },
+
+      Msg::GetHash(id) => {
+        return reply(match self.locate_by_id(id) {
+         Some(hash) => Reply::Entry(hash),
+         None => Reply::HashNotKnown,
         });
       },
 

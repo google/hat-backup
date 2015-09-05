@@ -21,7 +21,7 @@
 // use serialize::json;
 
 use rustc_serialize::json;
-use hash_index::{Hash};
+use hash_index::{Hash, HASHBYTES};
 use std::{str};
 
 
@@ -82,6 +82,12 @@ pub struct SimpleHashTreeWriter<B> {
   order: usize,
   levels: Vec<Vec<HashRef>>,  // Representation of rightmost path to root
 }
+
+
+pub fn decode_metadata_refs(metadata: &[u8]) -> Vec<Vec<u8>> {
+  metadata.chunks(HASHBYTES).map(|c| c.to_vec()).collect()
+}
+
 
 impl <B: HashTreeBackend + Clone> SimpleHashTreeWriter<B> {
 

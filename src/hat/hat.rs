@@ -100,7 +100,21 @@ impl gc::GcBackend for GcBackend {
   }
 
   fn reverse_refs(&self, hash_id: i64) -> Vec<i64> {
-    panic!("Not implemented yet")
+    let entry = match self.hash_index.send_reply(hash_index::Msg::GetHash(hash_id)) {
+      hash_index::Reply::Entry(entry) => entry,
+      hash_index::Reply::HashNotKnown => panic!("HashNotKnown in hash index."),
+      _ => panic!("Unexpected reply from hash index."),
+    };
+    if entry.payload.is_none() {
+      return Vec::new();
+    }
+    return hash_tree::decode_metadata_refs(&entry.payload.unwrap()).into_iter().map(|bytes| {
+        match self.hash_index.send_reply(hash_index::Msg::GetID(Hash{bytes:bytes})) {
+          hash_index::Reply::HashID(id) => id,
+          hash_index::Reply::HashNotKnown => panic!("HashNotKnown in hash index."),
+          _ => panic!("Unexpected result from hash index."),
+        }
+    }).collect();
   }
 
   fn list_ids_by_tag(&self, tag: tags::Tag) -> mpsc::Receiver<i64> {
