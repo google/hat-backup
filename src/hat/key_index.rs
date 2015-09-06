@@ -116,11 +116,9 @@ impl KeyIndex {
                                persistent_ref BLOB
                             );");
 
-    if cfg!(test) {
-      ki.exec_or_die("CREATE UNIQUE INDEX IF NOT EXISTS
-                      KeyIndex_UniqueParentName
-                      ON key_index(parent, name)");
-    }
+    ki.exec_or_die("CREATE UNIQUE INDEX IF NOT EXISTS
+                    KeyIndex_UniqueParentName
+                    ON key_index(parent, name)");
 
     ki.exec_or_die("BEGIN");
     ki
