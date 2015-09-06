@@ -33,7 +33,7 @@ use key_index::{KeyIndex};
 pub type KeyStoreProcess<KE, IT> = Process<Msg<KE, IT>, Reply>;
 
 pub type DirElem = (u64, Vec<u8>, u64, u64, u64, Vec<u8>, Vec<u8>,
-                    Option<ReaderResult<HashStoreBackend>>);
+                    Box<FnBox() -> Option<ReaderResult<HashStoreBackend>> + Send>);
 
 // Public structs
 pub enum Msg<KE, IT> {
@@ -212,17 +212,21 @@ impl
         match self.index.send_reply(key_index::Msg::ListDir(parent)) {
           key_index::Reply::ListResult(entries) => {
             // TODO(jos): Rewrite this tuple hell
-            let mut my_entries = Vec::with_capacity(entries.len());
+            let mut my_entries: Vec<DirElem> = Vec::with_capacity(entries.len());
             for (id, name, created, modified, accessed, hash, persistent_ref) in entries.into_iter()
             {
               let local_hash = hash_index::Hash{bytes: hash.clone()};
               let local_ref = persistent_ref.clone();
 
+              let local_hash_index = self.hash_index.clone();
+              let local_blob_store = self.blob_store.clone();
+
               my_entries.push(
                 (id, name, created, modified, accessed, hash, persistent_ref,
-                   SimpleHashTreeReader::open(
-                     HashStoreBackend::new(self.hash_index.clone(), self.blob_store.clone()),
-                     local_hash, local_ref)
+                   Box::new(move||
+                            SimpleHashTreeReader::open(
+                            HashStoreBackend::new(local_hash_index.clone(), local_blob_store.clone()),
+                              local_hash, local_ref))
                  ));
             }
             return reply(Reply::ListResult(my_entries));

@@ -692,7 +692,7 @@ impl Family
 
   pub fn checkout_in_dir(&self, output_dir: PathBuf, dir_id: Option<u64>) {
     let mut path = output_dir;
-    for (id, name, _, _, _, hash, _, data_res_opt) in self.list_from_key_store(dir_id).into_iter() {
+    for (id, name, _, _, _, hash, _, data_res_open) in self.list_from_key_store(dir_id).into_iter() {
       // Extend directory with filename:
       path.push(str::from_utf8(&name[..]).unwrap());
 
@@ -703,7 +703,7 @@ impl Family
       } else {
         // This is a file, write it
         let mut fd = fs::File::create(&path).unwrap();
-        if let Some(data_res) = data_res_opt {
+        if let Some(data_res) = data_res_open() {
           self.write_file_chunks(&mut fd, data_res);
         }
       }
