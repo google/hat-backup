@@ -24,7 +24,8 @@ use process::{Process};
 use tags;
 
 use blob_index::{BlobIndex};
-use blob_store::{BlobStore, BlobStoreProcess, BlobStoreBackend};
+use blob_store;
+use blob_store::{BlobID, BlobStore, BlobStoreProcess, BlobStoreBackend};
 
 use hash_index;
 use hash_index::{GcData, Hash, HashIndex, HashIndexProcess};
@@ -410,6 +411,59 @@ impl <B: 'static + BlobStoreBackend + Clone + Send> Hat<B> {
          snapshot_index::Reply::FlushOk => (),
          _ => panic!("Unexpected reply from snapshot index."),
      };
+  }
+
+  pub fn gc(&mut self) {
+    // Remove unused hashes.
+    let mut deleted_hashes = 0;
+    let (sender, receiver) = mpsc::channel();
+    self.gc.list_unused_ids(sender);
+    for id in receiver.iter() {
+      deleted_hashes += 1;
+      match self.hash_index.send_reply(hash_index::Msg::Delete(id)) {
+        hash_index::Reply::Ok => (),
+        _ => panic!("Unexpected reply from hash index."),
+      }
+    }
+    match self.hash_index.send_reply(hash_index::Msg::Flush) {
+      hash_index::Reply::CommitOk => (),
+      _ => panic!("Unexpected reply from hash index."),
+    }
+    // Mark used blobs.
+    let entries = match self.hash_index.send_reply(hash_index::Msg::List) {
+      hash_index::Reply::Listing(ch) => ch,
+      _ => panic!("Unexpected reply from hash index."),
+    };
+    match self.blob_store.send_reply(blob_store::Msg::TagAll(tags::Tag::InProgress)) {
+      blob_store::Reply::Ok => (),
+      _ => panic!("Unexpected reply from blob store."),
+    }
+    let mut live_blobs = 0;
+    for entry in entries.iter() {
+      if let Some(bytes) = entry.persistent_ref {
+        live_blobs += 1;
+        let pref = BlobID::from_bytes(bytes);
+        match self.blob_store.send_reply(blob_store::Msg::Tag(pref, tags::Tag::Reserved)) {
+          blob_store::Reply::Ok => (),
+          _ => panic!("Unexpected reply from blob store."),
+        }
+      }
+    }
+    // Anything still marked "in progress" is not referenced by any hash.
+    match self.blob_store.send_reply(blob_store::Msg::DeleteByTag(tags::Tag::InProgress)) {
+      blob_store::Reply::Ok => (),
+      _ => panic!("Unexpected reply from blob store."),
+    }
+    match self.blob_store.send_reply(blob_store::Msg::TagAll(tags::Tag::Done)) {
+      blob_store::Reply::Ok => (),
+      _ => panic!("Unexpected reply from blob store."),
+    }
+    match self.blob_store.send_reply(blob_store::Msg::Flush) {
+      blob_store::Reply::FlushOk => (),
+      _ => panic!("Unexpected reply from blob store."),
+    }
+    println!("Deleted hashes: {:?}", deleted_hashes);
+    println!("Live data blobs after deletion: {:?}", live_blobs);
   }
 }
 

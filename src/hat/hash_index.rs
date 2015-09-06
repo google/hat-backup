@@ -121,16 +121,20 @@ pub enum Msg {
   /// Returns `CallbackRegistered` or `HashNotKnown`.
   CallAfterHashIsComitted(Hash, Box<FnBox() + Send>),
 
+  /// List all hash entries.
+  List,
 
-  // APIs related to tagging, which is useful to indicate state during operation stages.
-  // These operate directly on the underlying IDs.
+  /// APIs related to tagging, which is useful to indicate state during operation stages.
+  /// These operate directly on the underlying IDs.
   SetTag(i64, tags::Tag),
   SetAllTags(tags::Tag),
   GetTag(i64),
   GetIDsByTag(i64),
 
+  /// Permanently delete hash by its ID.
+  Delete(i64),
 
-  // APIs related to garbage collector metadata tied to (hash id, family id) pairs.
+  /// APIs related to garbage collector metadata tied to (hash id, family id) pairs.
   ReadGcData(i64, i64),
   UpdateGcData(i64, i64, Box<FnBox(GcData) -> Option<GcData> + Send>),
   UpdateFamilyGcData(i64, mpsc::Receiver<Box<FnBox(GcData) -> Option<GcData> + Send>>),
@@ -151,6 +155,8 @@ pub enum Reply {
   ReserveOk,
   CommitOk,
   CallbackRegistered,
+
+  Listing(mpsc::Receiver<HashEntry>),
 
   HashTag(Option<tags::Tag>),
   HashIDs(Vec<i64>),
@@ -478,6 +484,34 @@ impl HashIndex {
     self.maybe_flush();
   }
 
+  fn list(&mut self) -> mpsc::Receiver<HashEntry> {
+    let (sender, receiver) = mpsc::channel();
+    let mut cursor = self.prepare_or_die("SELECT hash, height, payload, blob_ref FROM hash_index");
+    loop {
+      let status = cursor.step();
+      if status == SQLITE_DONE {
+        break;
+      }
+      assert_eq!(status, SQLITE_ROW);
+      if let Err(_) = sender.send(
+        HashEntry{hash: Hash{bytes: cursor.get_blob(0).unwrap_or(&[]).to_vec()},
+                  level: cursor.get_int(1) as i64,
+                  payload: cursor.get_blob(2).and_then(|p| if p.len() == 0 { None } else { Some(p.to_vec()) }),
+                  persistent_ref: cursor.get_blob(3).map(|p| p.to_vec())
+      }) {
+          break;
+      }
+    }
+    return receiver;
+  }
+
+  fn delete(&mut self, id: i64) {
+    let mut cursor = self.prepare_or_die(&format!("DELETE FROM hash_index WHERE id={:?} LIMIT 1", id));
+    assert_eq!(cursor.step(), SQLITE_DONE);
+    let mut cursor2 = self.prepare_or_die(&format!("DELETE FROM gc_metadata WHERE hash_id={:?}", id));
+    assert_eq!(cursor2.step(), SQLITE_DONE);
+   }
+
   fn maybe_flush(&mut self) {
     if self.flush_timer.did_fire() {
       self.flush();
@@ -581,6 +615,15 @@ impl MsgHandler<Msg, Reply> for HashIndex {
         } else {
           return reply(Reply::HashNotKnown);
         }
+      },
+
+      Msg::List => {
+        return reply(Reply::Listing(self.list()));
+      },
+
+      Msg::Delete(id) => {
+        self.delete(id);
+        return reply(Reply::Ok);
       },
 
       Msg::SetTag(id, tag) => {

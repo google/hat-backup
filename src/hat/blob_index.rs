@@ -14,6 +14,7 @@
 
 //! Local state for external blobs and their states.
 
+use std::sync::mpsc;
 use sodiumoxide::randombytes::{randombytes};
 
 use std::collections::{HashMap};
@@ -24,7 +25,7 @@ use tags;
 
 use sqlite3::database::{Database};
 use sqlite3::cursor::{Cursor};
-use sqlite3::types::ResultCode::{SQLITE_ROW};
+use sqlite3::types::ResultCode::{SQLITE_DONE, SQLITE_ROW};
 use sqlite3::{open};
 
 
@@ -48,11 +49,20 @@ pub enum Msg {
   /// Report that this blob has been fully committed to persistent storage. We can now use its
   /// reference internally. Only committed blobs are considered "safe to use".
   CommitDone(BlobDesc),
+
+  Tag(BlobDesc, tags::Tag),
+  TagAll(tags::Tag),
+  ListByTag(tags::Tag),
+  DeleteByTag(tags::Tag),
+
+  Flush,
 }
 
 pub enum Reply {
   Reserved(BlobDesc),
+  Listing(mpsc::Receiver<BlobDesc>),
   CommitOk,
+  Ok,
 }
 
 pub struct BlobIndex {
@@ -157,6 +167,35 @@ impl BlobIndex {
     self.exec_or_die(&format!("UPDATE blob_index SET tag={} WHERE id={}", tags::Tag::Done as i64, blob.id));
     self.new_transaction();
   }
+
+  fn tag(&mut self, tag: tags::Tag, target: Option<BlobDesc>) {
+    let filter = target.map(|d| 
+                            if d.id != 0 { format!(" WHERE id={:?} LIMIT 1", d.id) }
+                            else { format!(" WHERE name=x'{}' LIMIT 1", d.name.to_hex()) }).unwrap_or("".to_string());
+    self.exec_or_die(&format!("UPDATE blob_index SET tag={:?} {}", tag as i64, filter));
+  }
+
+  fn delete_by_tag(&mut self, tag: tags::Tag) {
+    self.exec_or_die(&format!("DELETE FROM blob_index WHERE tag={:?}", tag as i64));
+  }
+
+  fn list_by_tag(&mut self, tag: tags::Tag) -> mpsc::Receiver<BlobDesc> {
+    let (sender, receiver) = mpsc::channel();
+    let mut cursor = self.prepare_or_die(&format!("SELECT id, name FROM blob_index WHERE tag={:?}", tag as i64));
+    loop {
+      let status = cursor.step();
+      if status == SQLITE_DONE {
+        break;
+      }
+      assert_eq!(status, SQLITE_ROW);
+      if let Err(_) = sender.send(BlobDesc{id: cursor.get_i64(0),
+                                           name: cursor.get_blob(1).unwrap().to_vec()}) 
+      {
+        break; // channel closed.
+      }
+    }
+    return receiver;
+  }
 }
 
 impl Drop for BlobIndex {
@@ -178,6 +217,25 @@ impl MsgHandler<Msg, Reply> for BlobIndex {
       Msg::CommitDone(blob) => {
         self.commit_blob(&blob);
         return reply(Reply::CommitOk);
+      },
+      Msg::Flush => {
+        self.new_transaction();
+        return reply(Reply::CommitOk);
+      },
+      Msg::Tag(blob, tag) => {
+        self.tag(tag, Some(blob));
+        reply(Reply::Ok);
+      },
+      Msg::TagAll(tag) => {
+        self.tag(tag, None);
+        reply(Reply::Ok);
+      },
+      Msg::ListByTag(tag) => {
+        reply(Reply::Listing(self.list_by_tag(tag)));
+      },
+      Msg::DeleteByTag(tag) => {
+        self.delete_by_tag(tag);
+        reply(Reply::Ok);
       }
     }
   }

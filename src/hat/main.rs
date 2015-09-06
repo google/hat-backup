@@ -109,7 +109,7 @@ fn main() {
     // Create valid arguments
     let matches = App::new("hat")
                         // get version from Cargo.toml
-                        .version(&format!("v{}",crate_version!())[..])
+                        .version(&format!("v{}", crate_version!())[..])
                         .about("Create backup snapshots")
                         .arg_from_usage("--license 'Display the license'")
                         .subcommand(SubCommand::with_name("snapshot")
@@ -125,6 +125,9 @@ fn main() {
                             .about("Delete a snapshot")
                             .args_from_usage("<NAME> 'Name of the snapshot family'
                                               <ID> 'The snapshot id to delete'"))
+                        .subcommand(SubCommand::with_name("gc")
+                            .args_from_usage("-p --pretend 'Do not modify any data'")
+                            .about("Garbage collect: identify and remove unused data blocks."))
                         .get_matches();
 
     // Check for license flag
@@ -175,7 +178,12 @@ fn main() {
 
             hat.deregister(name, id.parse::<i64>().unwrap());
         },
-        _       => {
+        ("gc", Some(_matches)) => {
+            let backend = blob_store::FileBackend::new(blob_dir());
+            let mut hat = hat::Hat::open_repository(&PathBuf::from("repo"), backend, MAX_BLOB_SIZE);
+            hat.gc();
+        },
+        _ => {
             println!("No subcommand specified\n{}\nFor more information re-run with --help", matches.usage());
             std::process::exit(1);
         }

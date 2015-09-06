@@ -223,7 +223,7 @@ impl SnapshotIndex {
     family_id_opt.and_then(|family_id| {
 
     let mut lookup_stm = self.prepare_or_die(
-      "SELECT id, snapshot_id, hash, tree_ref FROM snapshot_index WHERE family_id=? ORDER BY snapshot_id DESC");
+      "SELECT rowid, snapshot_id, hash, tree_ref FROM snapshot_index WHERE family_id=? ORDER BY snapshot_id DESC");
 
     assert_eq!(SQLITE_OK, lookup_stm.bind_param(1, &Integer64(family_id)));
 

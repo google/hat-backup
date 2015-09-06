@@ -36,12 +36,15 @@ use blob_index::{BlobIndexProcess};
 #[cfg(test)]
 use blob_index::{BlobIndex};
 
+use tags;
+
 
 pub type BlobStoreProcess = Process<Msg, Reply>;
 
 pub trait BlobStoreBackend {
   fn store(&mut self, name: &[u8], data: &[u8]) -> Result<(), String>;
   fn retrieve(&mut self, name: &[u8]) -> Result<Vec<u8>, String>;
+  fn delete(&mut self, name: &[u8]) -> Result<(), String>;
 }
 
 
@@ -60,6 +63,10 @@ impl FileBackend {
 
   fn guarded_cache_get(&self, name: &Vec<u8>) -> Option<Result<Vec<u8>, String>> {
     self.read_cache.lock().unwrap().get(name).map(|v| v.clone())
+  }
+
+  fn guarded_cache_delete(&self, name: &Vec<u8>) {
+    self.read_cache.lock().unwrap().remove(name);
   }
 
   fn guarded_cache_put(&mut self, name: Vec<u8>, result: Result<Vec<u8>, String>) {
@@ -115,6 +122,19 @@ impl BlobStoreBackend for FileBackend {
     return res;
   }
 
+  fn delete(&mut self, name: &[u8]) -> Result<(), String> {
+    let name = name.to_vec();
+    self.guarded_cache_delete(&name);
+
+    let path = { let mut p = self.root.clone();
+                 p.push(&name.to_hex());
+                 p };
+
+    match fs::remove_file(&path) {
+      Ok(_) => Ok(()),
+      Err(e) => Err(e.to_string()),
+    }
+  }
 }
 
 
@@ -145,6 +165,10 @@ pub enum Msg {
   Store(Vec<u8>, Box<FnBox(BlobID) + Send>),
   /// Retrieve the data chunk identified by `BlobID`.
   Retrieve(BlobID),
+  /// Tag helpers.
+  Tag(BlobID, tags::Tag),
+  TagAll(tags::Tag),
+  DeleteByTag(tags::Tag),
   /// Flush the current blob, independent of its size.
   Flush,
 }
@@ -155,6 +179,7 @@ pub enum Reply {
   StoreOk(BlobID),
   RetrieveOk(Vec<u8>),
   FlushOk,
+  Ok,
 }
 
 
@@ -300,7 +325,7 @@ impl <B: BlobStoreBackend> MsgHandler<Msg, Reply> for BlobStore<B> {
 
         // Flushing can be expensive, so try not block on it.
         self.maybe_flush();
-       },
+      },
       Msg::Retrieve(id) => {
         if id.begin == 0 && id.end == 0 {
           return reply(Reply::RetrieveOk(vec![]));
@@ -309,11 +334,43 @@ impl <B: BlobStoreBackend> MsgHandler<Msg, Reply> for BlobStore<B> {
         let chunk = &blob[id.begin .. id.end];
         return reply(Reply::RetrieveOk(chunk.to_vec()));
       },
+      Msg::Tag(blob, tag) => {
+        match self.blob_index.send_reply(blob_index::Msg::Tag(blob_index::BlobDesc{id:0, name:blob.name}, tag)) {
+          blob_index::Reply::Ok => reply(Reply::Ok),
+          _ => panic!("Unexpected reply from blob index."),
+        }
+      },
+      Msg::TagAll(tag) => {
+        match self.blob_index.send_reply(blob_index::Msg::TagAll(tag)) {
+          blob_index::Reply::Ok => reply(Reply::Ok),
+          _ => panic!("Unexpected reply from blob index."),
+        }
+      },
+      Msg::DeleteByTag(tag) => {
+        let blobs = match self.blob_index.send_reply(blob_index::Msg::ListByTag(tag.clone())) {
+          blob_index::Reply::Listing(ch) => ch,
+          _ => panic!("Unexpected reply from blob index."),
+        };
+        for b in blobs.iter() {
+          match self.backend.delete(&b.name) {
+            Ok(_) => (),
+            Err(e) => println!("Could not delete {}: {}", b.name.to_hex(), e.to_string()),
+          }
+        }
+        match self.blob_index.send_reply(blob_index::Msg::DeleteByTag(tag)) {
+          blob_index::Reply::Ok => (),
+          _ => panic!("Unexpected reply from blob index."),
+        }
+        return reply(Reply::Ok);
+      },
       Msg::Flush => {
         self.flush();
+        match self.blob_index.send_reply(blob_index::Msg::Flush) {
+          blob_index::Reply::CommitOk => (),
+          _ => panic!("Unexpected reply from blob index."),
+        }
         return reply(Reply::FlushOk)
       },
-
     }
   }
 
