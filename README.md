@@ -51,8 +51,11 @@ There are a bunch of lacking functionality needed before a feature complete rele
 
 - Commit hash-tree tops of known snapshots to external storage.
 - Add recovery function when all local state is gone.
-- Add book-keeping for metadata needed to identify live hashes (reference sets in each family's keyindex).
-- Add deletion and garbage-collection.
+- ~~Add book-keeping for metadata needed to identify live hashes (e.g. reference sets in each family's keyindex).~~
+- ~~Add deletion and garbage-collection.~~
+  - Make 'commit' crash-safe by retrying failed 'register' runs.
+  - GC should not be able to break the index. This can be avoided by having 'snapshot' check if hashes it wants to reuse still exist (i.e. have not been GC'ed yet).
+  - GC should delete hashes top-down to avoid removing a child hash before its parent hash.
 - Have the blobstore thread(s) talk to external thread(s) to isolate communication with external storage.
 - Make the API used for talking to the external storage easy to change (put it in separate put/get/del programs).
 - Add encryption through NaCL/sodiumdioxide; preferably as late as possible.
