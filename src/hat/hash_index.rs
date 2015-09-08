@@ -398,8 +398,11 @@ impl HashIndex {
   }
 
   fn list_ids_by_tag(&mut self, tag: i64) -> Vec<i64> {
+    // We list hashes top-down.
+    // This is required for safe deletion.
+    // TODO(jos): consider moving this requirement closer to the code that needs it.
     let mut cursor = self.prepare_or_die(
-      &format!("SELECT id FROM hash_index WHERE tag={:?}", tag)[..]);
+      &format!("SELECT id FROM hash_index WHERE tag={:?} ORDER BY height DESC", tag)[..]);
 
     let mut out = vec![];
     while cursor.step() == SQLITE_ROW {
