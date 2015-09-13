@@ -236,61 +236,69 @@ impl
       },
 
       Msg::Insert(org_entry, chunk_it_opt) => {
-        match self.index.send_reply(key_index::Msg::LookupExact(org_entry)) {
-
+        let entry = match self.index.send_reply(key_index::Msg::LookupExact(org_entry)) {
           key_index::Reply::Entry(entry) => {
-            return reply(Reply::Id(entry.id().unwrap()));
+            match entry.data_hash() {
+              None => entry,
+              Some(bytes) => {
+                match self.hash_index.send_reply(hash_index::Msg::HashExists(hash_index::Hash{bytes:bytes})) {
+                  hash_index::Reply::HashKnown => {
+                    return reply(Reply::Id(entry.id().unwrap()));
+                  },
+                  _ => entry,
+                }
+              }
+            }
           },
-
           key_index::Reply::NotFound(entry) => {
-            let entry = match self.index.send_reply(key_index::Msg::Insert(entry)) {
+            match self.index.send_reply(key_index::Msg::Insert(entry)) {
               key_index::Reply::Entry(entry) => entry,
-              _ => panic!("No ID returned from key index Insert()."),
-            };
-
-            // Send out the ID early to allow the client to continue its key discovery routine.
-            // The bounded input-channel will prevent the client from overflowing us.
-            assert!(entry.id().is_some());
-            reply(Reply::Id(entry.id().unwrap().clone()));
-
-
-            // Setup hash tree structure
-            let mut tree = self.hash_tree_writer();
-
-            // Check if we have an data source:
-            let it_opt = chunk_it_opt.and_then(|open| open());
-            if it_opt.is_none() {
-              // No data is associated with this entry.
-              self.index.send_reply(key_index::Msg::UpdateDataHash(entry, None, None));
-              // Bail out before storing data that does not exist:
-              return;
+              _ => panic!("Could not insert entry into key index."),
             }
-
-            // Read and insert all file chunks:
-            // (see HashStoreBackend::insert_chunk above)
-            let mut bytes_read = 0u64;
-            for chunk in it_opt.unwrap() {
-              bytes_read += chunk.len() as u64;
-              tree.append(chunk);
-            }
-
-            // Warn the user if we did not read the expected size:
-            entry.size().map(|s| { file_size_warning(entry.name(), s, bytes_read); });
-
-            // Get top tree hash:
-            let (hash, persistent_ref) = tree.hash();
-
-            // Install a callback for updating the entry's data hash once the data has been stored:
-            let local_index = self.index.clone();
-            let hash_bytes = hash.bytes.clone();
-            let callback = Box::new(move|| {
-              local_index.send_reply(
-                key_index::Msg::UpdateDataHash(entry, Some(hash_bytes), Some(persistent_ref)));
-            });
-            self.hash_index.send_reply(hash_index::Msg::CallAfterHashIsComitted(hash, callback));
           },
           _ => panic!("Unexpected reply from key index."),
+        };
+
+        // Send out the ID early to allow the client to continue its key discovery routine.
+        // The bounded input-channel will prevent the client from overflowing us.
+        assert!(entry.id().is_some());
+        reply(Reply::Id(entry.id().unwrap().clone()));
+
+
+        // Setup hash tree structure
+        let mut tree = self.hash_tree_writer();
+
+        // Check if we have an data source:
+        let it_opt = chunk_it_opt.and_then(|open| open());
+        if it_opt.is_none() {
+          // No data is associated with this entry.
+          self.index.send_reply(key_index::Msg::UpdateDataHash(entry, None, None));
+          // Bail out before storing data that does not exist:
+          return;
         }
+
+        // Read and insert all file chunks:
+        // (see HashStoreBackend::insert_chunk above)
+        let mut bytes_read = 0u64;
+        for chunk in it_opt.unwrap() {
+          bytes_read += chunk.len() as u64;
+          tree.append(chunk);
+        }
+
+        // Warn the user if we did not read the expected size:
+        entry.size().map(|s| { file_size_warning(entry.name(), s, bytes_read); });
+
+        // Get top tree hash:
+        let (hash, persistent_ref) = tree.hash();
+
+        // Install a callback for updating the entry's data hash once the data has been stored:
+        let local_index = self.index.clone();
+        let hash_bytes = hash.bytes.clone();
+        let callback = Box::new(move|| {
+          local_index.send_reply(
+            key_index::Msg::UpdateDataHash(entry, Some(hash_bytes), Some(persistent_ref)));
+        });
+        self.hash_index.send_reply(hash_index::Msg::CallAfterHashIsComitted(hash, callback));
       }
     }
   }
