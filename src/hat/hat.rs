@@ -474,6 +474,7 @@ struct FileEntry {
   metadata: fs::Metadata,
   full_path: PathBuf,
   link_path: Option<PathBuf>,
+  data_hash: Option<Vec<u8>>,
 }
 
 impl FileEntry {
@@ -490,6 +491,7 @@ impl FileEntry {
         metadata: fs::metadata(&full_path).unwrap(),
         full_path: full_path.clone(),
         link_path: link_path,
+        data_hash: None,
       })
     }
     else { Err("Could not parse filename."[..].to_string()) }
@@ -513,6 +515,7 @@ impl Clone for FileEntry {
       metadata: fs::metadata(&self.full_path).unwrap(),
       full_path: self.full_path.clone(),
       link_path: self.link_path.clone(),
+      data_hash: self.data_hash.clone(),
     }
   }
 }
@@ -551,9 +554,19 @@ impl KeyEntry<FileEntry> for FileEntry {
   fn group_id(&self) -> Option<u64> {
     None
   }
+
+  fn data_hash(&self) -> Option<Vec<u8>> {
+    self.data_hash.clone()
+  }
+
   fn with_id(self, id: Option<u64>) -> FileEntry {
     let mut x = self;
     x.id = id;
+    return x;
+  }
+  fn with_data_hash(self, hash: Option<Vec<u8>>) -> FileEntry {
+    let mut x = self;
+    x.data_hash = hash;
     return x;
   }
 }

@@ -236,24 +236,23 @@ impl
       },
 
       Msg::Insert(org_entry, chunk_it_opt) => {
-        match self.index.send_reply(key_index::Msg::LookupExact(org_entry.clone())) {
+        match self.index.send_reply(key_index::Msg::LookupExact(org_entry)) {
 
-          key_index::Reply::Id(entry_id) => {
-            return reply(Reply::Id(entry_id));
+          key_index::Reply::Entry(entry) => {
+            return reply(Reply::Id(entry.id().unwrap()));
           },
 
-          _ => {
-            let id = match self.index.send_reply(key_index::Msg::Insert(org_entry.clone())) {
-              key_index::Reply::Id(entry_id) => entry_id,
+          key_index::Reply::NotFound(entry) => {
+            let entry = match self.index.send_reply(key_index::Msg::Insert(entry)) {
+              key_index::Reply::Entry(entry) => entry,
               _ => panic!("No ID returned from key index Insert()."),
             };
 
             // Send out the ID early to allow the client to continue its key discovery routine.
             // The bounded input-channel will prevent the client from overflowing us.
-            reply(Reply::Id(id.clone()));
+            assert!(entry.id().is_some());
+            reply(Reply::Id(entry.id().unwrap().clone()));
 
-            let new_entry = org_entry.clone().with_id(Some(id));
-            assert!(new_entry.id().is_some());
 
             // Setup hash tree structure
             let mut tree = self.hash_tree_writer();
@@ -262,7 +261,7 @@ impl
             let it_opt = chunk_it_opt.and_then(|open| open());
             if it_opt.is_none() {
               // No data is associated with this entry.
-              self.index.send_reply(key_index::Msg::UpdateDataHash(new_entry, None, None));
+              self.index.send_reply(key_index::Msg::UpdateDataHash(entry, None, None));
               // Bail out before storing data that does not exist:
               return;
             }
@@ -276,7 +275,7 @@ impl
             }
 
             // Warn the user if we did not read the expected size:
-            org_entry.size().map(|s| { file_size_warning(org_entry.name(), s, bytes_read); });
+            entry.size().map(|s| { file_size_warning(entry.name(), s, bytes_read); });
 
             // Get top tree hash:
             let (hash, persistent_ref) = tree.hash();
@@ -286,10 +285,11 @@ impl
             let hash_bytes = hash.bytes.clone();
             let callback = Box::new(move|| {
               local_index.send_reply(
-                key_index::Msg::UpdateDataHash(new_entry, Some(hash_bytes), Some(persistent_ref)));
+                key_index::Msg::UpdateDataHash(entry, Some(hash_bytes), Some(persistent_ref)));
             });
             self.hash_index.send_reply(hash_index::Msg::CallAfterHashIsComitted(hash, callback));
-          }
+          },
+          _ => panic!("Unexpected reply from key index."),
         }
       }
     }
@@ -328,6 +328,8 @@ mod tests {
     created: Option<u64>,
     modified: Option<u64>,
     accessed: Option<u64>,
+
+    data_hash: Option<Vec<u8>>,
   }
 
   impl KeyEntry<KeyEntryStub> for KeyEntryStub {
@@ -372,12 +374,21 @@ mod tests {
       None
     }
 
+    fn data_hash(&self) -> Option<Vec<u8>> {
+      self.data_hash.clone()
+    }
+
     fn with_id(self, id: Option<u64>) -> KeyEntryStub {
       let mut x = self;
       x.id = id;
       return x;
     }
 
+    fn with_data_hash(self, data_hash: Option<Vec<u8>>) -> KeyEntryStub {
+      let mut x = self;
+      x.data_hash = data_hash;
+      return x;
+    }
   }
 
   impl Iterator for KeyEntryStub {
@@ -427,7 +438,7 @@ mod tests {
           id: None, parent_id: None,  // updated by insert_and_update_fs()
 
           name: random_ascii_bytes(),
-          data: data_opt,
+          data: data_opt, data_hash: None,
 
           created: Some(created),
           modified: Some(accessed),
@@ -447,7 +458,7 @@ mod tests {
     let root = KeyEntryStub{
       parent_id: None, id: None, //  updated by insert_and_update_fs()
       name: b"root".to_vec(),
-      data: None,
+      data: None, data_hash: None,
       created: Some(created), modified: Some(modified), accessed: Some(accessed)};
 
     FileSystem{file: root, filelist: create_files(size)}
@@ -497,7 +508,7 @@ mod tests {
 
           match dir.file.data {
             Some(ref original) => {
-              let it = match tree_data {
+              let it = match tree_data() {
                 None => panic!("No data."),
                 Some(it) => it,
               };
@@ -565,7 +576,7 @@ mod tests {
         parent_id: None,
         id: None,
         name: format!("{}", i).as_bytes().to_vec(),
-        data: Some(vec![bytes.clone()]),
+        data: Some(vec![bytes.clone()]), data_hash: None,
         created: None, modified: None, accessed: None};
       ks_p.send_reply(Msg::Insert(entry.clone(), Some(Box::new(move|| { Some(entry) }))));
 
@@ -601,7 +612,7 @@ mod tests {
         parent_id: None,
         id: None,
         name: format!("{}", i).as_bytes().to_vec(),
-        data: Some(vec!(my_bytes)),
+        data: Some(vec!(my_bytes)), data_hash: None,
         created: None, modified: None, accessed: None};
       ks_p.send_reply(Msg::Insert(entry.clone(), Some(Box::new(move|| { Some(entry) }))));
 
@@ -624,7 +635,7 @@ mod tests {
         parent_id: None,
         id: None,
         name: vec![1u8, 2, 3].to_vec(),
-        data: Some(vec![bytes; 16]),
+        data: Some(vec![bytes; 16]), data_hash: None,
         created: None, modified: None, accessed: None};
 
       ks_p.send_reply(Msg::Insert(entry.clone(), Some(Box::new(move|| { Some(entry) }))));
@@ -672,7 +683,7 @@ mod tests {
         parent_id: None,
         id: None,
         name: vec![1u8, 2, 3],
-        data: Some(chunks),
+        data: Some(chunks), data_hash: None,
         created: None, modified: None, accessed: None};
 
       ks_p.send_reply(Msg::Insert(entry.clone(), Some(Box::new(move|| { Some(entry) }))));

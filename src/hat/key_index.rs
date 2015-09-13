@@ -44,10 +44,13 @@ pub trait KeyEntry<KE> {
   fn user_id(&self) -> Option<u64>;
   fn group_id(&self) -> Option<u64>;
 
+  fn data_hash(&self) -> Option<Vec<u8>>;
+
   fn with_id(self, Option<u64>) -> KE;
+  fn with_data_hash(self, Option<Vec<u8>>) -> KE;
 }
 
-pub type KeyIndexProcess<KE> = Process<Msg<KE>, Reply>;
+pub type KeyIndexProcess<KE> = Process<Msg<KE>, Reply<KE>>;
 
 pub enum Msg<KeyEntryT> {
 
@@ -71,9 +74,9 @@ pub enum Msg<KeyEntryT> {
   Flush,
 }
 
-pub enum Reply {
-  Id(u64),
-  NotFound,
+pub enum Reply<KeyEntryT> {
+  Entry(KeyEntryT),
+  NotFound(KeyEntryT),
   UpdateOk,
   ListResult(Vec<(u64, Vec<u8>, u64, u64, u64, Vec<u8>, Vec<u8>)>),
   FlushOk,
@@ -167,8 +170,8 @@ impl Drop for KeyIndex {
   }
 }
 
-impl <A: KeyEntry<A>> MsgHandler<Msg<A>, Reply> for KeyIndex {
-  fn handle(&mut self, msg: Msg<A>, reply: Box<Fn(Reply)>) {
+impl <A: KeyEntry<A>> MsgHandler<Msg<A>, Reply<A>> for KeyIndex {
+  fn handle(&mut self, msg: Msg<A>, reply: Box<Fn(Reply<A>)>) {
     match msg {
 
       Msg::Insert(entry) => {
@@ -183,13 +186,13 @@ impl <A: KeyEntry<A>> MsgHandler<Msg<A>, Reply> for KeyIndex {
           entry.accessed().unwrap_or(0)));
 
         let id = self.dbh.get_last_insert_rowid();
-        return reply(Reply::Id(i64_to_u64_or_panic(id)));
+        return reply(Reply::Entry(entry.with_id(Some(i64_to_u64_or_panic(id)))));
       },
 
       Msg::LookupExact(entry) => {
         let parent = entry.parent_id().unwrap_or(0);
         let mut cursor = self.prepare_or_die(&format!(
-          "SELECT rowid FROM key_index
+          "SELECT rowid, hash FROM key_index
            WHERE parent={:?} AND name=x'{}'
            AND created={} AND modified={} AND accessed={}
            LIMIT 1",
@@ -199,10 +202,12 @@ impl <A: KeyEntry<A>> MsgHandler<Msg<A>, Reply> for KeyIndex {
           entry.accessed().unwrap_or(0)));
         if cursor.step() == SQLITE_ROW {
           let id = i64_to_u64_or_panic(cursor.get_i64(0));
+          let hash_opt = cursor.get_blob(1).map(|s| s.to_vec());
           assert!(cursor.step() == SQLITE_DONE);
-          return reply(Reply::Id(id));
+          return reply(Reply::Entry(entry.with_id(Some(id))
+                                         .with_data_hash(hash_opt)));
         } else {
-          return reply(Reply::NotFound);
+          return reply(Reply::NotFound(entry));
         }
       },
 
@@ -297,6 +302,7 @@ mod tests {
     id: Option<u64>,
     parent: Option<u64>,
     name: Vec<u8>,
+    data_hash: Option<Vec<u8>>,
   }
   impl KeyEntry<TestEntry> for TestEntry {
     fn id(&self) -> Option<u64> {
@@ -332,9 +338,17 @@ mod tests {
     fn group_id(&self) -> Option<u64> {
       None
     }
+    fn data_hash(&self) -> Option<Vec<u8>> {
+      self.data_hash.clone()
+    }
     fn with_id(self, id: Option<u64>) -> TestEntry {
       let mut x = self;
       x.id = id;
+      return x;
+    }
+    fn with_data_hash(self, data_hash: Option<Vec<u8>>) -> TestEntry {
+      let mut x = self;
+      x.data_hash = data_hash;
       return x;
     }
   }
