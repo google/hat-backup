@@ -409,6 +409,12 @@ pub mod tests {
       let value_opt = self.files.lock().unwrap().get(&key.to_vec()).map(|v| v.clone());
       value_opt.map(|v| Ok(v)).unwrap_or_else(|| Err(format!("Unknown key: '{:?}'", key)))
     }
+
+    fn guarded_delete(&mut self, key: &[u8]) -> Result<(), String> {
+      let mut guarded_files = self.files.lock().unwrap();
+      guarded_files.remove(key);
+      Ok(())
+    }
   }
 
   impl BlobStoreBackend for MemoryBackend {
@@ -419,6 +425,10 @@ pub mod tests {
 
     fn retrieve(&mut self, name: &[u8]) -> Result<Vec<u8>, String> {
       self.guarded_retrieve(name)
+    }
+
+    fn delete(&mut self, name: &[u8]) -> Result<(), String> {
+      self.guarded_delete(name)
     }
   }
 
@@ -431,6 +441,9 @@ pub mod tests {
     }
     fn retrieve(&mut self, name: &[u8]) -> Result<Vec<u8>, String> {
       Err(format!("Unknown key: '{:?}'", name))
+    }
+    fn delete(&mut self, _name: &[u8]) -> Result<(), String> {
+      Ok(())
     }
   }
 
