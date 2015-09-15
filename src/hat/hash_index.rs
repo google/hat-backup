@@ -19,7 +19,6 @@ use std::sync::mpsc;
 use time::Duration;
 use rustc_serialize::hex::{ToHex};
 
-use callback_container::{CallbackContainer};
 use cumulative_counter::{CumulativeCounter};
 use unique_priority_queue::{UniquePriorityQueue};
 use process::{Process, MsgHandler};
@@ -117,10 +116,6 @@ pub enum Msg {
   /// Returns CommitOk.
   Commit(Hash, Vec<u8>),
 
-  /// Install a "on-commit" handler to be called after `Hash` is committed.
-  /// Returns `CallbackRegistered` or `HashNotKnown`.
-  CallAfterHashIsComitted(Hash, Box<FnBox() + Send>),
-
   /// List all hash entries.
   List,
 
@@ -183,8 +178,6 @@ pub struct HashIndex {
 
   queue: UniquePriorityQueue<i64, Vec<u8>, QueueEntry>,
 
-  callbacks: CallbackContainer<Vec<u8>>,
-
   flush_timer: PeriodicTimer,
 }
 
@@ -196,7 +189,6 @@ impl HashIndex {
         HashIndex{dbh: dbh,
                   id_counter: CumulativeCounter::new(0),
                   queue: UniquePriorityQueue::new(),
-                  callbacks: CallbackContainer::new(),
                   flush_timer: PeriodicTimer::new(Duration::seconds(10)),
         }
       },
@@ -336,22 +328,6 @@ impl HashIndex {
     }
   }
 
-  fn register_hash_callback(&mut self, hash: &Hash, callback: Box<FnBox() + Send>) -> bool {
-    assert!(hash.bytes.len() > 0);
-
-    if self.queue.find_value_of_key(&hash.bytes).is_some() {
-      self.callbacks.add(hash.bytes.clone(), callback);
-    } else if self.locate(hash).is_some() {
-      // Hash was already committed
-      callback();
-    } else {
-      // We cannot register this callback, since the hash doesn't exist anywhere
-      return false
-    }
-
-    return true;
-  }
-
   fn insert_completed_in_order(&mut self) {
     let mut insert_stm = self.dbh.prepare(
       "INSERT INTO hash_index (id, hash, height, payload, blob_ref) VALUES (?, ?, ?, ?, ?)",
@@ -378,8 +354,6 @@ impl HashIndex {
 
           assert_eq!(SQLITE_OK, insert_stm.clear_bindings());
           assert_eq!(SQLITE_OK, insert_stm.reset());
-
-          self.callbacks.allow_flush_of(&hash_bytes);
         },
       }
     }
@@ -524,9 +498,6 @@ impl HashIndex {
   fn flush(&mut self) {
     // Callbacks assume their data is safe, so commit before calling them
     self.exec_or_die("COMMIT; BEGIN");
-
-    // Run ready callbacks
-    self.callbacks.flush();
   }
 }
 
@@ -534,9 +505,6 @@ impl HashIndex {
 // impl  Drop for HashIndex {
 //   fn drop(&mut self) {
 //     self.flush();
-
-//     assert_eq!(self.callbacks.len(), 0);
-
 //     assert_eq!(self.queue.len(), 0);
 //     self.exec_or_die("COMMIT");
 //   }
@@ -609,15 +577,6 @@ impl MsgHandler<Msg, Reply> for HashIndex {
         assert!(hash.bytes.len() > 0);
         self.commit(&hash, &persistent_ref);
         return reply(Reply::CommitOk);
-      },
-
-      Msg::CallAfterHashIsComitted(hash, callback) => {
-        assert!(hash.bytes.len() > 0);
-        if self.register_hash_callback(&hash, callback) {
-          return reply(Reply::CallbackRegistered);
-        } else {
-          return reply(Reply::HashNotKnown);
-        }
       },
 
       Msg::List => {

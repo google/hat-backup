@@ -60,7 +60,6 @@ use std::borrow::ToOwned;
 
 use clap::{App, SubCommand};
 
-mod callback_container;
 mod cumulative_counter;
 mod ordered_collection;
 mod periodic_timer;

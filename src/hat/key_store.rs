@@ -291,14 +291,13 @@ impl
         // Get top tree hash:
         let (hash, persistent_ref) = tree.hash();
 
-        // Install a callback for updating the entry's data hash once the data has been stored:
-        let local_index = self.index.clone();
-        let hash_bytes = hash.bytes.clone();
-        let callback = Box::new(move|| {
-          local_index.send_reply(
-            key_index::Msg::UpdateDataHash(entry, Some(hash_bytes), Some(persistent_ref)));
-        });
-        self.hash_index.send_reply(hash_index::Msg::CallAfterHashIsComitted(hash, callback));
+        // Update hash in key index.
+        // It is OK that this has is not yet valid, as we check hashes at snapshot time.
+        match self.index.send_reply(
+            key_index::Msg::UpdateDataHash(entry, Some(hash.bytes), Some(persistent_ref))) {
+            key_index::Reply::UpdateOk => (),
+            _ => panic!("Unexpected reply from key index."),
+        };
       }
     }
   }
