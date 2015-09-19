@@ -41,6 +41,9 @@ impl <B: gc::GcBackend> GcRc<B> {
 impl <B: gc::GcBackend> gc::Gc for GcRc<B> {
 
   fn register(&mut self, _snapshot: SnapshotInfo, refs: mpsc::Receiver<gc::Id>) {
+    // Start off with a commit to disable automatic commit and run register as one transaction.
+    self.backend.manual_commit();
+
     // Increment counters.
     for r in refs.iter() {
       self.backend.update_data(r, DATA_FAMILY,
@@ -61,9 +64,18 @@ impl <B: gc::GcBackend> gc::Gc for GcRc<B> {
   }
 
   fn deregister(&mut self, _snapshot: SnapshotInfo, refs: Box<FnBox() -> mpsc::Receiver<gc::Id>>) {
+    // Start off with a commit to disable automatic commit and run deregister as one transaction.
+    self.backend.manual_commit();
+
+    let mut last_opt = None;
     for r in refs().iter() {
       self.backend.update_data(r, DATA_FAMILY,
                                Box::new(move|GcData{num, bytes}| Some(GcData{num:num - 1, bytes:bytes})));
+      last_opt = Some(r);
+    }
+    match last_opt {
+      Some(last) => self.backend.set_tag(last, tags::Tag::InProgress),
+      None => (),
     }
   }
 
@@ -72,6 +84,7 @@ impl <B: gc::GcBackend> gc::Gc for GcRc<B> {
     self.backend.set_all_tags(tags::Tag::Done);
     for r in self.backend.list_ids_by_tag(tags::Tag::Done) {
       let data = self.backend.get_data(r, DATA_FAMILY);
+      assert!(data.num >= 0);
       if data.num > 0 {
         gc::mark_tree(&mut self.backend, r, tags::Tag::Reserved);
       }
@@ -85,6 +98,13 @@ impl <B: gc::GcBackend> gc::Gc for GcRc<B> {
     }
   }
 
+  fn status(&mut self, final_ref: gc::Id) -> Option<gc::Status> {
+    match self.backend.get_tag(final_ref) {
+      Some(tags::Tag::Complete) => Some(gc::Status::Complete),
+      Some(tags::Tag::InProgress) => Some(gc::Status::InProgress),
+      _ => None,
+    }
+  }
 }
 
 #[test]
@@ -92,4 +112,16 @@ fn gc_rc_test() {
   gc::gc_test(vec![vec![1], vec![2], vec![1,2,3], vec![4, 5, 6]],
               Box::new(move|backend| Box::new(GcRc::new(Box::new(backend)))),
               gc::GcType::Exact);
+}
+
+#[test]
+fn gc_rc_resume_register_test() {
+  gc::resume_register_test(Box::new(move|backend| Box::new(GcRc::new(Box::new(backend)))),
+                           gc::GcType::Exact);
+}
+
+#[test]
+fn gc_rc_resume_deregister_test() {
+  gc::resume_deregister_test(Box::new(move|backend| Box::new(GcRc::new(Box::new(backend)))),
+                             gc::GcType::Exact);
 }

@@ -128,6 +128,15 @@ impl gc::GcBackend for GcBackend {
     }
     return receiver;
   }
+
+  fn manual_commit(&mut self) {
+    match self.hash_index.send_reply(hash_index::Msg::ManualCommit) {
+      hash_index::Reply::CommitOk => {
+        return
+      },
+      _ => panic!("Unexpected reply from hash index."),
+    }
+  }
 }
 
 
@@ -404,6 +413,7 @@ impl <B: 'static + BlobStoreBackend + Clone + Send> Hat<B> {
          }
          return id_receiver;
      });
+     // TODO(sejr): tag the snapshot as "WillResume" to allow resume.
      self.gc.deregister(info.clone(), listing);
      self.snapshot_index.send_reply(snapshot_index::Msg::Delete(info));
      family.flush();

@@ -134,6 +134,9 @@ pub enum Msg {
   UpdateGcData(i64, i64, Box<FnBox(GcData) -> Option<GcData> + Send>),
   UpdateFamilyGcData(i64, mpsc::Receiver<Box<FnBox(GcData) -> Option<GcData> + Send>>),
 
+  /// Manual commit. This also disables automatic periodic commit.
+  ManualCommit,
+
   /// Flush the hash index to clear internal buffers and commit the underlying database.
   Flush,
 }
@@ -179,6 +182,7 @@ pub struct HashIndex {
   queue: UniquePriorityQueue<i64, Vec<u8>, QueueEntry>,
 
   flush_timer: PeriodicTimer,
+  flush_periodically: bool,
 }
 
 impl HashIndex {
@@ -190,6 +194,7 @@ impl HashIndex {
                   id_counter: CumulativeCounter::new(0),
                   queue: UniquePriorityQueue::new(),
                   flush_timer: PeriodicTimer::new(Duration::seconds(10)),
+                  flush_periodically: true,
         }
       },
       Err(err) => panic!("{:?}", err),
@@ -490,7 +495,7 @@ impl HashIndex {
    }
 
   fn maybe_flush(&mut self) {
-    if self.flush_timer.did_fire() {
+    if self.flush_periodically && self.flush_timer.did_fire() {
       self.flush();
     }
   }
@@ -617,6 +622,12 @@ impl MsgHandler<Msg, Reply> for HashIndex {
       Msg::UpdateFamilyGcData(family_id, update_fs) => {
         self.update_family_gc_data(family_id, update_fs);
         return reply(Reply::Ok);
+      },
+
+      Msg::ManualCommit => {
+        self.flush();
+        self.flush_periodically = false;
+        return reply(Reply::CommitOk);
       },
 
       Msg::Flush => {

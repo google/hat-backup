@@ -15,6 +15,7 @@
 
 use std::boxed::FnBox;
 use std::collections::{HashMap};
+use std::mem;
 use std::sync::{mpsc, Arc, Mutex};
 
 use hash_index::{GcData};
@@ -24,6 +25,13 @@ use tags;
 
 pub type Id = i64;
 pub type UpdateFn = Box<FnBox(GcData) -> Option<GcData> + Send>;
+
+
+#[derive(PartialEq, Debug)]
+pub enum Status {
+  InProgress,
+  Complete,
+}
 
 
 pub trait GcBackend {
@@ -41,6 +49,8 @@ pub trait GcBackend {
   fn reverse_refs(&self, hash_id: Id) -> Vec<Id>;
 
   fn list_ids_by_tag(&self, tag: tags::Tag) -> mpsc::Receiver<Id>;
+
+  fn manual_commit(&mut self);
 }
 
 
@@ -66,14 +76,18 @@ pub trait Gc {
   fn deregister(&mut self, snapshot: SnapshotInfo, Box<FnBox() -> mpsc::Receiver<Id>>);
 
   fn list_unused_ids(&mut self, refs: mpsc::Sender<Id>);
+
+  fn status(&mut self, final_ref: Id) -> Option<Status>;
 }
 
 
+#[derive(Clone)]
 pub struct MemoryBackend {
   gc_data: HashMap<(Id, Id), GcData>,
   tags: HashMap<Id, tags::Tag>,
   parents: HashMap<Id, Vec<Id>>,
   snapshot_refs: HashMap<Id, Vec<Id>>,
+  commit: Option<Box<MemoryBackend>>,
 }
 
 impl MemoryBackend {
@@ -83,6 +97,7 @@ impl MemoryBackend {
       tags:          HashMap::new(),
       parents:       HashMap::new(),
       snapshot_refs: HashMap::new(),
+      commit:        None,
     }
   }
 }
@@ -90,7 +105,7 @@ impl MemoryBackend {
 
 #[derive(Clone)]
 pub struct SafeMemoryBackend {
-  backend: Arc<Mutex<MemoryBackend>>
+  backend: Arc<Mutex<MemoryBackend>>,
 }
 
 impl SafeMemoryBackend {
@@ -112,6 +127,26 @@ impl SafeMemoryBackend {
                    .snapshot_refs.get(&info.unique_id).unwrap_or(&vec![]).clone();
     refs.iter().map(|id| sender.send(*id)).last();
     return receiver;
+  }
+
+  fn commit(&mut self) {
+    let mut backend = self.backend.lock().unwrap();
+    backend.commit = Some(Box::new(backend.clone()));
+  }
+
+  fn rollback(&mut self) {
+    let mut backend = self.backend.lock().unwrap();
+    let commit = &mut None;
+    mem::swap(commit, &mut backend.commit);
+    match *commit {
+      None => return,
+      Some(ref mut commit) => {
+        mem::swap(&mut backend.gc_data, &mut commit.gc_data);
+        mem::swap(&mut backend.tags, &mut commit.tags);
+        mem::swap(&mut backend.parents, &mut commit.parents);
+        mem::swap(&mut backend.snapshot_refs, &mut commit.snapshot_refs);
+      }
+    }
   }
 }
 
@@ -172,6 +207,10 @@ impl GcBackend for SafeMemoryBackend {
     ids.iter().map(|id| sender.send(*id)).last();
     return receiver;
   }
+
+  fn manual_commit(&mut self) {
+    self.commit();
+  }
 }
 
 
@@ -230,5 +269,93 @@ pub fn gc_test<GC>(snapshots: Vec<Vec<u8>>,
       }
     },
     GcType::InExact => {},
+  }
+}
+
+pub fn resume_register_test<GC>(mk_gc: Box<FnBox(SafeMemoryBackend) -> Box<GC>>,
+                                gc_type: GcType) where GC: Gc {
+  let mut backend = SafeMemoryBackend::new();
+  let mut gc = mk_gc(backend.clone());
+
+  let refs = vec![1, 2, 3, 4, 5];
+  let info = SnapshotInfo{unique_id: 1, family_id: 1, snapshot_id: 1};
+  backend.insert_snapshot(&info, refs.iter().map(|i| *i as Id).collect());
+
+  let receiver = |n| {
+    let (sender, receiver) = mpsc::channel();
+    refs[..n].iter().map(|id| sender.send(*id as Id)).last();
+    drop(sender);
+    return receiver;
+  };
+
+  for n in (1..refs.len()) {
+    gc.register(info.clone(), receiver(n));
+    assert_eq!(gc.status(*refs.last().expect("nonempty")), None);
+    backend.rollback();
+  }
+
+  gc.register(info.clone(), receiver(refs.len() - 1));
+  let final_ref = *refs.last().expect("nonempty");
+  gc.register_final(info.clone(), final_ref);
+  assert_eq!(gc.status(final_ref), Some(Status::InProgress));
+  gc.register_cleanup(info.clone(), final_ref);
+  assert_eq!(gc.status(final_ref), None);
+
+
+  let receive = receiver(refs.len());
+  gc.deregister(info.clone(), Box::new(move|| receive));
+
+  let (sender, receiver) = mpsc::channel();
+  gc.list_unused_ids(sender);
+
+  let mut unused: Vec<_> = receiver.iter().collect();
+  unused.sort();
+
+  match gc_type {
+    GcType::Exact => assert_eq!(unused, vec![1, 2, 3, 4, 5]),
+    _ => (),
+  }
+}
+
+pub fn resume_deregister_test<GC>(mk_gc: Box<FnBox(SafeMemoryBackend) -> Box<GC>>,
+                                  gc_type: GcType) where GC: Gc {
+  let mut backend = SafeMemoryBackend::new();
+  let mut gc = mk_gc(backend.clone());
+
+  let refs = vec![1, 2, 3, 4, 5];
+  let info = SnapshotInfo{unique_id: 1, family_id: 1, snapshot_id: 1};
+  backend.insert_snapshot(&info, refs.iter().map(|i| *i as Id).collect());
+
+  let receiver = |n| {
+    let (sender, receiver) = mpsc::channel();
+    refs[..n].iter().map(|id| sender.send(*id as Id)).last();
+    drop(sender);
+    return receiver;
+  };
+  gc.register(info.clone(), receiver(refs.len() - 1));
+  let final_ref = *refs.last().expect("nonempty");
+  gc.register_final(info.clone(), final_ref);
+  gc.register_cleanup(info.clone(), final_ref);
+
+  backend.manual_commit();
+  for _ in (1..10) {
+    backend.rollback();
+    let receive = receiver(refs.len());
+    gc.deregister(info.clone(), Box::new(move|| receive));
+    assert_eq!(gc.status(final_ref), Some(Status::InProgress));
+  }
+
+  gc.register_cleanup(info.clone(), final_ref);
+  assert_eq!(gc.status(final_ref), None);
+
+  let (sender, receiver) = mpsc::channel();
+  gc.list_unused_ids(sender);
+
+  let mut unused: Vec<_> = receiver.iter().collect();
+  unused.sort();
+
+  match gc_type {
+    GcType::Exact => assert_eq!(unused, vec![1, 2, 3, 4, 5]),
+    _ => (),
   }
 }
