@@ -317,6 +317,7 @@ mod tests {
   use rand::thread_rng;
 
   use test::{Bencher};
+  use quickcheck;
 
   fn random_ascii_bytes() -> Vec<u8> {
     let ascii: String = thread_rng().gen_ascii_chars().take(32).collect();
@@ -546,24 +547,25 @@ mod tests {
     count
   }
 
-  #[quickcheck]
-  fn identity(size: u8) -> bool
-  {
-    let backend = MemoryBackend::new();
-    let ks_p = Process::new(Box::new(move|| { KeyStore::new_for_testing(backend) }));
+  #[test]
+  fn identity() {
+    fn prop(size: u8) -> bool {
+      let backend = MemoryBackend::new();
+      let ks_p = Process::new(Box::new(move|| { KeyStore::new_for_testing(backend) }));
 
-    let mut fs = rng_filesystem(size as usize);
-    insert_and_update_fs(&mut fs, ks_p.clone());
-    let fs = fs;
+      let mut fs = rng_filesystem(size as usize);
+      insert_and_update_fs(&mut fs, ks_p.clone());
+      let fs = fs;
 
-    match ks_p.send_reply(Msg::Flush) {
-      Reply::FlushOk => (),
-      _ => panic!("Unexpected result from key store."),
+      match ks_p.send_reply(Msg::Flush) {
+        Reply::FlushOk => (),
+        _ => panic!("Unexpected result from key store."),
+      }
+
+      verify_filesystem(&fs, ks_p.clone());
+      true
     }
-
-    verify_filesystem(&fs, ks_p.clone());
-
-    true
+    quickcheck::quickcheck(prop as fn(u8) -> bool);
   }
 
 

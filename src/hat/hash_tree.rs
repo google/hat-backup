@@ -54,7 +54,6 @@ fn hash_refs_from_bytes(bytes: &[u8]) -> Option<Vec<HashRef>> {
   return str::from_utf8(bytes).ok().and_then(|s| { json::decode(s).ok() })
 }
 
-#[quickcheck]
 fn test_json(count: u8, hash: Vec<u8>, pref: Vec<u8>) -> bool {
   let mut refs = Vec::new();
   for _ in 0..count {
@@ -305,6 +304,7 @@ mod tests {
 
   use hash_index::{Hash};
   use std::collections::{BTreeMap, BTreeSet};
+  use quickcheck;
 
   #[derive(Clone)]
   struct MemoryBackend {
@@ -358,35 +358,38 @@ mod tests {
     }
   }
 
-  #[quickcheck]
-  fn identity_many_small_blocks(chunks_count: u8) -> bool {
-    let backend = MemoryBackend::new();
-    let mut ht = SimpleHashTreeWriter::new(4, backend.clone());
+  #[test]
+  fn identity_many_small_blocks() {
+    fn prop(chunks_count: u8) -> bool {
+      let backend = MemoryBackend::new();
+      let mut ht = SimpleHashTreeWriter::new(4, backend.clone());
 
-    for _ in 0..chunks_count {
-      ht.append(b"a".to_vec());
+      for _ in 0..chunks_count {
+        ht.append(b"a".to_vec());
+      }
+
+      let (hash, hash_ref) = ht.hash();
+
+      let mut tree_it = SimpleHashTreeReader::open(backend, hash, hash_ref).expect("tree not found");
+
+      if chunks_count == 0 {
+        // An empty tree is a tree with a single empty chunk (as opposed to no chunks).
+        assert_eq!(Some(vec![]), tree_it.next());
+        assert_eq!(0, tree_it.count());
+        return true;
+      }
+
+      // We have a tree, let's investigate!
+      let mut actual_count = 0;
+      for chunk in tree_it {
+        assert_eq!(chunk, b"a".to_vec());
+        actual_count += 1;
+      }
+      assert_eq!(chunks_count, actual_count);
+
+      true
     }
-
-    let (hash, hash_ref) = ht.hash();
-
-    let mut tree_it = SimpleHashTreeReader::open(backend, hash, hash_ref).expect("tree not found");
-
-    if chunks_count == 0 {
-      // An empty tree is a tree with a single empty chunk (as opposed to no chunks).
-      assert_eq!(Some(vec![]), tree_it.next());
-      assert_eq!(0, tree_it.count());
-      return true;
-    }
-
-    // We have a tree, let's investigate!
-    let mut actual_count = 0;
-    for chunk in tree_it {
-      assert_eq!(chunk, b"a".to_vec());
-      actual_count += 1;
-    }
-    assert_eq!(chunks_count, actual_count);
-
-    true
+    quickcheck::quickcheck(prop as fn(u8) -> bool);
   }
 
   #[test]

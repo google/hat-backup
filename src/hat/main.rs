@@ -29,9 +29,6 @@
 #![feature(plugin)]
 
 #![feature(fnbox)]
-#![feature(future)]
-
-#![plugin(quickcheck_macros)]
 
 // Standard Rust imports
 extern crate rand;

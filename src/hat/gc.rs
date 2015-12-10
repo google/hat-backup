@@ -288,7 +288,7 @@ pub fn resume_register_test<GC>(mk_gc: Box<FnBox(SafeMemoryBackend) -> Box<GC>>,
     return receiver;
   };
 
-  for n in (1..refs.len()) {
+  for n in 1..refs.len() {
     gc.register(info.clone(), receiver(n));
     assert_eq!(gc.status(*refs.last().expect("nonempty")), None);
     backend.rollback();
@@ -338,7 +338,7 @@ pub fn resume_deregister_test<GC>(mk_gc: Box<FnBox(SafeMemoryBackend) -> Box<GC>
   gc.register_cleanup(info.clone(), final_ref);
 
   backend.manual_commit();
-  for _ in (1..10) {
+  for _ in 1..10 {
     backend.rollback();
     let receive = receiver(refs.len());
     gc.deregister(info.clone(), Box::new(move|| receive));

@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![plugin(quickcheck_macros)]
-
 use std::collections::{BTreeMap};
 use std::fmt::{Debug};
 
@@ -108,63 +106,70 @@ mod tests {
   use super::*;
 
   use std::collections::{BTreeMap};
+  use quickcheck;
 
-  #[quickcheck]
-  fn insert1(priority: i8, key: isize, value: i8) -> bool {
-    let mut upq = UniquePriorityQueue::new();
-    assert!(upq.reserve_priority(priority, key).is_ok());
-    assert_eq!(upq.pop_min_if_complete(), None);
-    upq.put_value(key, value);
-    assert_eq!(upq.pop_min_if_complete(), None);
-    upq.set_ready(priority);
-    assert_eq!(upq.pop_min_if_complete(), Some((priority, key, value)));
-
-    return true;
+  #[test]
+  fn insert1() {
+    fn prop(priority: i8, key: isize, value: i8) -> bool {
+      let mut upq = UniquePriorityQueue::new();
+      assert!(upq.reserve_priority(priority, key).is_ok());
+      assert_eq!(upq.pop_min_if_complete(), None);
+      upq.put_value(key, value);
+      assert_eq!(upq.pop_min_if_complete(), None);
+      upq.set_ready(priority);
+      assert_eq!(upq.pop_min_if_complete(), Some((priority, key, value)));
+      return true;
+    }
+    quickcheck::quickcheck(prop as fn(i8, isize, i8) -> bool);
   }
 
-  #[quickcheck]
-  fn insert_many(keys: Vec<(i8, isize, i8)>) -> bool {
-    let mut upq = UniquePriorityQueue::new();
-    assert_eq!(upq.pop_min_if_complete(), None);
+  #[test]
+  fn insert_many() {
+    fn prop(keys: Vec<(i8, isize, i8)>) -> bool {
+      let mut upq = UniquePriorityQueue::new();
+      assert_eq!(upq.pop_min_if_complete(), None);
 
-    // Insert priorities
-    let mut in_use0 = BTreeMap::new();
-    for &(ref p, ref k, ref v) in keys.iter() {
-      match upq.reserve_priority(*p, *k) {
-        Err(()) => {}  // Already reserved this priority or key; skip
-        Ok(()) => {
-          in_use0.insert(*p, (*k, *v));
-          assert_eq!(upq.find_key(k), Some(p));
+      // Insert priorities
+      let mut in_use0 = BTreeMap::new();
+      for &(ref p, ref k, ref v) in keys.iter() {
+        match upq.reserve_priority(*p, *k) {
+          Err(()) => {}  // Already reserved this priority or key; skip
+          Ok(()) => {
+            in_use0.insert(*p, (*k, *v));
+            assert_eq!(upq.find_key(k), Some(p));
+          }
         }
       }
+      assert_eq!(upq.pop_min_if_complete(), None);
+
+      // Update values
+      let mut in_use1 = BTreeMap::new();
+      for (p, &(ref k, ref v)) in in_use0.iter() {
+        in_use1.insert(*p, (*k, *v));
+        upq.put_value(*k, *v);
+        assert_eq!(upq.find_value_of_key(k), Some(*v));
+      }
+      drop(in_use0);
+      assert_eq!(upq.pop_min_if_complete(), None);
+
+      // Commit all
+      for (p, _) in in_use1.iter() {
+        upq.set_ready(*p);
+      }
+
+      // Verify that everything is now there, and all entries are complete
+      for _ in 0..in_use1.len() {
+        let next = upq.pop_min_if_complete();
+        assert!(next.is_some());
+
+        let (p, k, v) = next.unwrap();
+        assert_eq!(in_use1.get(&p), Some(&(k, v)));
+      }
+
+      assert_eq!(upq.pop_min_if_complete(), None);
+      return true;
     }
-    assert_eq!(upq.pop_min_if_complete(), None);
 
-    // Update values
-    let mut in_use1 = BTreeMap::new();
-    for (p, &(ref k, ref v)) in in_use0.iter() {
-      in_use1.insert(*p, (*k, *v));
-      upq.put_value(*k, *v);
-      assert_eq!(upq.find_value_of_key(k), Some(*v));
-    }
-    drop(in_use0);
-    assert_eq!(upq.pop_min_if_complete(), None);
-
-    // Commit all
-    for (p, _) in in_use1.iter() {
-      upq.set_ready(*p);
-    }
-
-    // Verify that everything is now there, and all entries are complete
-    for _ in 0..in_use1.len() {
-      let next = upq.pop_min_if_complete();
-      assert!(next.is_some());
-
-      let (p, k, v) = next.unwrap();
-      assert_eq!(in_use1.get(&p), Some(&(k, v)));
-    }
-
-    assert_eq!(upq.pop_min_if_complete(), None);
-    return true;
+    quickcheck::quickcheck(prop as fn(Vec<(i8, isize, i8)>)  -> bool);
   }
 }

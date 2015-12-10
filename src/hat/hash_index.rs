@@ -35,7 +35,7 @@ use periodic_timer::{PeriodicTimer};
 use sodiumoxide::crypto::hash::{sha512};
 
 
-pub static HASHBYTES:usize = sha512::HASHBYTES;
+pub static HASHBYTES:usize = sha512::DIGESTBYTES;
 
 pub type HashIndexProcess = Process<Msg, Reply>;
 

@@ -270,11 +270,12 @@ impl <B: 'static + BlobStoreBackend + Clone + Send> Hat<B> {
     // Commit metadata while registering needed data-hashes (files and dirs).
     let (hash, top_ref) = {
       let mut local_family = family.clone();
-      let mut fut = sync::Future::spawn(move|| local_family.commit(hash_sender));
+      let (s, r) = mpsc::channel();
 
+      thread::spawn(move|| s.send(local_family.commit(hash_sender)));
       self.gc.register(snapshot_info.clone(), hash_id_receiver);
 
-      fut.get()
+      r.recv().unwrap()
     };
 
     // Tag 2:
@@ -679,7 +680,7 @@ impl listdir::PathHandler<Option<u64>> for InsertPathHandler
 
 fn try_a_few_times_then_panic<F>(f: F, msg: &str) where F: FnMut() -> bool {
   let mut f = f;
-  for _ in (1 as i32..5) {
+  for _ in 1 as i32..5 {
     if f() { return }
   }
   panic!(msg.to_string());

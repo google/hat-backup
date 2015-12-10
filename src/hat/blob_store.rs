@@ -385,6 +385,7 @@ pub mod tests {
 
   use std::sync::{Arc, Mutex};
   use std::collections::{BTreeMap};
+  use quickcheck;
 
   #[derive(Clone)]
   pub struct MemoryBackend {
@@ -448,92 +449,101 @@ pub mod tests {
   }
 
 
-  #[quickcheck]
-  fn identity(chunks: Vec<Vec<u8>>) -> bool {
-    let mut backend = MemoryBackend::new();
+  #[test]
+  fn identity() {
+    fn prop(chunks: Vec<Vec<u8>>) -> bool {
+      let mut backend = MemoryBackend::new();
 
-    let local_backend = backend.clone();
-    let bs_p : BlobStoreProcess =
-      Process::new(Box::new(move|| { BlobStore::new_for_testing(local_backend, 1024) }));
+      let local_backend = backend.clone();
+      let bs_p : BlobStoreProcess =
+        Process::new(Box::new(move|| { BlobStore::new_for_testing(local_backend, 1024) }));
 
-    let mut ids = Vec::new();
-    for chunk in chunks.iter() {
-      match bs_p.send_reply(Msg::Store(chunk.as_slice().to_vec(), Box::new(move|_| {}))) {
-        Reply::StoreOk(id) => { ids.push((id, chunk)); },
-        _ => panic!("Unexpected reply from blob store."),
-      }
-    }
-
-    assert_eq!(bs_p.send_reply(Msg::Flush), Reply::FlushOk);
-
-    // Non-empty chunks must be in the backend now:
-    for &(ref id, chunk) in ids.iter() {
-      if chunk.len() > 0 {
-        match backend.retrieve(id.name.as_slice()) {
-          Ok(_) => (),
-          Err(e) => panic!(e),
+      let mut ids = Vec::new();
+      for chunk in chunks.iter() {
+        match bs_p.send_reply(Msg::Store(chunk.as_slice().to_vec(), Box::new(move|_| {}))) {
+          Reply::StoreOk(id) => { ids.push((id, chunk)); },
+          _ => panic!("Unexpected reply from blob store."),
         }
       }
-    }
 
-    // All chunks must be available through the blob store:
-    for &(ref id, chunk) in ids.iter() {
-      match bs_p.send_reply(Msg::Retrieve(id.clone())) {
-        Reply::RetrieveOk(found_chunk) => assert_eq!(found_chunk,
-                                              chunk.as_slice().to_vec()),
-        _ => panic!("Unexpected reply from blob store."),
-      }
-    }
-
-    return true;
-  }
-
-  #[quickcheck]
-  fn identity_with_excessive_flushing(chunks: Vec<Vec<u8>>) -> bool {
-    let mut backend = MemoryBackend::new();
-
-    let local_backend = backend.clone();
-    let bs_p: BlobStoreProcess = Process::new(Box::new(move|| {
-      BlobStore::new_for_testing(local_backend, 1024) }));
-
-    let mut ids = Vec::new();
-    for chunk in chunks.iter() {
-      match bs_p.send_reply(Msg::Store(chunk.as_slice().to_vec(), Box::new(move|_| {}))) {
-        Reply::StoreOk(id) => { ids.push((id, chunk)); },
-        _ => panic!("Unexpected reply from blob store."),
-      }
       assert_eq!(bs_p.send_reply(Msg::Flush), Reply::FlushOk);
-      let &(ref id, chunk) = ids.last().unwrap();
-      assert_eq!(bs_p.send_reply(Msg::Retrieve(id.clone())), Reply::RetrieveOk(chunk.clone()));
-    }
 
-    // Non-empty chunks must be in the backend now:
-    for &(ref id, chunk) in ids.iter() {
-      if chunk.len() > 0 {
-        match backend.retrieve(id.name.as_slice()) {
-          Ok(_) => (),
-          Err(e) => panic!(e),
+      // Non-empty chunks must be in the backend now:
+      for &(ref id, chunk) in ids.iter() {
+        if chunk.len() > 0 {
+          match backend.retrieve(id.name.as_slice()) {
+            Ok(_) => (),
+            Err(e) => panic!(e),
+          }
         }
       }
-    }
 
-    // All chunks must be available through the blob store:
-    for &(ref id, chunk) in ids.iter() {
-      match bs_p.send_reply(Msg::Retrieve(id.clone())) {
-        Reply::RetrieveOk(found_chunk) => assert_eq!(found_chunk,
-                                                     chunk.as_slice().to_vec()),
-        _ => panic!("Unexpected reply from blob store."),
+      // All chunks must be available through the blob store:
+      for &(ref id, chunk) in ids.iter() {
+        match bs_p.send_reply(Msg::Retrieve(id.clone())) {
+          Reply::RetrieveOk(found_chunk) => assert_eq!(found_chunk,
+                                                       chunk.as_slice().to_vec()),
+          _ => panic!("Unexpected reply from blob store."),
+        }
       }
-    }
 
-    return true;
+      return true;
+    }
+    quickcheck::quickcheck(prop as fn(Vec<Vec<u8>>) -> bool);
   }
 
-  #[quickcheck]
-  fn blobid_identity(name: Vec<u8>, begin: usize, end: usize) -> bool {
-    let blob_id = BlobID{name: name.to_vec(),
-                         begin: begin, end: end};
-    BlobID::from_bytes(blob_id.as_bytes()) == blob_id
+  #[test]
+  fn identity_with_excessive_flushing() {
+    fn prop(chunks: Vec<Vec<u8>>) -> bool {
+      let mut backend = MemoryBackend::new();
+
+      let local_backend = backend.clone();
+      let bs_p: BlobStoreProcess = Process::new(Box::new(move|| {
+        BlobStore::new_for_testing(local_backend, 1024) }));
+
+      let mut ids = Vec::new();
+      for chunk in chunks.iter() {
+        match bs_p.send_reply(Msg::Store(chunk.as_slice().to_vec(), Box::new(move|_| {}))) {
+          Reply::StoreOk(id) => { ids.push((id, chunk)); },
+          _ => panic!("Unexpected reply from blob store."),
+        }
+        assert_eq!(bs_p.send_reply(Msg::Flush), Reply::FlushOk);
+        let &(ref id, chunk) = ids.last().unwrap();
+        assert_eq!(bs_p.send_reply(Msg::Retrieve(id.clone())), Reply::RetrieveOk(chunk.clone()));
+      }
+
+      // Non-empty chunks must be in the backend now:
+      for &(ref id, chunk) in ids.iter() {
+        if chunk.len() > 0 {
+          match backend.retrieve(id.name.as_slice()) {
+            Ok(_) => (),
+            Err(e) => panic!(e),
+          }
+        }
+      }
+
+      // All chunks must be available through the blob store:
+      for &(ref id, chunk) in ids.iter() {
+        match bs_p.send_reply(Msg::Retrieve(id.clone())) {
+          Reply::RetrieveOk(found_chunk) => assert_eq!(found_chunk,
+                                                       chunk.as_slice().to_vec()),
+          _ => panic!("Unexpected reply from blob store."),
+        }
+      }
+
+      return true;
+    }
+    quickcheck::quickcheck(prop as fn(Vec<Vec<u8>>) -> bool);
+  }
+
+  #[test]
+  fn blobid_identity() {
+    fn prop(name: Vec<u8>, begin: usize, end: usize) -> bool {
+      let blob_id = BlobID{name: name.to_vec(),
+                           begin: begin, end: end};
+      BlobID::from_bytes(blob_id.as_bytes()) == blob_id
+    }
+    quickcheck::quickcheck(prop as fn(Vec<u8>, usize, usize) -> bool);
   }
 
 }

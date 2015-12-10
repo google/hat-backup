@@ -9,11 +9,9 @@ path = "src/hat/main.rs"
 
 [dependencies]
 rand = "*"
-quickcheck = "0.2.19"
-quickcheck_macros = "0.2.19"
+quickcheck = "*"
 clap = "*"
-num = "0.1.24"
-num-macros = "0.1.24"
+num = "*"
 rustc-serialize = "*"
 time = "*"
 
