@@ -187,7 +187,12 @@ fn list_snapshot(backend: &key_store::HashStoreBackend, out: &mpsc::Sender<BTree
   }
 }
 
-
+fn get_hash_id(index: &HashIndexProcess, hash: Hash) -> Result<i64, String> {
+  match index.send_reply(hash_index::Msg::GetID(hash)) {
+    hash_index::Reply::HashID(id) => return Ok(id),
+    _ => return Err("Tried to register an unknown hash".to_string()),
+  }
+}
 
 impl <B: 'static + BlobStoreBackend + Clone + Send> Hat<B> {
   pub fn open_repository(repository_root: &PathBuf, backend: B, max_blob_size: usize)
@@ -207,7 +212,7 @@ impl <B: 'static + BlobStoreBackend + Clone + Send> Hat<B> {
     let gc_backend = GcBackend{hash_index: hi_p.clone()};
     let gc = gc_rc::GcRc::new(Box::new(gc_backend));
 
-    Hat{repository_root: repository_root.clone(),
+    let mut hat = Hat{repository_root: repository_root.clone(),
         snapshot_index: si_p,
         hash_index: hi_p.clone(),
         blob_store: bs_p.clone(),
@@ -215,7 +220,12 @@ impl <B: 'static + BlobStoreBackend + Clone + Send> Hat<B> {
         hash_backend: key_store::HashStoreBackend::new(hi_p, bs_p),
         gc: Box::new(gc),
         max_blob_size: max_blob_size,
-    }
+    };
+
+    // Resume any unfinished commands.
+    hat.resume();
+
+    return hat;
   }
 
   pub fn open_family(&self, name: String) -> Option<Family> {
@@ -234,7 +244,58 @@ impl <B: 'static + BlobStoreBackend + Clone + Send> Hat<B> {
     Some(Family{name: name, key_store: ks, key_store_process: ks_p})
   }
 
-  pub fn commit(&mut self, family_name: String) {
+  pub fn resume(&mut self) {
+    let need_work = match self.snapshot_index.send_reply(
+      snapshot_index::Msg::ListNotDone) {
+        snapshot_index::Reply::NotDone(lst) => lst,
+        _ => panic!("Invalid reply from snapshot index"),
+      };
+
+    for snapshot in need_work.into_iter() {
+      match snapshot.status {
+        snapshot_index::WorkStatus::InProgress => {
+          let done_hash_opt = match snapshot.hash.clone() {
+            None => None,
+            Some(h) => {
+              let status = get_hash_id(&self.hash_index, h.clone()).ok()
+                           .and_then(|id| self.gc.status(id));
+              match status {
+                None => None,  // We did not fully commit.
+                Some(gc::Status::InProgress) => Some(h),
+                Some(gc::Status::Complete) => Some(h),
+              }
+            },
+          };
+          match done_hash_opt {
+            Some(h) => self.commit_finalize_by_name(snapshot.family_name, snapshot.info, h),
+            None => {
+              println!("Resuming commit of: {}", snapshot.family_name);
+              self.commit(snapshot.family_name, Some(snapshot.info));
+            }
+          }
+        }
+        snapshot_index::WorkStatus::Complete => {
+          match snapshot.hash.clone() {
+            Some(h) => self.commit_finalize_by_name(snapshot.family_name, snapshot.info, h),
+            None => {
+              // This should not happen.
+              panic!("Snapshot {:?} is fully registered in GC, but has not hash in the index", snapshot);
+            }
+          }
+        }
+      }
+    }
+
+    // We should have finished everything there was to finish.
+    let need_work = match self.snapshot_index.send_reply(
+      snapshot_index::Msg::ListNotDone) {
+        snapshot_index::Reply::NotDone(lst) => lst,
+        _ => panic!("Invalid reply from snapshot index"),
+      };
+    assert_eq!(need_work.len(), 0);
+  }
+
+  pub fn commit(&mut self, family_name: String, resume_info: Option<SnapshotInfo>) {
     let family = self.open_family(family_name.clone()).expect(
       &format!("Could not open family '{}'", family_name));
 
@@ -242,19 +303,18 @@ impl <B: 'static + BlobStoreBackend + Clone + Send> Hat<B> {
     //  Reserve the snapshot and commit the reservation.
     //  Register all but the last hashes.
     //  (the last hash is a special-case, as the GC use it to save meta-data for resuming)
-    let snapshot_info = match self.snapshot_index.send_reply(
-      snapshot_index::Msg::Reserve(family_name.clone())) {
-        snapshot_index::Reply::Reserved(info) => info,
-        _ => panic!("Invalid reply from snapshot index"),
+    let snapshot_info = match resume_info {
+      Some(info) => info,  // Resume already started commit.
+      None => {
+        // Create new commit.
+        match self.snapshot_index.send_reply(
+          snapshot_index::Msg::Reserve(family_name.clone())) {
+            snapshot_index::Reply::Reserved(info) => info,
+            _ => panic!("Invalid reply from snapshot index"),
+        }
+      }
     };
     self.flush_snapshot_index();
-
-    fn get_hash_id(index: &HashIndexProcess, hash: Hash) -> Result<i64, String> {
-      match index.send_reply(hash_index::Msg::GetID(hash)) {
-        hash_index::Reply::HashID(id) => return Ok(id),
-        _ => return Err("Tried to register an unknown hash".to_string()),
-      }
-    }
 
     // Prepare.
     let (hash_sender, hash_receiver) = mpsc::channel();
@@ -278,6 +338,10 @@ impl <B: 'static + BlobStoreBackend + Clone + Send> Hat<B> {
       r.recv().unwrap()
     };
 
+    // Push any remaining data to external storage.
+    // This also flushes our hashes from the memory index, so we can tag them.
+    self.flush_blob_store();
+
     // Tag 2:
     // We update the snapshot entry with the tree hash, which we then register.
     // When the GC has seen the final hash, we flush everything so far.
@@ -292,11 +356,18 @@ impl <B: 'static + BlobStoreBackend + Clone + Send> Hat<B> {
     // At this point, the GC should still be able to either resume or rollback safely.
     // After a successful flush, all GC work is done.
     // The GC must be able to tell if it has completed or not.
-    let hash_id = get_hash_id(&self.hash_index, hash).unwrap();
+    let hash_id = get_hash_id(&self.hash_index, hash.clone()).unwrap();
     self.gc.register_final(snapshot_info.clone(), hash_id);
     family.flush();
-    self.flush_snapshot_index();
+    self.commit_finalize(family, snapshot_info, hash);
+  }
 
+  fn commit_finalize_by_name(&mut self, family_name: String, snapshot_info: SnapshotInfo, hash: Hash) {
+      let family = self.open_family(family_name).expect("Unknown family name");
+      self.commit_finalize(family, snapshot_info, hash);
+  }
+
+  fn commit_finalize(&mut self, family: Family, snapshot_info: SnapshotInfo, hash: Hash) {
     // Tag 3:
     // Commit locally. Let the GC perform any needed cleanup.
     // If we resume at this stage, we know that commit was successful and all work was completed.
@@ -307,9 +378,9 @@ impl <B: 'static + BlobStoreBackend + Clone + Send> Hat<B> {
     };
     self.flush_snapshot_index();
 
+    let hash_id = get_hash_id(&self.hash_index, hash).unwrap();
     self.gc.register_cleanup(snapshot_info.clone(), hash_id);
     family.flush();
-    self.flush_snapshot_index();
 
     // Tag 0: All is done.
     match self.snapshot_index.send_reply(snapshot_index::Msg::Commit(snapshot_info)) {
@@ -324,6 +395,13 @@ impl <B: 'static + BlobStoreBackend + Clone + Send> Hat<B> {
       snapshot_index::Reply::FlushOk => (),
       _ => panic!("Invalid reply from snapshot index"),
     };
+  }
+
+  pub fn flush_blob_store(&self) {
+    match self.blob_store.send_reply(blob_store::Msg::Flush) {
+      blob_store::Reply::FlushOk => (),
+      _ => panic!("Invalid reply from blob store"),
+    }
   }
 
   pub fn checkout_in_dir(&self, family_name: String, output_dir: PathBuf) {

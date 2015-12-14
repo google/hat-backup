@@ -25,7 +25,7 @@ use sqlite3::{open};
 
 use hash_index;
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct SnapshotInfo{
   pub unique_id: i64,
   pub family_id: i64,
@@ -55,6 +55,9 @@ pub enum Msg {
   /// Delete snapshot.
   Delete(SnapshotInfo),
 
+  /// List incomplete snapshots (either committing or deleting).
+  ListNotDone,
+
   /// Flush the hash index to clear internal buffers and commit the underlying database.
   Flush,
 }
@@ -64,7 +67,22 @@ pub enum Reply {
   UpdateOk,
   CommitOk,
   Snapshot(Option<(SnapshotInfo, hash_index::Hash, Vec<u8>)>),
+  NotDone(Vec<SnapshotStatus>),
   FlushOk,
+}
+
+#[derive(Debug)]
+pub enum WorkStatus {
+  InProgress,
+  Complete,
+}
+
+#[derive(Debug)]
+pub struct SnapshotStatus {
+  pub family_name: String,
+  pub info: SnapshotInfo,
+  pub hash: Option<hash_index::Hash>,
+  pub status: WorkStatus,
 }
 
 
@@ -237,6 +255,37 @@ impl SnapshotIndex {
     })
   }
 
+  fn list_undone(&mut self) -> Vec<SnapshotStatus> {
+    let mut lookup_stm = self.prepare_or_die(
+      "SELECT rowid, family_id, snapshot_id, f.name, hash, tag
+       FROM snapshot_index JOIN family f ON (f.rowid == family_id) WHERE tag!=?");
+
+    assert_eq!(SQLITE_OK, lookup_stm.bind_param(1, &Integer64(tags::Tag::Done as i64)));
+
+    let mut outs = vec![];
+    while lookup_stm.step() == SQLITE_ROW {
+
+      let info = SnapshotInfo{unique_id:   lookup_stm.get_i64(0),
+                              family_id:   lookup_stm.get_i64(1),
+                              snapshot_id: lookup_stm.get_i64(2)};
+
+      let name = lookup_stm.get_text(3).unwrap().to_string();
+
+      let hash = lookup_stm.get_blob(4).and_then(|h| if h.len() == 0 { None }
+                                                     else { Some(hash_index::Hash{bytes:h.to_vec()}) });
+
+      let tag = tags::tag_from_num(lookup_stm.get_i64(5));
+      let status = match tag {
+        Some(tags::Tag::Reserved) | Some(tags::Tag::InProgress)        => WorkStatus::InProgress,
+        Some(tags::Tag::Complete) | Some(tags::Tag::Done)       | None => WorkStatus::Complete,
+      };
+
+      outs.push(SnapshotStatus{info: info, hash: hash, status: status, family_name: name});
+    }
+
+    return outs;
+  }
+
   fn flush(&mut self) {
     self.exec_or_die("COMMIT; BEGIN");
   }
@@ -259,7 +308,7 @@ impl process::MsgHandler<Msg, Reply> for SnapshotIndex {
       Msg::ReadyCommit(snapshot) => {
         self.set_tag(snapshot, tags::Tag::Complete);
         return reply(Reply::UpdateOk);
-      }
+      },
 
       Msg::Commit(snapshot) => {
         self.set_tag(snapshot, tags::Tag::Done);
@@ -269,22 +318,26 @@ impl process::MsgHandler<Msg, Reply> for SnapshotIndex {
       Msg::Latest(name) => {
         let res_opt = self.latest_snapshot(name);
         return reply(Reply::Snapshot(res_opt));
-      }
+      },
 
       Msg::Lookup(name, id) => {
         let res_opt = self.get_snapshot_info(name, id);
         return reply(Reply::Snapshot(res_opt));
-      }
+      },
 
       Msg::Delete(info) => {
         self.delete_snapshot(info);
         return reply(Reply::UpdateOk);
+      },
+
+      Msg::ListNotDone => {
+        return reply(Reply::NotDone(self.list_undone()));
       }
 
       Msg::Flush => {
         self.flush();
         return reply(Reply::FlushOk);
-      }
+      },
     }
   }
 }
