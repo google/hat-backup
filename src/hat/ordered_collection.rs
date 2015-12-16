@@ -26,7 +26,7 @@ pub trait OrderedCollection<K: Clone + Ord, V> {
   fn pop_min_when<F>(&mut self, ready: F) -> Option<(K, V)>
     where F: Fn(&K, &V) -> bool;
   fn update_value<F>(&mut self, k: K, f: F) where F: FnOnce(Option<&V>) -> V;
-  fn find_min<'a>(&'a self) -> Option<(&'a K, &'a V)>;
+  fn find_min(&self) -> Option<(&K, &V)>;
 }
 
 impl <K: Clone + Ord, V> OrderedCollection<K, V> for BTreeMap<K, V> {
@@ -50,7 +50,7 @@ impl <K: Clone + Ord, V> OrderedCollection<K, V> for BTreeMap<K, V> {
                     (k, v) })
   }
 
-  fn find_min<'a>(&'a self) -> Option<(&'a K, &'a V)> {
+  fn find_min(&self) -> Option<(&K, &V)> {
     self.iter().next()
   }
 }

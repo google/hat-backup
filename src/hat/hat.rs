@@ -109,13 +109,14 @@ impl gc::GcBackend for GcBackend {
     if entry.payload.is_none() {
       return Vec::new();
     }
-    return hash_tree::decode_metadata_refs(&entry.payload.unwrap()).into_iter().map(|bytes| {
+
+    hash_tree::decode_metadata_refs(&entry.payload.unwrap()).into_iter().map(|bytes| {
         match self.hash_index.send_reply(hash_index::Msg::GetID(Hash{bytes:bytes})) {
           hash_index::Reply::HashID(id) => id,
           hash_index::Reply::HashNotKnown => panic!("HashNotKnown in hash index."),
           _ => panic!("Unexpected result from hash index."),
         }
-    }).collect();
+    }).collect()
   }
 
   fn list_ids_by_tag(&self, tag: tags::Tag) -> mpsc::Receiver<i64> {
@@ -126,7 +127,8 @@ impl gc::GcBackend for GcBackend {
       },
       _ => panic!("Unexpected reply from hash index."),
     }
-    return receiver;
+
+    receiver
   }
 
   fn manual_commit(&mut self) {
@@ -158,15 +160,15 @@ fn concat_filename(a: &PathBuf, b: String) -> String {
 }
 
 fn snapshot_index_name(root: &PathBuf) -> String {
-  concat_filename(root, "snapshot_index.sqlite3".to_string())
+  concat_filename(root, "snapshot_index.sqlite3".to_owned())
 }
 
 fn blob_index_name(root: &PathBuf) -> String {
-  concat_filename(root, "blob_index.sqlite3".to_string())
+  concat_filename(root, "blob_index.sqlite3".to_owned())
 }
 
 fn hash_index_name(root: &PathBuf) -> String {
-  concat_filename(root, "hash_index.sqlite3".to_string())
+  concat_filename(root, "hash_index.sqlite3".to_owned())
 }
 
 fn list_snapshot(backend: &key_store::HashStoreBackend, out: &mpsc::Sender<BTreeMap<String, json::Json>>, 
@@ -189,8 +191,8 @@ fn list_snapshot(backend: &key_store::HashStoreBackend, out: &mpsc::Sender<BTree
 
 fn get_hash_id(index: &HashIndexProcess, hash: Hash) -> Result<i64, String> {
   match index.send_reply(hash_index::Msg::GetID(hash)) {
-    hash_index::Reply::HashID(id) => return Ok(id),
-    _ => return Err("Tried to register an unknown hash".to_string()),
+    hash_index::Reply::HashID(id) => Ok(id),
+    _ => Err("Tried to register an unknown hash".to_owned()),
   }
 }
 
@@ -225,7 +227,7 @@ impl <B: 'static + BlobStoreBackend + Clone + Send> Hat<B> {
     // Resume any unfinished commands.
     hat.resume();
 
-    return hat;
+    hat
   }
 
   pub fn open_family(&self, name: String) -> Option<Family> {
@@ -241,6 +243,7 @@ impl <B: 'static + BlobStoreBackend + Clone + Send> Hat<B> {
     let ks_p = Process::new(Box::new(move|| { local_ks }));
 
     let ks = KeyStore::new(ki_p, self.hash_index.clone(), self.blob_store.clone());
+
     Some(Family{name: name, key_store: ks, key_store_process: ks_p})
   }
 
@@ -490,7 +493,8 @@ impl <B: 'static + BlobStoreBackend + Clone + Send> Hat<B> {
                hash_index::Reply::HashID(id) => id_sender.send(id).unwrap(),
                _ => panic!("Unexpected reply from hash index."),
          }
-         return id_receiver;
+
+         id_receiver
      });
      // TODO(sejr): tag the snapshot as "WillResume" to allow resume.
      self.gc.deregister(info.clone(), listing);
@@ -583,7 +587,7 @@ impl FileEntry {
         data_hash: None,
       })
     }
-    else { Err("Could not parse filename."[..].to_string()) }
+    else { Err("Could not parse filename."[..].to_owned()) }
   }
 
   fn file_iterator(&self) -> io::Result<FileIterator> {
@@ -651,12 +655,14 @@ impl KeyEntry<FileEntry> for FileEntry {
   fn with_id(self, id: Option<u64>) -> FileEntry {
     let mut x = self;
     x.id = id;
-    return x;
+
+    x
   }
   fn with_data_hash(self, hash: Option<Vec<u8>>) -> FileEntry {
     let mut x = self;
     x.data_hash = hash;
-    return x;
+
+    x
   }
 }
 
@@ -721,7 +727,7 @@ impl listdir::PathHandler<Option<u64>> for InsertPathHandler
 
     match FileEntry::new(path.clone(), parent) {
       Err(e) => {
-        println!("Skipping '{}': {}", path.display(), e.to_string());
+        println!("Skipping '{}': {}", path.display(), e.to_owned());
       },
       Ok(file_entry) => {
         if file_entry.is_symlink() {
@@ -751,7 +757,7 @@ impl listdir::PathHandler<Option<u64>> for InsertPathHandler
       }
     }
 
-    return None;
+    None
   }
 }
 
@@ -761,7 +767,7 @@ fn try_a_few_times_then_panic<F>(f: F, msg: &str) where F: FnMut() -> bool {
   for _ in 1 as i32..5 {
     if f() { return }
   }
-  panic!(msg.to_string());
+  panic!(msg.to_owned());
 }
 
 
@@ -798,7 +804,7 @@ impl Family
       // Extend directory with filename:
       path.push(str::from_utf8(&name[..]).unwrap());
 
-      if hash.len() == 0 {
+      if hash.is_empty() {
         // This is a directory, recurse!
         fs::create_dir_all(&path).unwrap();
         self.checkout_in_dir(path.clone(), Some(id));
@@ -815,12 +821,10 @@ impl Family
   }
 
   pub fn list_from_key_store(&self, dir_id: Option<u64>) -> Vec<key_store::DirElem> {
-    let listing = match self.key_store_process.send_reply(key_store::Msg::ListDir(dir_id)) {
+    match self.key_store_process.send_reply(key_store::Msg::ListDir(dir_id)) {
       key_store::Reply::ListResult(ls) => ls,
       _ => panic!("Unexpected result from key store."),
-    };
-
-    return listing;
+    }
   }
 
   pub fn fetch_dir_data<HTB: hash_tree::HashTreeBackend + Clone>(
@@ -830,19 +834,21 @@ impl Family
     let it = hash_tree::SimpleHashTreeReader::open(backend, dir_hash, dir_ref)
       .expect("unable to open dir");
     for chunk in it {
-      if chunk.len() == 0 {
+      if chunk.is_empty() {
         continue;
       }
       let m = json::Json::from_str(str::from_utf8(&chunk[..]).unwrap()).unwrap();
       out.push(m);
     }
-    return out;
+
+    out
   }
 
   pub fn commit(&mut self, hash_ch: mpsc::Sender<Hash>)  -> (Hash, Vec<u8>) {
     let mut top_tree = self.key_store.hash_tree_writer();
     self.commit_to_tree(&mut top_tree, None, hash_ch);
-    return top_tree.hash();
+
+    top_tree.hash()
   }
 
   pub fn commit_to_tree(&mut self,
@@ -852,17 +858,17 @@ impl Family
 
     for (id, name, ctime, _mtime, atime, hash, data_ref, _) in self.list_from_key_store(dir_id).into_iter() {
       let mut m = BTreeMap::new();
-      m.insert("id".to_string(), id.to_json());
-      m.insert("name".to_string(), name.to_json());
-      m.insert("ct".to_string(), ctime.to_json());
-      m.insert("at".to_string(), atime.to_json());
+      m.insert("id".to_owned(), id.to_json());
+      m.insert("name".to_owned(), name.to_json());
+      m.insert("ct".to_owned(), ctime.to_json());
+      m.insert("at".to_owned(), atime.to_json());
 
-      if hash.len() > 0 {
+      if !hash.is_empty() {
         // This is a file, store its data hash:
-        m.insert("data_hash".to_string(), hash.to_json());
-        m.insert("data_ref".to_string(), data_ref.to_json());
+        m.insert("data_hash".to_owned(), hash.to_json());
+        m.insert("data_ref".to_owned(), data_ref.to_json());
         hash_ch.send(Hash{bytes: hash}).unwrap();
-      } else if hash.len() == 0 {
+      } else {
         drop(hash);
         drop(data_ref);
         // This is a directory, recurse!
@@ -870,8 +876,8 @@ impl Family
         self.commit_to_tree(&mut inner_tree, Some(id), hash_ch.clone());
         // Store a reference for the sub-tree in our tree:
         let (dir_hash, dir_ref) = inner_tree.hash();
-        m.insert("dir_hash".to_string(), dir_hash.bytes.to_json());
-        m.insert("dir_ref".to_string(), dir_ref.to_json());
+        m.insert("dir_hash".to_owned(), dir_hash.bytes.to_json());
+        m.insert("dir_ref".to_owned(), dir_ref.to_json());
         hash_ch.send(dir_hash).unwrap();
       }
 
@@ -884,7 +890,7 @@ impl Family
         keys.clear();
       }
     }
-    if keys.len() > 0 {
+    if !keys.is_empty() {
       tree.append(keys.to_json().to_string().as_bytes().to_vec());
     }
   }

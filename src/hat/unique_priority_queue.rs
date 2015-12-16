@@ -44,10 +44,11 @@ impl <P: Debug + Clone + Ord, K: Debug + Ord + Clone, V: Clone>
     }
     self.priority.insert_unique(p.clone(), (Status::Pending(k.clone()), None));
     self.key_to_priority.insert(k, p);
-    return Ok(());
+
+    Ok(())
   }
 
-  pub fn find_key<'a>(&'a self, k: &K) -> Option<&'a P> {
+  pub fn find_key(&self, k: &K) -> Option<&P> {
     self.key_to_priority.get(k)
   }
 
@@ -59,7 +60,7 @@ impl <P: Debug + Clone + Ord, K: Debug + Ord + Clone, V: Clone>
     });
   }
 
-  pub fn find_value_of_key<'a>(&'a self, k: &K) -> Option<V> {
+  pub fn find_value_of_key(&self, k: &K) -> Option<V> {
     let prio_opt = self.key_to_priority.get(k);
     prio_opt.and_then(|prio| self.priority.get(prio).and_then(|&(_, ref v_opt)| v_opt.clone()))
   }
@@ -80,8 +81,8 @@ impl <P: Debug + Clone + Ord, K: Debug + Ord + Clone, V: Clone>
   }
 
   pub fn pop_min_if_complete(&mut self) -> Option<(P, K, V)> {
-    let min_opt = self.priority.pop_min_when(|_k, min| match min {
-      &(Status::Ready(_), Some(_)) => true,  // We are ready and have a value
+    let min_opt = self.priority.pop_min_when(|_k, min| match *min {
+      (Status::Ready(_), Some(_)) => true,  // We are ready and have a value
       _ => false,
     });
     min_opt.map(|(p, (status, v_opt))| { match status {
@@ -98,6 +99,9 @@ impl <P: Debug + Clone + Ord, K: Debug + Ord + Clone, V: Clone>
     self.priority.len()
   }
 
+  fn is_empty(&self) -> bool {
+    self.priority.is_empty()
+  }
 }
 
 
@@ -118,7 +122,8 @@ mod tests {
       assert_eq!(upq.pop_min_if_complete(), None);
       upq.set_ready(priority);
       assert_eq!(upq.pop_min_if_complete(), Some((priority, key, value)));
-      return true;
+
+      true
     }
     quickcheck::quickcheck(prop as fn(i8, isize, i8) -> bool);
   }
@@ -167,7 +172,8 @@ mod tests {
       }
 
       assert_eq!(upq.pop_min_if_complete(), None);
-      return true;
+
+      true
     }
 
     quickcheck::quickcheck(prop as fn(Vec<(i8, isize, i8)>)  -> bool);

@@ -31,9 +31,9 @@ impl PeriodicTimer {
   pub fn did_fire(&mut self) -> bool {
     if SteadyTime::now() - self.start >= self.interval {
       self.start = SteadyTime::now();
-      return true;
+      true
     } else {
-      return false;
+      false
     }
   }
 

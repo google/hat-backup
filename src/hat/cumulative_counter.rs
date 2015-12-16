@@ -24,9 +24,9 @@ impl CumulativeCounter {
     CumulativeCounter{previous: previous}
   }
 
-  pub fn next(&mut self) -> i64 {
+  pub fn increment(&mut self) -> i64 {
     self.previous += 1;
-    return self.previous;
+    self.previous
   }
 
 }

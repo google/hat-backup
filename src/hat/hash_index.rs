@@ -295,7 +295,7 @@ impl HashIndex {
   }
 
   fn next_id(&mut self) -> i64 {
-    self.id_counter.next()
+    self.id_counter.increment()
   }
 
   fn reserve(&mut self, hash_entry: HashEntry) -> i64 {
@@ -322,7 +322,7 @@ impl HashIndex {
     let old_entry = self.locate(&hash).expect("hash was reserved");
 
     // If we didn't already commit and pop() the hash, update it:
-    let id_opt = self.queue.find_key(&hash.bytes).map(|id| id.clone());
+    let id_opt = self.queue.find_key(&hash.bytes).cloned();
     if id_opt.is_some() {
       assert_eq!(id_opt, Some(old_entry.id));
       self.queue.update_value(&hash.bytes,
@@ -365,7 +365,7 @@ impl HashIndex {
   }
 
   fn set_tag(&mut self, id_opt: Option<i64>, tag: tags::Tag) {
-    let condition = id_opt.map(|id| format!("WHERE id={:?}", id)).unwrap_or("".to_string());
+    let condition = id_opt.map_or("".to_owned(), |id| format!("WHERE id={:?}", id));
     self.exec_or_die(&format!("UPDATE hash_index SET tag={:?} {}",
                               tag as i64, condition)[..]);
   }
@@ -373,7 +373,7 @@ impl HashIndex {
   fn get_tag(&mut self, id: i64) -> Option<tags::Tag> {
     let tag_opt = self.select1(&format!("SELECT tag FROM hash_index WHERE id={:?}", id)[..])
                       .as_mut().map(|row| row.get_i64(0));
-    return tag_opt.and_then(|i| tags::tag_from_num(i));
+    return tag_opt.and_then(tags::tag_from_num);
   }
 
   fn list_ids_by_tag(&mut self, tag: i64) -> Vec<i64> {
