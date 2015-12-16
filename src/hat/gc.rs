@@ -166,7 +166,7 @@ impl GcBackend for SafeMemoryBackend {
   }
 
   fn update_all_data_by_family(&mut self, family_id: Id, fs: mpsc::Receiver<UpdateFn>) {
-    for (k, v) in self.backend.lock().unwrap().gc_data.iter_mut() {
+    for (k, v) in &mut self.backend.lock().unwrap().gc_data {
       if k.1 == family_id {
         let f = fs.recv().unwrap();
         *v = f(v.clone()).unwrap_or(GcData{num: 0, bytes: vec![]});
@@ -179,13 +179,13 @@ impl GcBackend for SafeMemoryBackend {
   }
 
   fn get_tag(&self, hash_id: Id) -> Option<tags::Tag> {
-    self.backend.lock().unwrap().tags.get(&hash_id).map(|t| t.clone())
+    self.backend.lock().unwrap().tags.get(&hash_id).cloned()
   }
 
   fn set_all_tags(&mut self, tag: tags::Tag) {
     let mut backend = self.backend.lock().unwrap();
     for (_snapshot, refs) in backend.snapshot_refs.clone() {
-      for r in refs.iter() {
+      for r in refs {
         backend.tags.insert(r.clone(), tag.clone());
       }
     }
@@ -197,7 +197,7 @@ impl GcBackend for SafeMemoryBackend {
 
   fn list_ids_by_tag(&self, tag: tags::Tag) -> mpsc::Receiver<Id> {
     let mut ids = vec![];
-    for (id, id_tag) in self.backend.lock().unwrap().tags.iter() {
+    for (id, id_tag) in &self.backend.lock().unwrap().tags {
       if *id_tag == tag {
         ids.push(*id);
       }
@@ -311,9 +311,8 @@ pub fn resume_register_test<GC>(mk_gc: Box<FnBox(SafeMemoryBackend) -> Box<GC>>,
   let mut unused: Vec<_> = receiver.iter().collect();
   unused.sort();
 
-  match gc_type {
-    GcType::Exact => assert_eq!(unused, vec![1, 2, 3, 4, 5]),
-    _ => (),
+  if let GcType::Exact = gc_type {
+    assert_eq!(unused, vec![1, 2, 3, 4, 5]);
   }
 }
 
@@ -354,8 +353,7 @@ pub fn resume_deregister_test<GC>(mk_gc: Box<FnBox(SafeMemoryBackend) -> Box<GC>
   let mut unused: Vec<_> = receiver.iter().collect();
   unused.sort();
 
-  match gc_type {
-    GcType::Exact => assert_eq!(unused, vec![1, 2, 3, 4, 5]),
-    _ => (),
+  if let GcType::Exact = gc_type {
+    assert_eq!(unused, vec![1, 2, 3, 4, 5]);
   }
 }

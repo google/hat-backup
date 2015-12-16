@@ -275,12 +275,12 @@ impl <A: KeyEntry<A>> MsgHandler<Msg<A>, Reply<A>> for KeyIndex {
 
         while cursor.step() == SQLITE_ROW {
           let id = i64_to_u64_or_panic(cursor.get_i64(0));
-          let name = cursor.get_blob(1).expect("name").iter().map(|&x| x).collect();
+          let name = cursor.get_blob(1).expect("name").to_owned();
           let created = cursor.get_i64(2);
           let modified = cursor.get_i64(3);
           let accessed = cursor.get_i64(4);
-          let hash = cursor.get_blob(5).unwrap_or(&[]).iter().map(|&x| x).collect();
-          let persistent_ref = cursor.get_blob(6).unwrap_or(&[]).iter().map(|&x| x).collect();
+          let hash = cursor.get_blob(5).unwrap_or(&[]).to_owned();
+          let persistent_ref = cursor.get_blob(6).unwrap_or(&[]).to_owned();
 
           listing.push((id, name,
                         created as u64, modified as u64, accessed as u64,

@@ -255,7 +255,7 @@ impl HashIndex {
   }
 
   fn index_locate(&mut self, hash: &Hash) -> Option<QueueEntry> {
-    assert!(hash.bytes.len() > 0);
+    assert!(!hash.bytes.is_empty());
 
     let result_opt = self.select1(&format!(
       "SELECT id, height, payload, blob_ref FROM hash_index WHERE hash=x'{}'",
@@ -267,7 +267,7 @@ impl HashIndex {
       let payload: Vec<u8> = result.get_blob(2).unwrap_or(&[]).to_vec();
       let persistent_ref: Vec<u8> = result.get_blob(3).unwrap_or(&[]).to_vec();
       QueueEntry{id: id, level: level,
-                 payload: if payload.len() == 0 { None }
+                 payload: if payload.is_empty() { None }
                           else {Some(payload) },
                  persistent_ref: Some(persistent_ref)
       } })
@@ -284,7 +284,7 @@ impl HashIndex {
     return result_opt.map(|mut result|
                HashEntry{hash: Hash{bytes: result.get_blob(0).unwrap_or(&[]).to_vec()},
                          level: result.get_int(1) as i64,
-                         payload: result.get_blob(2).and_then(|p| if p.len() == 0 { None } else { Some(p.to_vec()) }),
+                         payload: result.get_blob(2).and_then(|p| if p.is_empty() { None } else { Some(p.to_vec()) }),
                          persistent_ref: result.get_blob(3).map(|p| p.to_vec())
         });
   }
@@ -302,7 +302,7 @@ impl HashIndex {
     self.maybe_flush();
 
     let HashEntry{hash, level, payload, persistent_ref} = hash_entry;
-    assert!(hash.bytes.len() > 0);
+    assert!(!hash.bytes.is_empty());
 
     let my_id = self.next_id();
 
@@ -318,7 +318,7 @@ impl HashIndex {
 
   fn update_reserved(&mut self, hash_entry: HashEntry) {
     let HashEntry{hash, level, payload, persistent_ref} = hash_entry;
-    assert!(hash.bytes.len() > 0);
+    assert!(!hash.bytes.is_empty());
     let old_entry = self.locate(&hash).expect("hash was reserved");
 
     // If we didn't already commit and pop() the hash, update it:
@@ -453,11 +453,11 @@ impl HashIndex {
                               hash_id, family_id)[..]);
   }
 
-  fn commit(&mut self, hash: &Hash, blob_ref: &Vec<u8>) {
+  fn commit(&mut self, hash: &Hash, blob_ref: &[u8]) {
     // Update persistent reference for ready hash
     let queue_entry = self.locate(hash).expect("hash was committed");
     self.queue.update_value(&hash.bytes,
-                            |old_qe| QueueEntry{persistent_ref: Some(blob_ref.clone()),
+                            |old_qe| QueueEntry{persistent_ref: Some(blob_ref.to_owned()),
                                                 ..old_qe.clone()});
     self.queue.set_ready(queue_entry.id);
 
@@ -478,7 +478,7 @@ impl HashIndex {
       if let Err(_) = sender.send(
         HashEntry{hash: Hash{bytes: cursor.get_blob(0).unwrap_or(&[]).to_vec()},
                   level: cursor.get_int(1) as i64,
-                  payload: cursor.get_blob(2).and_then(|p| if p.len() == 0 { None } else { Some(p.to_vec()) }),
+                  payload: cursor.get_blob(2).and_then(|p| if p.is_empty() { None } else { Some(p.to_vec()) }),
                   persistent_ref: cursor.get_blob(3).map(|p| p.to_vec())
       }) {
           break;
@@ -521,7 +521,7 @@ impl MsgHandler<Msg, Reply> for HashIndex {
     match msg {
 
       Msg::GetID(hash) => {
-        assert!(hash.bytes.len() > 0);
+        assert!(!hash.bytes.is_empty());
         return reply(match self.locate(&hash) {
           Some(entry) => Reply::HashID(entry.id),
           None => Reply::HashNotKnown,
@@ -536,7 +536,7 @@ impl MsgHandler<Msg, Reply> for HashIndex {
       },
 
       Msg::HashExists(hash) => {
-        assert!(hash.bytes.len() > 0);
+        assert!(!hash.bytes.is_empty());
         return reply(match self.locate(&hash) {
           Some(_) => Reply::HashKnown,
           None => Reply::HashNotKnown,
@@ -544,7 +544,7 @@ impl MsgHandler<Msg, Reply> for HashIndex {
       },
 
       Msg::FetchPayload(hash) => {
-        assert!(hash.bytes.len() > 0);
+        assert!(!hash.bytes.is_empty());
         return reply(match self.locate(&hash) {
           Some(ref queue_entry) => Reply::Payload(queue_entry.payload.clone()),
           None => Reply::HashNotKnown,
@@ -552,7 +552,7 @@ impl MsgHandler<Msg, Reply> for HashIndex {
       },
 
       Msg::FetchPersistentRef(hash) => {
-        assert!(hash.bytes.len() > 0);
+        assert!(!hash.bytes.is_empty());
         return reply(match self.locate(&hash) {
           Some(ref queue_entry) if queue_entry.persistent_ref.is_none() => Reply::Retry,
           Some(queue_entry) =>
@@ -562,7 +562,7 @@ impl MsgHandler<Msg, Reply> for HashIndex {
       },
 
       Msg::Reserve(hash_entry) => {
-        assert!(hash_entry.hash.bytes.len() > 0);
+        assert!(!hash_entry.hash.bytes.is_empty());
         // To avoid unused IO, we store entries in-memory until committed to persistent storage.
         // This allows us to continue after a crash without needing to scan through and delete
         // uncommitted entries.
@@ -573,13 +573,13 @@ impl MsgHandler<Msg, Reply> for HashIndex {
       },
 
       Msg::UpdateReserved(hash_entry) => {
-        assert!(hash_entry.hash.bytes.len() > 0);
+        assert!(!hash_entry.hash.bytes.is_empty());
         self.update_reserved(hash_entry);
         return reply(Reply::ReserveOk);
       }
 
       Msg::Commit(hash, persistent_ref) => {
-        assert!(hash.bytes.len() > 0);
+        assert!(!hash.bytes.is_empty());
         self.commit(&hash, &persistent_ref);
         return reply(Reply::CommitOk);
       },

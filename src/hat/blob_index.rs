@@ -169,9 +169,9 @@ impl BlobIndex {
   }
 
   fn tag(&mut self, tag: tags::Tag, target: Option<BlobDesc>) {
-    let filter = target.map(|d| 
-                            if d.id != 0 { format!(" WHERE id={:?} LIMIT 1", d.id) }
-                            else { format!(" WHERE name=x'{}' LIMIT 1", d.name.to_hex()) }).unwrap_or("".to_string());
+    let filter = target.map_or("".to_owned(),
+                               |d| if d.id != 0 { format!(" WHERE id={:?} LIMIT 1", d.id) }
+                                   else { format!(" WHERE name=x'{}' LIMIT 1", d.name.to_hex()) });
     self.exec_or_die(&format!("UPDATE blob_index SET tag={:?} {}", tag as i64, filter));
   }
 

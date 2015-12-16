@@ -109,7 +109,7 @@ impl HashStoreBackend {
   }
 
   fn fetch_chunk_from_hash(&mut self, hash: hash_index::Hash) -> Option<Vec<u8>> {
-    assert!(hash.bytes.len() > 0);
+    assert!(!hash.bytes.is_empty());
     match self.hash_index.send_reply(hash_index::Msg::FetchPersistentRef(hash)) {
       hash_index::Reply::PersistentRef(chunk_ref_bytes) => {
         let chunk_ref = blob_store::BlobID::from_bytes(chunk_ref_bytes);
@@ -130,12 +130,12 @@ impl HashStoreBackend {
 impl HashTreeBackend for HashStoreBackend
 {
   fn fetch_chunk(&mut self, hash: hash_index::Hash) -> Option<Vec<u8>> {
-    assert!(hash.bytes.len() > 0);
+    assert!(!hash.bytes.is_empty());
     return self.fetch_chunk_from_hash(hash);
   }
 
   fn fetch_persistent_ref(&mut self, hash: hash_index::Hash) -> Option<Vec<u8>> {
-    assert!(hash.bytes.len() > 0);
+    assert!(!hash.bytes.is_empty());
     loop {
       match self.hash_index.send_reply(hash_index::Msg::FetchPersistentRef(hash.clone())) {
         hash_index::Reply::PersistentRef(r) => { return Some(r) }, // done
@@ -156,7 +156,7 @@ impl HashTreeBackend for HashStoreBackend
 
   fn insert_chunk(&mut self, hash: hash_index::Hash, level: i64, payload: Option<Vec<u8>>,
                   chunk: Vec<u8>) -> Vec<u8> {
-    assert!(hash.bytes.len() > 0);
+    assert!(!hash.bytes.is_empty());
 
     let mut hash_entry = hash_index::HashEntry{hash:hash.clone(), level:level, payload:payload,
                                                persistent_ref: None};
@@ -351,7 +351,7 @@ mod tests {
     }
 
     fn name(&self) -> Vec<u8> {
-      self.name.as_slice().to_vec()
+      self.name.to_owned()
     }
 
     fn size(&self) -> Option<u64> {
@@ -404,7 +404,7 @@ mod tests {
 
     fn next(&mut self) -> Option<Vec<u8>> {
       match self.data.as_mut() {
-        Some(x) => if x.len() > 0 { Some(x.remove(0)) } else { None },
+        Some(x) => if !x.is_empty() { Some(x.remove(0)) } else { None },
         None => None,
       }
     }
@@ -609,13 +609,9 @@ mod tests {
       i += 1;
 
       let mut my_bytes = bytes.clone();
-      {
-        let mut_view = my_bytes.as_mut_slice();
-        mut_view[0] = i as u8;
-        mut_view[1] = (i / 256) as u8;
-        mut_view[2] = (i / 65536) as u8;
-      }
-      let my_bytes = my_bytes;
+      my_bytes[0] = i as u8;
+      my_bytes[1] = (i / 256) as u8;
+      my_bytes[2] = (i / 65536) as u8;
 
       let entry = KeyEntryStub{
         parent_id: None,
@@ -673,18 +669,14 @@ mod tests {
       i += 1;
 
       let mut my_bytes = bytes.clone();
-      {
-        let mut_view = my_bytes.as_mut_slice();
-        mut_view[0] = i as u8;
-        mut_view[1] = (i / 256) as u8;
-        mut_view[2] = (i / 65536) as u8;
-      }
-      let my_bytes = my_bytes;
+      my_bytes[0] = i as u8;
+      my_bytes[1] = (i / 256) as u8;
+      my_bytes[2] = (i / 65536) as u8;
 
       let mut chunks = vec![];
       for i in 0..16 {
         let mut local_bytes = my_bytes.clone();
-        local_bytes.as_mut_slice()[3] = i as u8;
+        local_bytes[3] = i as u8;
         chunks.push(local_bytes);
       }
 

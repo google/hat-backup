@@ -61,11 +61,11 @@ impl FileBackend {
     FileBackend{root: root, read_cache: Arc::new(Mutex::new(BTreeMap::new())), max_cache_size: 10}
   }
 
-  fn guarded_cache_get(&self, name: &Vec<u8>) -> Option<Result<Vec<u8>, String>> {
-    self.read_cache.lock().unwrap().get(name).map(|v| v.clone())
+  fn guarded_cache_get(&self, name: &[u8]) -> Option<Result<Vec<u8>, String>> {
+    self.read_cache.lock().unwrap().get(name).cloned()
   }
 
-  fn guarded_cache_delete(&self, name: &Vec<u8>) {
+  fn guarded_cache_delete(&self, name: &[u8]) {
     self.read_cache.lock().unwrap().remove(name);
   }
 
@@ -97,8 +97,7 @@ impl BlobStoreBackend for FileBackend {
 
   fn retrieve(&mut self, name: &[u8]) -> Result<Vec<u8>, String> {
     // Check for key in cache:
-    let name = name.to_vec();
-    let value_opt = self.guarded_cache_get(&name);
+    let value_opt = self.guarded_cache_get(name);
     match value_opt {
       Some(result) => return result,
       None => (),
@@ -117,7 +116,7 @@ impl BlobStoreBackend for FileBackend {
     };
 
     // Update cache to contain key:
-    self.guarded_cache_put(name, res.clone());
+    self.guarded_cache_put(name.to_vec(), res.clone());
 
     return res;
   }
@@ -148,7 +147,7 @@ pub struct BlobID {
 impl BlobID {
 
   pub fn from_bytes(bytes: Vec<u8>) -> BlobID {
-    return rustc_serialize::json::decode(str::from_utf8(bytes.as_slice()).unwrap()).unwrap();
+    return rustc_serialize::json::decode(str::from_utf8(&bytes[..]).unwrap()).unwrap();
   }
 
   pub fn as_bytes(&self) -> Vec<u8> {
@@ -271,20 +270,15 @@ impl <B: BlobStoreBackend> BlobStore<B> {
     let mut blob = Vec::new();
 
     self.buffer_data.reverse();
-    loop {
-      match self.buffer_data.pop() {
-        Some((chunk_ref, chunk, cb)) => {
-          ready_callback.push((chunk_ref, cb));
-          for c in chunk {
-            blob.push(c);
-          }
-        },
-        None => break,
+    while let Some((chunk_ref, chunk, cb)) = self.buffer_data.pop() {
+      ready_callback.push((chunk_ref, cb));
+      for c in chunk {
+        blob.push(c);
       }
     }
 
     self.blob_index.send_reply(blob_index::Msg::InAir(old_blob_desc.clone()));
-    self.backend_store(old_blob_desc.name.as_slice(), blob.as_slice());
+    self.backend_store(&old_blob_desc.name[..], &blob[..]);
     self.blob_index.send_reply(blob_index::Msg::CommitDone(old_blob_desc));
 
     // Go through callbacks
@@ -305,7 +299,7 @@ impl <B: BlobStoreBackend> MsgHandler<Msg, Reply> for BlobStore<B> {
   fn handle(&mut self, msg: Msg, reply: Box<Fn(Reply)>) {
     match msg {
       Msg::Store(blob, callback) => {
-        if blob.len() == 0 {
+        if blob.is_empty() {
           let id = BlobID{name: vec!(0), begin: 0, end: 0};
           let cb_id = id.clone();
           thread::spawn(move|| { callback(cb_id) });
@@ -330,7 +324,7 @@ impl <B: BlobStoreBackend> MsgHandler<Msg, Reply> for BlobStore<B> {
         if id.begin == 0 && id.end == 0 {
           return reply(Reply::RetrieveOk(vec![]));
         }
-        let blob = self.backend_read(id.name.as_slice());
+        let blob = self.backend_read(&id.name[..]);
         let chunk = &blob[id.begin .. id.end];
         return reply(Reply::RetrieveOk(chunk.to_vec()));
       },
@@ -354,7 +348,7 @@ impl <B: BlobStoreBackend> MsgHandler<Msg, Reply> for BlobStore<B> {
         for b in blobs.iter() {
           match self.backend.delete(&b.name) {
             Ok(_) => (),
-            Err(e) => println!("Could not delete {}: {}", b.name.to_hex(), e.to_string()),
+            Err(e) => println!("Could not delete {}: {}", b.name.to_hex(), e),
           }
         }
         match self.blob_index.send_reply(blob_index::Msg::DeleteByTag(tag)) {
@@ -460,7 +454,7 @@ pub mod tests {
 
       let mut ids = Vec::new();
       for chunk in chunks.iter() {
-        match bs_p.send_reply(Msg::Store(chunk.as_slice().to_vec(), Box::new(move|_| {}))) {
+        match bs_p.send_reply(Msg::Store(chunk.to_owned(), Box::new(move|_| {}))) {
           Reply::StoreOk(id) => { ids.push((id, chunk)); },
           _ => panic!("Unexpected reply from blob store."),
         }
@@ -471,7 +465,7 @@ pub mod tests {
       // Non-empty chunks must be in the backend now:
       for &(ref id, chunk) in ids.iter() {
         if chunk.len() > 0 {
-          match backend.retrieve(id.name.as_slice()) {
+          match backend.retrieve(&id.name[..]) {
             Ok(_) => (),
             Err(e) => panic!(e),
           }
@@ -481,8 +475,7 @@ pub mod tests {
       // All chunks must be available through the blob store:
       for &(ref id, chunk) in ids.iter() {
         match bs_p.send_reply(Msg::Retrieve(id.clone())) {
-          Reply::RetrieveOk(found_chunk) => assert_eq!(found_chunk,
-                                                       chunk.as_slice().to_vec()),
+          Reply::RetrieveOk(found_chunk) => assert_eq!(found_chunk, chunk.to_owned()),
           _ => panic!("Unexpected reply from blob store."),
         }
       }
@@ -503,7 +496,7 @@ pub mod tests {
 
       let mut ids = Vec::new();
       for chunk in chunks.iter() {
-        match bs_p.send_reply(Msg::Store(chunk.as_slice().to_vec(), Box::new(move|_| {}))) {
+        match bs_p.send_reply(Msg::Store(chunk.to_owned(), Box::new(move|_| {}))) {
           Reply::StoreOk(id) => { ids.push((id, chunk)); },
           _ => panic!("Unexpected reply from blob store."),
         }
@@ -515,7 +508,7 @@ pub mod tests {
       // Non-empty chunks must be in the backend now:
       for &(ref id, chunk) in ids.iter() {
         if chunk.len() > 0 {
-          match backend.retrieve(id.name.as_slice()) {
+          match backend.retrieve(&id.name[..]) {
             Ok(_) => (),
             Err(e) => panic!(e),
           }
@@ -526,7 +519,7 @@ pub mod tests {
       for &(ref id, chunk) in ids.iter() {
         match bs_p.send_reply(Msg::Retrieve(id.clone())) {
           Reply::RetrieveOk(found_chunk) => assert_eq!(found_chunk,
-                                                       chunk.as_slice().to_vec()),
+                                                       chunk.to_owned()),
           _ => panic!("Unexpected reply from blob store."),
         }
       }

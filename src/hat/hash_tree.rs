@@ -113,7 +113,7 @@ impl <B: HashTreeBackend + Clone> SimpleHashTreeWriter<B> {
   /// same order, and split at the same boundaries (i.e. pushing 1-bytes blocks will give 1-byte
   /// blocks when reading; if needed, accummulation of data must be handled by the `backend`).
   pub fn append(&mut self, chunk: Vec<u8>) {
-    let hash = Hash::new(chunk.as_slice());
+    let hash = Hash::new(&chunk[..]);
     self.append_at(0, hash, chunk, None);
   }
 
@@ -157,7 +157,7 @@ impl <B: HashTreeBackend + Clone> SimpleHashTreeWriter<B> {
       metadata
     };
 
-    let hash = Hash::new(metadata_bytes.as_slice());
+    let hash = Hash::new(&metadata_bytes[..]);
     self.append_at(level + 1, hash, data, Some(metadata_bytes));
   }
 
@@ -168,12 +168,12 @@ impl <B: HashTreeBackend + Clone> SimpleHashTreeWriter<B> {
   /// after `hash()`.
   pub fn hash(&mut self) -> (Hash, Vec<u8>) {
     // Empty hash tree is equivalent to hash tree of one empty block:
-    if self.levels.len() == 0 {
+    if self.levels.is_empty() {
       self.append(vec!());
     }
 
     // Locate first level that isn't empty (has data to collapse)
-    let first_non_empty_level_idx = self.levels.iter().take_while(|level| level.len() == 0).count();
+    let first_non_empty_level_idx = self.levels.iter().take_while(|level| level.is_empty()).count();
 
     // Unless only root has data, collapse all levels up to top level (which is handled next)
     let top_level = self.top_level().expect("levels.len() > 0");
@@ -236,14 +236,14 @@ impl <B: HashTreeBackend + Clone> SimpleHashTreeReader<B> {
   /// defined by `root_hash` and `root_ref`.
   pub fn open(backend: B, root_hash: Hash, _root_ref: Vec<u8>) -> Option<ReaderResult<B>>
   {
-    if root_hash.bytes.len() == 0 {
+    if root_hash.bytes.is_empty() {
       return None
     }
 
     let data = backend.clone().fetch_chunk(root_hash.clone()).expect(
       "Could not find tree root hash.");
 
-    match hash_refs_from_bytes(data.as_slice()) {
+    match hash_refs_from_bytes(&data[..]) {
       None => Some(ReaderResult::SingleBlock(data)), // There's no tree top, just a data block
       Some(childs) => {
         let mut childs = childs;
@@ -254,13 +254,13 @@ impl <B: HashTreeBackend + Clone> SimpleHashTreeReader<B> {
   }
 
   fn extract(&mut self) -> Option<Vec<u8>> {
-    while self.stack.len() > 0 {
+    while !self.stack.is_empty() {
       let child = self.stack.pop().expect("len() > 0");
 
       let hash = Hash{bytes: child.hash};
       let data = self.backend.fetch_chunk(hash).expect("Invalid hash ref");
 
-      match hash_refs_from_bytes(data.as_slice()) {
+      match hash_refs_from_bytes(&data[..]) {
         None => return Some(data),
         Some(new_childs) => {
           let mut new_childs = new_childs;
@@ -434,13 +434,13 @@ mod tests {
     let mut bytes = vec!(0u8);
     {
       for i in 1u8..(order * 4 + 1) as u8 {
-        bytes.as_mut_slice()[0] = i;
+        bytes[0] = i;
         ht.append(bytes.clone());
       }
     }
 
     for i in 1u8..(order * 4 + 1) as u8 {
-      bytes.as_mut_slice()[0] = i;
+      bytes[0] = i;
       assert!(backend.saw_chunk(&bytes));
     }
 
@@ -449,7 +449,7 @@ mod tests {
     let it = SimpleHashTreeReader::open(backend, hash, hash_ref).expect("tree not found");
 
     for (i, chunk) in it.enumerate() {
-      bytes.as_mut_slice()[0] = (i+1) as u8;
+      bytes[0] = (i+1) as u8;
       assert_eq!(bytes, chunk);
     }
   }
@@ -462,21 +462,21 @@ mod tests {
     let mut bytes = vec!(0u8);
 
     for i in 1u8..order as u8 {
-      bytes.as_mut_slice()[0] = i;
+      bytes[0] = i;
       ht.append(bytes.clone());
     }
 
     let (hash, hash_ref) = ht.hash();
 
     for i in 1u8..order as u8 {
-      bytes.as_mut_slice()[0] = i;
+      bytes[0] = i;
       assert!(backend.saw_chunk(&bytes));
     }
 
     let it = SimpleHashTreeReader::open(backend, hash, hash_ref).expect("tree not found");
 
     for (i, chunk) in it.enumerate() {
-      bytes.as_mut_slice()[0] = (i+1) as u8;
+      bytes[0] = (i+1) as u8;
       assert_eq!(bytes, chunk);
     }
   }
@@ -489,7 +489,7 @@ mod tests {
     bench.iter(|| {
       let mut ht = SimpleHashTreeWriter::new(8, MemoryBackend::new());
       for i in 0u8..16 {
-        bytes.as_mut_slice()[0] = i;
+        bytes[0] = i;
         ht.append(bytes.clone());
       };
       ht.hash();

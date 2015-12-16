@@ -133,7 +133,7 @@ impl SnapshotIndex {
     }
   }
 
-  fn get_family_id(&mut self, family: &String) -> Option<i64> {
+  fn get_family_id(&mut self, family: &str) -> Option<i64> {
     let mut lookup_family = self.prepare_or_die("SELECT id FROM family WHERE name=?");
     assert_eq!(SQLITE_OK, lookup_family.bind_param(1, &Blob(family.as_bytes().to_vec())));
 
@@ -154,7 +154,7 @@ impl SnapshotIndex {
     assert_eq!(SQLITE_DONE, stm.step());
   }
 
-  fn get_or_create_family_id(&mut self, family: &String) -> i64 {
+  fn get_or_create_family_id(&mut self, family: &str) -> i64 {
     let id_opt = self.get_family_id(family);
     match id_opt {
       Some(id) => id,
@@ -269,7 +269,7 @@ impl SnapshotIndex {
                               family_id:   lookup_stm.get_i64(1),
                               snapshot_id: lookup_stm.get_i64(2)};
 
-      let name = lookup_stm.get_text(3).unwrap().to_string();
+      let name = lookup_stm.get_text(3).unwrap().to_owned();
 
       let hash = lookup_stm.get_blob(4).and_then(|h| if h.len() == 0 { None }
                                                      else { Some(hash_index::Hash{bytes:h.to_vec()}) });
@@ -301,7 +301,7 @@ impl process::MsgHandler<Msg, Reply> for SnapshotIndex {
       },
 
       Msg::Update(snapshot, hash, tree_ref) => {
-        self.update(snapshot, "anonymous".to_string(), hash, tree_ref);
+        self.update(snapshot, "anonymous".to_owned(), hash, tree_ref);
         return reply(Reply::UpdateOk);
       },
 

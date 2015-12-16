@@ -21,7 +21,6 @@
 #![warn(unused_qualifications)]
 
 // Unstable APIs:
-#![feature(convert)]
 #![feature(test)]
 
 #![feature(custom_attribute)]
