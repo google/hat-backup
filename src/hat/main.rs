@@ -121,8 +121,10 @@ fn main() {
                             .args_from_usage("<NAME> 'Name of the snapshot family'
                                               <ID> 'The snapshot id to delete'"))
                         .subcommand(SubCommand::with_name("gc")
-                            .args_from_usage("-p --pretend 'Do not modify any data'")
-                            .about("Garbage collect: identify and remove unused data blocks."))
+                            .about("Garbage collect: identify and remove unused data blocks.")
+                            .args_from_usage("-p --pretend 'Do not modify any data'"))
+                        .subcommand(SubCommand::with_name("resume")
+                            .about("Resume previous failed command."))
                         .get_matches();
 
     // Check for license flag
@@ -132,6 +134,11 @@ fn main() {
     sodiumoxide::init();
 
     match matches.subcommand() {
+        ("resume", Some(_matches)) => {
+            // Setting up the repository triggers automatic resume.
+            let backend = blob_store::FileBackend::new(blob_dir());
+            hat::Hat::open_repository(&PathBuf::from("repo"), backend, MAX_BLOB_SIZE);
+        },
         ("snapshot", Some(matches)) => {
             let name = matches.value_of("NAME").unwrap().to_owned();
             let path = matches.value_of("PATH").unwrap();
