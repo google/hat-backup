@@ -17,24 +17,25 @@ use time::Duration;
 
 
 pub struct PeriodicTimer {
-  start: SteadyTime,
-  interval: Duration,
+    start: SteadyTime,
+    interval: Duration,
 }
 
 
 impl PeriodicTimer {
-
-  pub fn new(interval: Duration) -> PeriodicTimer {
-    PeriodicTimer{start: SteadyTime::now(), interval:interval}
-  }
-
-  pub fn did_fire(&mut self) -> bool {
-    if SteadyTime::now() - self.start >= self.interval {
-      self.start = SteadyTime::now();
-      true
-    } else {
-      false
+    pub fn new(interval: Duration) -> PeriodicTimer {
+        PeriodicTimer {
+            start: SteadyTime::now(),
+            interval: interval,
+        }
     }
-  }
 
+    pub fn did_fire(&mut self) -> bool {
+        if SteadyTime::now() - self.start >= self.interval {
+            self.start = SteadyTime::now();
+            true
+        } else {
+            false
+        }
+    }
 }

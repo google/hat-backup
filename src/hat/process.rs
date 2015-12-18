@@ -55,69 +55,67 @@ use std::thread;
 use std::sync::mpsc;
 
 
-pub struct Process<Msg, Reply>
-{
-  sender: mpsc::SyncSender<(Msg, Option<mpsc::Sender<Reply>>)>,
+pub struct Process<Msg, Reply> {
+    sender: mpsc::SyncSender<(Msg, Option<mpsc::Sender<Reply>>)>,
 }
 
 /// When cloning a `process` we clone the input-channel, allowing multiple threads to share the same
 /// `process`.
-impl <Msg: Send, Reply: Send> Clone
-  for Process<Msg, Reply>
-{
-  fn clone(&self) -> Process<Msg, Reply> {
-    Process{sender: self.sender.clone()}
-  }
+impl<Msg: Send, Reply: Send> Clone for Process<Msg, Reply> {
+    fn clone(&self) -> Process<Msg, Reply> {
+        Process { sender: self.sender.clone() }
+    }
 }
 
 pub trait MsgHandler<Msg, Reply> {
-  fn handle(&mut self, msg: Msg, callback: Box<Fn(Reply)>);
+    fn handle(&mut self, msg: Msg, callback: Box<Fn(Reply)>);
 }
 
-impl <Msg:'static + Send, Reply:'static + Send>
-  Process<Msg, Reply>
-{
+impl<Msg: 'static + Send, Reply: 'static + Send> Process<Msg, Reply> {
+    /// Create and start a new process using `handler`.
+    pub fn new<H>(handler_proc: Box<FnBox() -> H + Send>) -> Process<Msg, Reply>
+        where H: 'static + MsgHandler<Msg, Reply>
+    {
+        let (sender, receiver) = mpsc::sync_channel(10);
+        let p = Process { sender: sender };
 
-  /// Create and start a new process using `handler`.
-  pub fn new<H>(handler_proc: Box<FnBox() -> H + Send>) -> Process<Msg, Reply>
-    where H: 'static + MsgHandler<Msg, Reply>
-  {
-    let (sender, receiver) = mpsc::sync_channel(10);
-    let p = Process{sender: sender};
+        p.start(receiver, handler_proc);
 
-    p.start(receiver, handler_proc);
-
-    p
-  }
+        p
+    }
 
 
-  fn start<H>(&self, receiver: mpsc::Receiver<(Msg, Option<mpsc::Sender<Reply>>)>,
-              handler_proc: Box<FnBox() -> H + Send>)
-    where H: 'static + MsgHandler<Msg, Reply>
-  {
-    thread::spawn(move|| {
-      // fork handler
-      let mut my_handler = handler_proc();
-      loop {
-        match receiver.recv() {
-          Ok((msg, None)) => {
-            my_handler.handle(msg, Box::new(|_r: Reply| {}));
-          },
-          Ok((msg, Some(rep))) => {
-            my_handler.handle(msg, Box::new(move|r| { rep.send(r).unwrap(); }));
-          },
-          Err(_recv_error) => break,
-        };
-      };
-    });
-  }
+    fn start<H>(&self,
+                receiver: mpsc::Receiver<(Msg, Option<mpsc::Sender<Reply>>)>,
+                handler_proc: Box<FnBox() -> H + Send>)
+        where H: 'static + MsgHandler<Msg, Reply>
+    {
+        thread::spawn(move || {
+            // fork handler
+            let mut my_handler = handler_proc();
+            loop {
+                match receiver.recv() {
+                    Ok((msg, None)) => {
+                        my_handler.handle(msg, Box::new(|_r: Reply| {}));
+                    }
+                    Ok((msg, Some(rep))) => {
+                        my_handler.handle(msg,
+                                          Box::new(move |r| {
+                                              rep.send(r).unwrap();
+                                          }));
+                    }
+                    Err(_recv_error) => break,
+                };
+            }
+        });
+    }
 
-  /// Synchronous send.
-  ///
-  /// Will always wait for a reply from the receiving `process`.
-  pub fn send_reply(&self, msg: Msg) -> Reply {
-    let (sender, receiver) = mpsc::channel();
-    self.sender.send((msg, Some(sender))).ok();
-    return receiver.recv().unwrap();
-  }
+    /// Synchronous send.
+    ///
+    /// Will always wait for a reply from the receiving `process`.
+    pub fn send_reply(&self, msg: Msg) -> Reply {
+        let (sender, receiver) = mpsc::channel();
+        self.sender.send((msg, Some(sender))).ok();
+        return receiver.recv().unwrap();
+    }
 }

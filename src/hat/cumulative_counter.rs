@@ -14,19 +14,17 @@
 
 
 pub struct CumulativeCounter {
-  previous: i64,
+    previous: i64,
 }
 
 
 impl CumulativeCounter {
+    pub fn new(previous: i64) -> CumulativeCounter {
+        CumulativeCounter { previous: previous }
+    }
 
-  pub fn new(previous: i64) -> CumulativeCounter {
-    CumulativeCounter{previous: previous}
-  }
-
-  pub fn increment(&mut self) -> i64 {
-    self.previous += 1;
-    self.previous
-  }
-
+    pub fn increment(&mut self) -> i64 {
+        self.previous += 1;
+        self.previous
+    }
 }

@@ -22,73 +22,75 @@ use threadpool;
 
 
 pub trait PathHandler<D> {
-  fn handle_path(&self, D, PathBuf) -> Option<D>;
+    fn handle_path(&self, D, PathBuf) -> Option<D>;
 }
 
 
 pub fn iterate_recursively<P: 'static + Send + Clone, W: 'static + PathHandler<P> + Send + Clone>
-  (root: (PathBuf, P), worker: &mut W)
-{
-  let threads = 10;
-  let (push_ch, work_ch) = mpsc::sync_channel(threads);
-  let pool = threadpool::ThreadPool::new(threads);
+    (root: (PathBuf, P),
+     worker: &mut W) {
+    let threads = 10;
+    let (push_ch, work_ch) = mpsc::sync_channel(threads);
+    let pool = threadpool::ThreadPool::new(threads);
 
-  // Insert the first task into the queue:
-  push_ch.send(Some(root)).unwrap();
-  let mut running_workers = 0 as i32;
+    // Insert the first task into the queue:
+    push_ch.send(Some(root)).unwrap();
+    let mut running_workers = 0 as i32;
 
-  // Master thread:
-  loop {
-    match work_ch.recv() {
-      Err(_) => unreachable!(),
-      Ok(None) => {
-        // A worker has completed a task.
-        // We are done when no more workers are active (i.e. all tasks are done):
-        running_workers -= 1;
-        if running_workers == 0 {
-          break
-        }
-      },
-      Ok(Some((root, payload))) => {
-        // Execute the task in a pool thread:
-        running_workers += 1;
-        let _worker = worker.clone();
-        let _push_ch = push_ch.clone();
-        pool.execute(move|| {
-          let res = fs::read_dir(&root);
-          if res.is_ok() {
-            for entry in res.unwrap() {
-              if entry.is_ok() {
-                let entry = entry.unwrap();
-                let file = entry.path();
-                let path = PathBuf::from(file.to_str().unwrap());
-                let dir_opt = _worker.handle_path(payload.clone(), path);
-                if dir_opt.is_some() {
-                  _push_ch.send(Some((file.clone(), dir_opt.unwrap()))).unwrap();
+    // Master thread:
+    loop {
+        match work_ch.recv() {
+            Err(_) => unreachable!(),
+            Ok(None) => {
+                // A worker has completed a task.
+                // We are done when no more workers are active (i.e. all tasks are done):
+                running_workers -= 1;
+                if running_workers == 0 {
+                    break;
                 }
-              }
             }
-          }
-          // Count this pool thread as idle:
-          _push_ch.send(None).unwrap();
-        });
-      }
+            Ok(Some((root, payload))) => {
+                // Execute the task in a pool thread:
+                running_workers += 1;
+                let _worker = worker.clone();
+                let _push_ch = push_ch.clone();
+                pool.execute(move || {
+                    let res = fs::read_dir(&root);
+                    if res.is_ok() {
+                        for entry in res.unwrap() {
+                            if entry.is_ok() {
+                                let entry = entry.unwrap();
+                                let file = entry.path();
+                                let path = PathBuf::from(file.to_str().unwrap());
+                                let dir_opt = _worker.handle_path(payload.clone(), path);
+                                if dir_opt.is_some() {
+                                    _push_ch.send(Some((file.clone(), dir_opt.unwrap()))).unwrap();
+                                }
+                            }
+                        }
+                    }
+                    // Count this pool thread as idle:
+                    _push_ch.send(None).unwrap();
+                });
+            }
+        }
     }
-  }
 }
 
 struct PrintPathHandler;
 
 impl Clone for PrintPathHandler {
-  fn clone(&self) -> PrintPathHandler { PrintPathHandler }
+    fn clone(&self) -> PrintPathHandler {
+        PrintPathHandler
+    }
 }
 
 impl PathHandler<()> for PrintPathHandler {
-  fn handle_path(&self, _: (), path: PathBuf) -> Option<()> {
-    println!("{}", path.display());
-    match fs::metadata(&path) {
-      Ok(ref m) if m.is_dir() => Some(()),
-      _ => None,
+    fn handle_path(&self, _: (), path: PathBuf) -> Option<()> {
+        println!("{}", path.display());
+        match fs::metadata(&path) {
+            Ok(ref m) if m.is_dir() => Some(()),
+            _ => None,
+        }
     }
-  }
 }

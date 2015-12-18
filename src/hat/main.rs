@@ -84,51 +84,58 @@ mod snapshot_index;
 
 static MAX_BLOB_SIZE: usize = 4 * 1024 * 1024;
 
-fn blob_dir() -> PathBuf { PathBuf::from("blobs") }
+fn blob_dir() -> PathBuf {
+    PathBuf::from("blobs")
+}
 
 #[cfg(not(test))]
 fn license() {
-  println!(include_str!("../../LICENSE"));
-  println!("clap (Command Line Argument Parser) License:");
-  println!(include_str!("../../LICENSE-CLAP"));
+    println!(include_str!("../../LICENSE"));
+    println!("clap (Command Line Argument Parser) License:");
+    println!(include_str!("../../LICENSE-CLAP"));
 }
 
 
 #[cfg(not(test))]
 fn main() {
-    // Because "snapshot" and "checkout" use the exact same type of arguments, we can make a template
-    // This template defines two positional arguments, both are required
+    // Because "snapshot" and "checkout" use the exact same type of arguments, we can make a
+    // template. This template defines two positional arguments, both are required
     let arg_template = "<NAME> 'Name of the snapshot'
-                        <PATH> 'The path of the snapshot'";
+                        <PATH> 'The path of \
+                        the snapshot'";
 
     // Create valid arguments
     let matches = App::new("hat")
-                        // get version from Cargo.toml
-                        .version(&format!("v{}", crate_version!())[..])
-                        .about("Create backup snapshots")
-                        .arg_from_usage("--license 'Display the license'")
-                        .subcommand(SubCommand::with_name("snapshot")
-                            .about("Create a snapshot")
-                            .args_from_usage(arg_template))
-                        .subcommand(SubCommand::with_name("checkout")
-                            .about("Checkout a snapshot")
-                            .args_from_usage(arg_template))
-                        .subcommand(SubCommand::with_name("commit")
-                            .about("Commit a snapshot")
-                            .arg_from_usage("<NAME> 'Name of the snapshot'"))
-                        .subcommand(SubCommand::with_name("delete")
-                            .about("Delete a snapshot")
-                            .args_from_usage("<NAME> 'Name of the snapshot family'
-                                              <ID> 'The snapshot id to delete'"))
-                        .subcommand(SubCommand::with_name("gc")
-                            .about("Garbage collect: identify and remove unused data blocks.")
-                            .args_from_usage("-p --pretend 'Do not modify any data'"))
-                        .subcommand(SubCommand::with_name("resume")
-                            .about("Resume previous failed command."))
-                        .get_matches();
+                      .version(&format!("v{}", crate_version!())[..])
+                      .about("Create backup snapshots")
+                      .arg_from_usage("--license 'Display the license'")
+                      .subcommand(SubCommand::with_name("snapshot")
+                                      .about("Create a snapshot")
+                                      .args_from_usage(arg_template))
+                      .subcommand(SubCommand::with_name("checkout")
+                                      .about("Checkout a snapshot")
+                                      .args_from_usage(arg_template))
+                      .subcommand(SubCommand::with_name("commit")
+                                      .about("Commit a snapshot")
+                                      .arg_from_usage("<NAME> 'Name of the snapshot'"))
+                      .subcommand(SubCommand::with_name("delete")
+                                      .about("Delete a snapshot")
+                                      .args_from_usage("<NAME> 'Name of the snapshot family'
+                                                        \
+                                                        <ID> 'The snapshot id to delete'"))
+                      .subcommand(SubCommand::with_name("gc")
+                                      .about("Garbage collect: identify and remove unused data \
+                                              blocks.")
+                                      .args_from_usage("-p --pretend 'Do not modify any data'"))
+                      .subcommand(SubCommand::with_name("resume")
+                                      .about("Resume previous failed command."))
+                      .get_matches();
 
     // Check for license flag
-    if matches.is_present("license") { license(); std::process::exit(0); }
+    if matches.is_present("license") {
+        license();
+        std::process::exit(0);
+    }
 
     // Initialize sodium (must only be called once)
     sodiumoxide::init();
@@ -138,7 +145,7 @@ fn main() {
             // Setting up the repository triggers automatic resume.
             let backend = blob_store::FileBackend::new(blob_dir());
             hat::Hat::open_repository(&PathBuf::from("repo"), backend, MAX_BLOB_SIZE);
-        },
+        }
         ("snapshot", Some(matches)) => {
             let name = matches.value_of("NAME").unwrap().to_owned();
             let path = matches.value_of("PATH").unwrap();
@@ -153,7 +160,7 @@ fn main() {
             family.flush();
 
             println!("Waiting for final flush...");
-        },
+        }
         ("checkout", Some(matches)) => {
             let name = matches.value_of("NAME").unwrap().to_owned();
             let path = matches.value_of("PATH").unwrap();
@@ -162,7 +169,7 @@ fn main() {
             let hat = hat::Hat::open_repository(&PathBuf::from("repo"), backend, MAX_BLOB_SIZE);
 
             hat.checkout_in_dir(name.clone(), PathBuf::from(path));
-        },
+        }
         ("commit", Some(matches)) => {
             let name = matches.value_of("NAME").unwrap().to_owned();
 
@@ -170,7 +177,7 @@ fn main() {
             let mut hat = hat::Hat::open_repository(&PathBuf::from("repo"), backend, MAX_BLOB_SIZE);
 
             hat.commit(name, None);
-        },
+        }
         ("delete", Some(matches)) => {
             let name = matches.value_of("NAME").unwrap().to_owned();
             let id = matches.value_of("ID").unwrap().to_owned();
@@ -179,14 +186,15 @@ fn main() {
             let mut hat = hat::Hat::open_repository(&PathBuf::from("repo"), backend, MAX_BLOB_SIZE);
 
             hat.deregister(name, id.parse::<i64>().unwrap());
-        },
+        }
         ("gc", Some(_matches)) => {
             let backend = blob_store::FileBackend::new(blob_dir());
             let mut hat = hat::Hat::open_repository(&PathBuf::from("repo"), backend, MAX_BLOB_SIZE);
             hat.gc();
-        },
+        }
         _ => {
-            println!("No subcommand specified\n{}\nFor more information re-run with --help", matches.usage());
+            println!("No subcommand specified\n{}\nFor more information re-run with --help",
+                     matches.usage());
             std::process::exit(1);
         }
     }
