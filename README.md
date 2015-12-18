@@ -61,7 +61,7 @@ There are a bunch of lacking functionality needed before a feature complete rele
 - Add encryption through NaCL/sodiumdioxide; preferably as late as possible.
 
 
-**Future Wishlist: (not blocking first release)**
+**Future wishlist: (not blocking first release)**
 - Output a dot graph over current hash trees to show dependencies and reuse.
 - FSCK style metadata verification ("check" subcommand?).
 - Commit snapshots while indexing them (possibly through "weak" snapshots that are ignored by GC). The purpose is to allow checking out a partial snapshot.
