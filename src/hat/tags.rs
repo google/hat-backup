@@ -20,6 +20,10 @@ pub enum Tag {
   Reserved = 1,
   InProgress = 2,
   Complete = 3,
+
+  WillDelete = 4,
+  ReadyDelete = 5,
+  DeleteComplete = 6
 }
 
 pub fn tag_from_num(n: i64) -> Option<Tag> {
@@ -28,6 +32,11 @@ pub fn tag_from_num(n: i64) -> Option<Tag> {
     1 => Some(Tag::Reserved),
     2 => Some(Tag::InProgress),
     3 => Some(Tag::Complete),
+
+    4 => Some(Tag::WillDelete),
+    5 => Some(Tag::ReadyDelete),
+    6 => Some(Tag::DeleteComplete),
+
     _ => None,
   }
 }

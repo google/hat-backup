@@ -73,7 +73,7 @@ pub trait Gc {
   fn register_final(&mut self, snapshot: SnapshotInfo, final_ref: Id);
   fn register_cleanup(&mut self, snapshot: SnapshotInfo, final_ref: Id);
 
-  fn deregister(&mut self, snapshot: SnapshotInfo, Box<FnBox() -> mpsc::Receiver<Id>>);
+  fn deregister(&mut self, snapshot: SnapshotInfo, final_ref: Id, Box<FnBox() -> mpsc::Receiver<Id>>);
 
   fn list_unused_ids(&mut self, refs: mpsc::Sender<Id>);
 
@@ -250,8 +250,9 @@ pub fn gc_test<GC>(snapshots: Vec<Vec<u8>>,
     receiver.iter().filter(|i:&i64| refs.contains(&(*i as u8))).map(|i| {
         panic!("ID prematurely deleted by GC: {}", i) }).last();
     // Deregister snapshot.
+    let last = backend.list_snapshot_refs(infos[i].clone()).iter().last().unwrap();
     let refs = backend.list_snapshot_refs(infos[i].clone());
-    gc.deregister(infos[i].clone(), Box::new(|| refs));
+    gc.deregister(infos[i].clone(), last, Box::new(|| refs));
   }
 
   let mut all_refs: Vec<u8> = snapshots.iter().flat_map(|v| v.clone().into_iter()).collect();
@@ -302,8 +303,9 @@ pub fn resume_register_test<GC>(mk_gc: Box<FnBox(SafeMemoryBackend) -> Box<GC>>,
   assert_eq!(gc.status(final_ref), None);
 
 
+  let last = receiver(refs.len()).iter().last().unwrap();
   let receive = receiver(refs.len());
-  gc.deregister(info.clone(), Box::new(move|| receive));
+  gc.deregister(info.clone(), last, Box::new(move|| receive));
 
   let (sender, receiver) = mpsc::channel();
   gc.list_unused_ids(sender);
@@ -339,9 +341,11 @@ pub fn resume_deregister_test<GC>(mk_gc: Box<FnBox(SafeMemoryBackend) -> Box<GC>
   backend.manual_commit();
   for _ in 1..10 {
     backend.rollback();
+
     let receive = receiver(refs.len());
-    gc.deregister(info.clone(), Box::new(move|| receive));
-    assert_eq!(gc.status(final_ref), Some(Status::InProgress));
+
+    gc.deregister(info.clone(), final_ref, Box::new(move|| receive));
+    assert_eq!(gc.status(final_ref), Some(Status::Complete));
   }
 
   gc.register_cleanup(info.clone(), final_ref);

@@ -52,6 +52,12 @@ pub enum Msg {
   /// Lookup exact snapshot info from family and snapshot id.
   Lookup(String, i64),
 
+  /// We are deleting this snapshot.
+  WillDelete(SnapshotInfo),
+
+  /// We are ready to delete of this snapshot.
+  ReadyDelete(SnapshotInfo),
+
   /// Delete snapshot.
   Delete(SnapshotInfo),
 
@@ -73,8 +79,10 @@ pub enum Reply {
 
 #[derive(Debug)]
 pub enum WorkStatus {
-  InProgress,
-  Complete,
+  CommitInProgress,
+  CommitComplete,
+  DeleteInProgress,
+  DeleteComplete,
 }
 
 #[derive(Debug)]
@@ -276,8 +284,10 @@ impl SnapshotIndex {
 
       let tag = tags::tag_from_num(lookup_stm.get_i64(5));
       let status = match tag {
-        Some(tags::Tag::Reserved) | Some(tags::Tag::InProgress)        => WorkStatus::InProgress,
-        Some(tags::Tag::Complete) | Some(tags::Tag::Done)       | None => WorkStatus::Complete,
+        Some(tags::Tag::Reserved)    | Some(tags::Tag::InProgress)        => WorkStatus::CommitInProgress,
+        Some(tags::Tag::Complete)    | Some(tags::Tag::Done)       | None => WorkStatus::CommitComplete,
+        Some(tags::Tag::WillDelete)                                       => WorkStatus::DeleteInProgress,
+        Some(tags::Tag::ReadyDelete) | Some(tags::Tag::DeleteComplete)    => WorkStatus::DeleteComplete,
       };
 
       outs.push(SnapshotStatus{info: info, hash: hash, status: status, family_name: name});
@@ -325,8 +335,18 @@ impl process::MsgHandler<Msg, Reply> for SnapshotIndex {
         return reply(Reply::Snapshot(res_opt));
       },
 
-      Msg::Delete(info) => {
-        self.delete_snapshot(info);
+      Msg::WillDelete(snapshot) => {
+        self.set_tag(snapshot, tags::Tag::WillDelete);
+        return reply(Reply::UpdateOk);
+      },
+
+      Msg::ReadyDelete(snapshot) => {
+        self.set_tag(snapshot, tags::Tag::ReadyDelete);
+        return reply(Reply::UpdateOk);
+      },
+
+      Msg::Delete(snapshot) => {
+        self.delete_snapshot(snapshot);
         return reply(Reply::UpdateOk);
       },
 

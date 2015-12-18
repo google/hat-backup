@@ -256,7 +256,7 @@ impl <B: 'static + BlobStoreBackend + Clone + Send> Hat<B> {
 
     for snapshot in need_work.into_iter() {
       match snapshot.status {
-        snapshot_index::WorkStatus::InProgress => {
+        snapshot_index::WorkStatus::CommitInProgress => {
           let done_hash_opt = match snapshot.hash.clone() {
             None => None,
             Some(h) => {
@@ -277,7 +277,7 @@ impl <B: 'static + BlobStoreBackend + Clone + Send> Hat<B> {
             }
           }
         }
-        snapshot_index::WorkStatus::Complete => {
+        snapshot_index::WorkStatus::CommitComplete => {
           match snapshot.hash.clone() {
             Some(h) => self.commit_finalize_by_name(snapshot.family_name, snapshot.info, h),
             None => {
@@ -285,7 +285,25 @@ impl <B: 'static + BlobStoreBackend + Clone + Send> Hat<B> {
               panic!("Snapshot {:?} is fully registered in GC, but has not hash in the index", snapshot);
             }
           }
-        }
+        },
+        snapshot_index::WorkStatus::DeleteInProgress => {
+          let hash = snapshot.hash.expect("Snapshot has no hash");
+          let hash_id = get_hash_id(&self.hash_index, hash.clone()).expect("Snapshot hash not recognized");
+          let status = self.gc.status(hash_id);
+          match status {
+            None | Some(gc::Status::InProgress) => {
+                println!("Resuming delete of: {} #{:?}", snapshot.family_name, snapshot.info.snapshot_id);
+                self.deregister(snapshot.family_name, snapshot.info.snapshot_id);
+            },
+            Some(gc::Status::Complete)          => self.deregister_finalize_by_name(snapshot.family_name,
+                                                                                    snapshot.info, hash_id),
+          }
+        },
+        snapshot_index::WorkStatus::DeleteComplete => {
+          let hash = snapshot.hash.expect("Snapshot has no hash");
+          let hash_id = get_hash_id(&self.hash_index, hash.clone()).expect("Snapshot hash not recognized");
+          self.deregister_finalize_by_name(snapshot.family_name, snapshot.info, hash_id);
+        },
       }
     }
 
@@ -472,12 +490,20 @@ impl <B: 'static + BlobStoreBackend + Clone + Send> Hat<B> {
              _ => panic!("Unexpected reply from snapshot index."),
          };
 
+     // Make the snapshot to enable resuming.
+     match self.snapshot_index.send_reply(snapshot_index::Msg::WillDelete(info.clone())) {
+       snapshot_index::Reply::UpdateOk => (),
+       _ => panic!("Unexpected reply from snapshot index."),
+     }
+     self.flush_snapshot_index();
+
      let local_family = family.clone();
      let local_hash_index = self.hash_index.clone();
      let local_hash_backend = self.hash_backend.clone();
+     let local_dir_hash = dir_hash.clone();
      let listing = Box::new(move|| {
          let (sender, receiver) = mpsc::channel();
-         list_snapshot(&local_hash_backend, &sender, &local_family, dir_hash.clone(), dir_ref);
+         list_snapshot(&local_hash_backend, &sender, &local_family, local_dir_hash.clone(), dir_ref);
          drop(sender);
 
          let (id_sender, id_receiver) = mpsc::channel();
@@ -489,21 +515,46 @@ impl <B: 'static + BlobStoreBackend + Clone + Send> Hat<B> {
                _ => panic!("Unexpected reply from hash index."),
            }
          }
-         match local_hash_index.send_reply(hash_index::Msg::GetID(dir_hash)) {
+         match local_hash_index.send_reply(hash_index::Msg::GetID(local_dir_hash)) {
                hash_index::Reply::HashID(id) => id_sender.send(id).unwrap(),
                _ => panic!("Unexpected reply from hash index."),
          }
-
          id_receiver
      });
-     // TODO(sejr): tag the snapshot as "WillResume" to allow resume.
-     self.gc.deregister(info.clone(), listing);
-     self.snapshot_index.send_reply(snapshot_index::Msg::Delete(info));
+
+     let final_ref = get_hash_id(&self.hash_index, dir_hash).expect("Snapshot hash does not exist");
+     self.gc.deregister(info.clone(), final_ref, listing);
      family.flush();
+
+     self.deregister_finalize(family, info, final_ref);
+  }
+
+  fn deregister_finalize_by_name(&mut self, family_name: String, snapshot_info: SnapshotInfo, hash_id: gc::Id) {
+     let family = self.open_family(family_name).expect("Unknown family name");
+     self.deregister_finalize(family, snapshot_info, hash_id);
+  }
+
+  fn deregister_finalize(&mut self, family: Family, info: SnapshotInfo, final_ref: gc::Id) {
+     // Mark the snapshot to enable resuming.
+     match self.snapshot_index.send_reply(snapshot_index::Msg::ReadyDelete(info.clone())) {
+       snapshot_index::Reply::UpdateOk => (),
+       _ => panic!("Unexpected reply from snapshot index."),
+     }
+     self.flush_snapshot_index();
+
+     // Clear GC state.
+     self.gc.register_cleanup(info.clone(), final_ref);
+     family.flush();
+
+     // Delete snapshot metadata.
+     self.snapshot_index.send_reply(snapshot_index::Msg::Delete(info));
+     self.flush_snapshot_index();
+
      match self.snapshot_index.send_reply(snapshot_index::Msg::Flush) {
          snapshot_index::Reply::FlushOk => (),
          _ => panic!("Unexpected reply from snapshot index."),
      };
+     self.flush_snapshot_index();
   }
 
   pub fn gc(&mut self) {

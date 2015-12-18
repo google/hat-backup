@@ -63,20 +63,16 @@ impl <B: gc::GcBackend> gc::Gc for GcRc<B> {
     self.backend.set_tag(ref_final, tags::Tag::Done);
   }
 
-  fn deregister(&mut self, _snapshot: SnapshotInfo, refs: Box<FnBox() -> mpsc::Receiver<gc::Id>>) {
+  fn deregister(&mut self, _snapshot: SnapshotInfo, ref_final: gc::Id,
+                refs: Box<FnBox() -> mpsc::Receiver<gc::Id>>) {
     // Start off with a commit to disable automatic commit and run deregister as one transaction.
     self.backend.manual_commit();
 
-    let mut last_opt = None;
     for r in refs().iter() {
       self.backend.update_data(r, DATA_FAMILY,
                                Box::new(move|GcData{num, bytes}| Some(GcData{num:num - 1, bytes:bytes})));
-      last_opt = Some(r);
     }
-    match last_opt {
-      Some(last) => self.backend.set_tag(last, tags::Tag::InProgress),
-      None => (),
-    }
+    self.backend.set_tag(ref_final, tags::Tag::ReadyDelete);
   }
 
 
@@ -100,7 +96,7 @@ impl <B: gc::GcBackend> gc::Gc for GcRc<B> {
 
   fn status(&mut self, final_ref: gc::Id) -> Option<gc::Status> {
     match self.backend.get_tag(final_ref) {
-      Some(tags::Tag::Complete) => Some(gc::Status::Complete),
+      Some(tags::Tag::Complete) | Some(tags::Tag::ReadyDelete) => Some(gc::Status::Complete),
       Some(tags::Tag::InProgress) => Some(gc::Status::InProgress),
       _ => None,
     }

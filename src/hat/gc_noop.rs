@@ -44,7 +44,8 @@ impl <B: gc::GcBackend> gc::Gc for GcNoop<B> {
   fn register_cleanup(&mut self, _snapshot: SnapshotInfo, _ref_final: gc::Id) {
   }
 
-  fn deregister(&mut self, _snapshot: SnapshotInfo, _refs: Box<FnBox() -> mpsc::Receiver<gc::Id>>) {}
+  fn deregister(&mut self, _snapshot: SnapshotInfo, _final_ref: gc::Id,
+                _refs: Box<FnBox() -> mpsc::Receiver<gc::Id>>) {}
 
   fn list_unused_ids(&mut self, _refs: mpsc::Sender<gc::Id>) {}
 
