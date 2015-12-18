@@ -50,7 +50,7 @@ I am currently focusing on reaching a feature complete and useful state and as a
 There are a bunch of lacking functionality needed before a feature complete release is in sight:
 
 - Commit hash-tree tops of known snapshots to external storage.
-- Add recovery function when all local state is gone.
+- Add recovery function to restore local metadata from external hash-tree tops (for when all local state is gone).
 - ~~Add book-keeping for metadata needed to identify live hashes (e.g. reference sets in each family's keyindex).~~
 - ~~Add deletion and garbage-collection.~~
   - ~~Make 'commit' crash-safe by retrying failed 'register' and 'deregister' runs~~. Add tests as this is fragile logic.
@@ -59,6 +59,13 @@ There are a bunch of lacking functionality needed before a feature complete rele
 - Have the blobstore thread(s) talk to external thread(s) to isolate communication with external storage.
 - Make the API used for talking to the external storage easy to change (put it in separate put/get/del programs).
 - Add encryption through NaCL/sodiumdioxide; preferably as late as possible.
+
+
+**Future Wishlist: (not blocking first release)**
+- Output a dot graph over current hash trees to show dependencies and reuse.
+- FSCK style metadata verification ("check" subcommand?).
+- Commit snapshots while indexing them (possibly through "weak" snapshots that are ignored by GC). The purpose is to allow checking out a partial snapshot.
+- Add "--pretend" to all subcommands and have it give a signal as to what would happen without it.
 
 ## Building from source
 First, make sure you have the required system libraries installed:
