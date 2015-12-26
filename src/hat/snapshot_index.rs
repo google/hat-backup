@@ -64,6 +64,9 @@ pub enum Msg {
     /// List incomplete snapshots (either committing or deleting).
     ListNotDone,
 
+    /// List all snapshots.
+    ListAll,
+
     /// Flush the hash index to clear internal buffers and commit the underlying database.
     Flush,
 }
@@ -74,6 +77,7 @@ pub enum Reply {
     CommitOk,
     Snapshot(Option<(SnapshotInfo, hash_index::Hash, Vec<u8>)>),
     NotDone(Vec<SnapshotStatus>),
+    All(Vec<SnapshotStatus>),
     FlushOk,
 }
 
@@ -90,6 +94,8 @@ pub struct SnapshotStatus {
     pub family_name: String,
     pub info: SnapshotInfo,
     pub hash: Option<hash_index::Hash>,
+    pub msg: Option<String>,
+    pub tree_ref: Option<String>,
     pub status: WorkStatus,
 }
 
@@ -299,14 +305,15 @@ impl SnapshotIndex {
         })
     }
 
-    fn list_undone(&mut self) -> Vec<SnapshotStatus> {
-        let mut lookup_stm = self.prepare_or_die("SELECT rowid, family_id, snapshot_id, f.name, \
-                                                  hash, tag
-       FROM snapshot_index JOIN \
-                                                  family f ON (f.rowid == family_id) WHERE tag!=?");
+    fn list_all(&mut self, not_tag: Option<tags::Tag>) -> Vec<SnapshotStatus> {
+        let sql = " \
+          SELECT rowid, family_id, snapshot_id, f.name, \
+          hash, tag, tree_ref, msg \
+          FROM snapshot_index JOIN \
+          family f ON (f.rowid == family_id)";
 
-        assert_eq!(SQLITE_OK,
-                   lookup_stm.bind_param(1, &Integer64(tags::Tag::Done as i64)));
+        let where_ = not_tag.map_or("".to_owned(), |t| format!(" WHERE tag!={:?}", t as i64));
+        let mut lookup_stm = self.prepare_or_die(&format!("{} {}", sql, where_));
 
         let mut outs = vec![];
         while lookup_stm.step() == SQLITE_ROW {
@@ -345,11 +352,14 @@ impl SnapshotIndex {
                 info: info,
                 hash: hash,
                 status: status,
+                tree_ref: lookup_stm.get_text(6).map(|s| s.to_owned()),
+                msg: lookup_stm.get_text(7).map(|s| s.to_owned()),
                 family_name: name,
             });
         }
 
         return outs;
+
     }
 
     fn flush(&mut self) {
@@ -407,7 +417,11 @@ impl process::MsgHandler<Msg, Reply> for SnapshotIndex {
             }
 
             Msg::ListNotDone => {
-                return reply(Reply::NotDone(self.list_undone()));
+                return reply(Reply::NotDone(self.list_all(Some(tags::Tag::Done) /* not_tag */ )));
+            }
+
+            Msg::ListAll => {
+                return reply(Reply::All(self.list_all(None)));
             }
 
             Msg::Flush => {

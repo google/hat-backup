@@ -238,6 +238,11 @@ impl<B: 'static + BlobStoreBackend + Clone + Send> Hat<B> {
         hat
     }
 
+    pub fn hash_tree_writer(&mut self) -> hash_tree::SimpleHashTreeWriter<key_store::HashStoreBackend> {
+        let backend = key_store::HashStoreBackend::new(self.hash_index.clone(), self.blob_store.clone());
+        return hash_tree::SimpleHashTreeWriter::new(8, backend);
+    }
+
     pub fn open_family(&self, name: String) -> Option<Family> {
         // We setup a standard pipeline of processes:
         // KeyStore -> KeyIndex
@@ -259,6 +264,31 @@ impl<B: 'static + BlobStoreBackend + Clone + Send> Hat<B> {
             key_store: ks,
             key_store_process: ks_p,
         })
+    }
+
+    pub fn meta_commit(&mut self) {
+        let snapshots = match self.snapshot_index.send_reply(snapshot_index::Msg::ListAll) {
+            snapshot_index::Reply::All(lst) => lst,
+            _ => panic!("Invalid reply from snapshot index"),
+        };
+
+        // TODO(jos): use a hash tree for this listing.
+        let mut v = Vec::new();
+        for snapshot in snapshots.into_iter() {
+            let mut m = BTreeMap::new();
+            m.insert("snapshot_id".to_owned(), snapshot.info.snapshot_id.to_json());
+            m.insert("family_name".to_owned(), snapshot.family_name.to_json());
+            m.insert("hash".to_owned(), snapshot.hash.to_owned().unwrap().bytes.to_json());
+            m.insert("tree_ref".to_owned(), snapshot.tree_ref.to_owned().to_json());
+            v.push(m);
+        }
+        let listing = v.to_json().to_string().as_bytes().to_vec();
+        
+        // TODO(jos): make sure this operation is atomic or resumable.
+        match self.blob_store.send_reply(blob_store::Msg::StoreNamed("root".to_owned(), listing)) {
+            blob_store::Reply::StoreNamedOk(_) => (),
+            _ => panic!("Invalid reply from blob store"),
+        };
     }
 
     pub fn resume(&mut self) {

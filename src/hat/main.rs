@@ -118,6 +118,8 @@ fn main() {
                       .subcommand(SubCommand::with_name("commit")
                                       .about("Commit a snapshot")
                                       .arg_from_usage("<NAME> 'Name of the snapshot'"))
+                      .subcommand(SubCommand::with_name("meta-commit")
+                                      .about("Commit snapshot metadata (required for recover command"))
                       .subcommand(SubCommand::with_name("delete")
                                       .about("Delete a snapshot")
                                       .args_from_usage("<NAME> 'Name of the snapshot family'
@@ -169,6 +171,12 @@ fn main() {
             let hat = hat::Hat::open_repository(&PathBuf::from("repo"), backend, MAX_BLOB_SIZE);
 
             hat.checkout_in_dir(name.clone(), PathBuf::from(path));
+        }
+        ("meta-commit", Some(_)) => {
+            let backend = blob_store::FileBackend::new(blob_dir());
+            let mut hat = hat::Hat::open_repository(&PathBuf::from("repo"), backend, MAX_BLOB_SIZE);
+
+            hat.meta_commit();
         }
         ("commit", Some(matches)) => {
             let name = matches.value_of("NAME").unwrap().to_owned();
