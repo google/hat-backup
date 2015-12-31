@@ -53,6 +53,27 @@ use std::thread;
 
 use time;
 
+#[derive(RustcEncodable, RustcDecodable)]
+struct RootItem {
+    snapshot_id: i64,
+    family_name: String,
+    msg: String,
+    hash: Vec<u8>,
+    tree_ref: Vec<u8>,
+}
+
+impl ToJson for RootItem {
+    fn to_json(&self) -> json::Json {
+        let mut m = BTreeMap::new();
+        m.insert("snapshot_id".to_owned(), self.snapshot_id.to_json());
+        m.insert("family_name".to_owned(), self.family_name.to_json());
+        m.insert("msg".to_owned(), self.msg.to_json());
+        m.insert("hash".to_owned(), self.hash.to_owned().to_json());
+        m.insert("tree_ref".to_owned(), self.tree_ref.to_owned().to_json());
+        return m.to_json();
+    }
+}
+
 
 struct GcBackend {
     hash_index: HashIndexProcess,
@@ -238,8 +259,10 @@ impl<B: 'static + BlobStoreBackend + Clone + Send> Hat<B> {
         hat
     }
 
-    pub fn hash_tree_writer(&mut self) -> hash_tree::SimpleHashTreeWriter<key_store::HashStoreBackend> {
-        let backend = key_store::HashStoreBackend::new(self.hash_index.clone(), self.blob_store.clone());
+    pub fn hash_tree_writer(&mut self)
+                            -> hash_tree::SimpleHashTreeWriter<key_store::HashStoreBackend> {
+        let backend = key_store::HashStoreBackend::new(self.hash_index.clone(),
+                                                       self.blob_store.clone());
         return hash_tree::SimpleHashTreeWriter::new(8, backend);
     }
 
@@ -275,20 +298,44 @@ impl<B: 'static + BlobStoreBackend + Clone + Send> Hat<B> {
         // TODO(jos): use a hash tree for this listing.
         let mut v = Vec::new();
         for snapshot in snapshots.into_iter() {
-            let mut m = BTreeMap::new();
-            m.insert("snapshot_id".to_owned(), snapshot.info.snapshot_id.to_json());
-            m.insert("family_name".to_owned(), snapshot.family_name.to_json());
-            m.insert("hash".to_owned(), snapshot.hash.to_owned().unwrap().bytes.to_json());
-            m.insert("tree_ref".to_owned(), snapshot.tree_ref.to_owned().to_json());
-            v.push(m);
+            v.push(RootItem {
+                snapshot_id: snapshot.info.snapshot_id,
+                family_name: snapshot.family_name,
+                msg: snapshot.msg.unwrap_or("".to_owned()),
+                hash: snapshot.hash.to_owned().unwrap().bytes,
+                tree_ref: snapshot.tree_ref.to_owned().unwrap(),
+            });
         }
         let listing = v.to_json().to_string().as_bytes().to_vec();
-        
+
         // TODO(jos): make sure this operation is atomic or resumable.
         match self.blob_store.send_reply(blob_store::Msg::StoreNamed("root".to_owned(), listing)) {
             blob_store::Reply::StoreNamedOk(_) => (),
             _ => panic!("Invalid reply from blob store"),
         };
+    }
+
+    pub fn recover(&mut self) {
+        let root = match self.blob_store
+                             .send_reply(blob_store::Msg::RetrieveNamed("root".to_owned())) {
+            blob_store::Reply::RetrieveOk(r) => r,
+            _ => panic!("Could not read root file"),
+        };
+        let snapshots: Vec<RootItem> = str::from_utf8(&root[..])
+                                           .ok()
+                                           .and_then(|s| json::decode(s).ok())
+                                           .expect("Could not parse root content");
+        for s in snapshots.into_iter() {
+            match self.snapshot_index.send_reply(snapshot_index::Msg::Recover(s.snapshot_id,
+                                                                              s.family_name,
+                                                                              s.msg,
+                                                                              s.hash,
+                                                                              s.tree_ref)) {
+                snapshot_index::Reply::RecoverOk => (),
+                _ => panic!("Invalid reply from snapshot index"),
+            }
+        }
+        self.flush_snapshot_index();
     }
 
     pub fn resume(&mut self) {
@@ -546,7 +593,7 @@ impl<B: 'static + BlobStoreBackend + Clone + Send> Hat<B> {
                         let tree_opt = hash_tree::SimpleHashTreeReader::open(self.hash_backend
                                                                                  .clone(),
                                                                              hash,
-                                                                             pref);
+                                                                             Some(pref));
                         if let Some(tree) = tree_opt {
                             family.write_file_chunks(&mut fd, tree);
                         }
@@ -994,7 +1041,7 @@ impl Family {
                                                                    backend: HTB)
                                                                    -> Vec<json::Json> {
         let mut out = Vec::new();
-        let it = hash_tree::SimpleHashTreeReader::open(backend, dir_hash, dir_ref)
+        let it = hash_tree::SimpleHashTreeReader::open(backend, dir_hash, Some(dir_ref))
                      .expect("unable to open dir");
         for chunk in it {
             if chunk.is_empty() {

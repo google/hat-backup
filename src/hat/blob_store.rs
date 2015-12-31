@@ -145,9 +145,9 @@ impl BlobStoreBackend for FileBackend {
 
 #[derive(Debug, Clone, Eq, PartialEq, RustcEncodable, RustcDecodable)]
 pub struct BlobID {
-    name: Vec<u8>,
-    begin: usize,
-    end: usize,
+    pub name: Vec<u8>,
+    pub begin: usize,
+    pub end: usize,
 }
 
 impl BlobID {
@@ -166,10 +166,12 @@ pub enum Msg {
     /// containing the chunk has been committed to persistent storage (it is then safe to use the
     /// `BlobID` as persistent reference).
     Store(Vec<u8>, Box<FnBox(BlobID) + Send>),
-    /// Store a full named blob (used for writing root).
-    StoreNamed(String, Vec<u8>),
     /// Retrieve the data chunk identified by `BlobID`.
     Retrieve(BlobID),
+    /// Store a full named blob (used for writing root).
+    StoreNamed(String, Vec<u8>),
+    /// Retrieve full named blob.
+    RetrieveNamed(String),
     /// Tag helpers.
     Tag(BlobID, tags::Tag),
     TagAll(tags::Tag),
@@ -336,10 +338,6 @@ impl<B: BlobStoreBackend> MsgHandler<Msg, Reply> for BlobStore<B> {
                 // Flushing can be expensive, so try not block on it.
                 self.maybe_flush();
             }
-            Msg::StoreNamed(name, data) => {
-                self.backend.store(name.as_bytes(), &data[..]).ok();
-                reply(Reply::StoreNamedOk(name));
-            }
             Msg::Retrieve(id) => {
                 if id.begin == 0 && id.end == 0 {
                     return reply(Reply::RetrieveOk(vec![]));
@@ -347,6 +345,13 @@ impl<B: BlobStoreBackend> MsgHandler<Msg, Reply> for BlobStore<B> {
                 let blob = self.backend_read(&id.name[..]);
                 let chunk = &blob[id.begin..id.end];
                 return reply(Reply::RetrieveOk(chunk.to_vec()));
+            }
+            Msg::StoreNamed(name, data) => {
+                self.backend.store(name.as_bytes(), &data[..]).ok();
+                reply(Reply::StoreNamedOk(name));
+            }
+            Msg::RetrieveNamed(name) => {
+                reply(Reply::RetrieveOk(self.backend_read(name.as_bytes())));
             }
             Msg::Tag(blob, tag) => {
                 match self.blob_index.send_reply(blob_index::Msg::Tag(blob_index::BlobDesc {

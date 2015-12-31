@@ -148,8 +148,14 @@ impl HashStoreBackend {
 }
 
 impl HashTreeBackend for HashStoreBackend {
-    fn fetch_chunk(&mut self, hash: hash_index::Hash) -> Option<Vec<u8>> {
+    fn fetch_chunk(&mut self,
+                   hash: hash_index::Hash,
+                   persistent_ref: Option<blob_store::BlobID>)
+                   -> Option<Vec<u8>> {
         assert!(!hash.bytes.is_empty());
+        if let Some(r) = persistent_ref {
+            return self.fetch_chunk_from_persistent_ref(r);
+        }
         return self.fetch_chunk_from_hash(hash);
     }
 
@@ -259,7 +265,7 @@ impl
                             SimpleHashTreeReader::open(
                             HashStoreBackend::new(local_hash_index.clone(),
                                                   local_blob_store.clone()),
-                              local_hash, local_ref))
+                              local_hash, Some(local_ref)))
                  ));
             }
             return reply(Reply::ListResult(my_entries));

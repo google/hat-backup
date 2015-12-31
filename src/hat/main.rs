@@ -119,7 +119,10 @@ fn main() {
                                       .about("Commit a snapshot")
                                       .arg_from_usage("<NAME> 'Name of the snapshot'"))
                       .subcommand(SubCommand::with_name("meta-commit")
-                                      .about("Commit snapshot metadata (required for recover command"))
+                                      .about("Commit snapshot metadata (required for recover \
+                                              command"))
+                      .subcommand(SubCommand::with_name("recover")
+                                      .about("Recover list of commit'ed snapshots"))
                       .subcommand(SubCommand::with_name("delete")
                                       .about("Delete a snapshot")
                                       .args_from_usage("<NAME> 'Name of the snapshot family'
@@ -177,6 +180,12 @@ fn main() {
             let mut hat = hat::Hat::open_repository(&PathBuf::from("repo"), backend, MAX_BLOB_SIZE);
 
             hat.meta_commit();
+        }
+        ("recover", Some(_)) => {
+            let backend = blob_store::FileBackend::new(blob_dir());
+            let mut hat = hat::Hat::open_repository(&PathBuf::from("repo"), backend, MAX_BLOB_SIZE);
+
+            hat.recover();
         }
         ("commit", Some(matches)) => {
             let name = matches.value_of("NAME").unwrap().to_owned();
