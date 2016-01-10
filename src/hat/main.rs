@@ -35,6 +35,7 @@ extern crate test;
 extern crate time;
 
 // Rust bindings
+extern crate capnp;
 extern crate sodiumoxide;
 extern crate sqlite3;
 
@@ -80,6 +81,11 @@ mod gc_rc;
 mod tags;
 
 mod snapshot_index;
+
+
+pub mod root_capnp {
+    include!(concat!(env!("OUT_DIR"), "/root_capnp.rs"));
+}
 
 
 static MAX_BLOB_SIZE: usize = 4 * 1024 * 1024;

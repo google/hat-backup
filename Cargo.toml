@@ -2,12 +2,17 @@
 name = "hat-backup"
 version = "0.0.1-pre"
 authors = ["Johan Nielsen <sejr@google.com>"]
+build = "build.rs"
 
 [[bin]]
 name = "hat"
 path = "src/hat/main.rs"
 
+[build-dependencies]
+capnpc = "*"
+
 [dependencies]
+capnp = "*"
 rand = "*"
 quickcheck = "*"
 clap = "*"

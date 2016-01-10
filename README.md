@@ -68,9 +68,10 @@ There are a bunch of lacking functionality needed before a feature complete rele
 - Add "--pretend" to all subcommands and have it give a signal as to what would happen without it.
 
 ## Building from source
-First, make sure you have the required system libraries installed:
+First, make sure you have the required system libraries and tools installed:
 * libsodium
 * libsqlite3
+* capnproto (at least version 0.5.3)
 
 0. Install rust (try nightly or check commit log for compatible version)
    * Rust nighly is available from http://rust-lang.org

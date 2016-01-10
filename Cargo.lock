@@ -2,6 +2,8 @@
 name = "hat-backup"
 version = "0.0.1-pre"
 dependencies = [
+ "capnp 0.5.3 (registry+https://github.com/rust-lang/crates.io-index)",
+ "capnpc 0.5.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "clap 1.5.3 (registry+https://github.com/rust-lang/crates.io-index)",
  "num 0.1.28 (registry+https://github.com/rust-lang/crates.io-index)",
  "quickcheck 0.2.24 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -31,6 +33,27 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 name = "bitflags"
 version = "0.3.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[package]]
+name = "byteorder"
+version = "0.4.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[package]]
+name = "capnp"
+version = "0.5.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+dependencies = [
+ "byteorder 0.4.2 (registry+https://github.com/rust-lang/crates.io-index)",
+]
+
+[[package]]
+name = "capnpc"
+version = "0.5.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+dependencies = [
+ "capnp 0.5.3 (registry+https://github.com/rust-lang/crates.io-index)",
+]
 
 [[package]]
 name = "clap"

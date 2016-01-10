@@ -15,6 +15,7 @@
 //! High level Hat API
 
 
+use capnp;
 use rustc_serialize::json;
 use rustc_serialize::json::ToJson;
 use std::str;
@@ -52,27 +53,7 @@ use std::sync::atomic;
 use std::thread;
 
 use time;
-
-#[derive(RustcEncodable, RustcDecodable)]
-struct RootItem {
-    snapshot_id: i64,
-    family_name: String,
-    msg: String,
-    hash: Vec<u8>,
-    tree_ref: Vec<u8>,
-}
-
-impl ToJson for RootItem {
-    fn to_json(&self) -> json::Json {
-        let mut m = BTreeMap::new();
-        m.insert("snapshot_id".to_owned(), self.snapshot_id.to_json());
-        m.insert("family_name".to_owned(), self.family_name.to_json());
-        m.insert("msg".to_owned(), self.msg.to_json());
-        m.insert("hash".to_owned(), self.hash.to_owned().to_json());
-        m.insert("tree_ref".to_owned(), self.tree_ref.to_owned().to_json());
-        return m.to_json();
-    }
-}
+use root_capnp;
 
 
 struct GcBackend {
@@ -290,23 +271,29 @@ impl<B: 'static + BlobStoreBackend + Clone + Send> Hat<B> {
     }
 
     pub fn meta_commit(&mut self) {
-        let snapshots = match self.snapshot_index.send_reply(snapshot_index::Msg::ListAll) {
+        let all_snapshots = match self.snapshot_index.send_reply(snapshot_index::Msg::ListAll) {
             snapshot_index::Reply::All(lst) => lst,
             _ => panic!("Invalid reply from snapshot index"),
         };
 
         // TODO(jos): use a hash tree for this listing.
-        let mut v = Vec::new();
-        for snapshot in snapshots.into_iter() {
-            v.push(RootItem {
-                snapshot_id: snapshot.info.snapshot_id,
-                family_name: snapshot.family_name,
-                msg: snapshot.msg.unwrap_or("".to_owned()),
-                hash: snapshot.hash.to_owned().unwrap().bytes,
-                tree_ref: snapshot.tree_ref.to_owned().unwrap(),
-            });
+        let mut message = ::capnp::message::Builder::new_default();
+
+        {
+            let root = message.init_root::<root_capnp::snapshot_list::Builder>();
+            let mut snapshots = root.init_snapshots(all_snapshots.len() as u32);
+
+            for (i, snapshot) in all_snapshots.into_iter().enumerate() {
+                let mut s = snapshots.borrow().get(i as u32);
+                s.set_id(snapshot.info.snapshot_id);
+                s.set_family_name(&snapshot.family_name);
+                s.set_msg(&snapshot.msg.unwrap_or("".to_owned()));
+                s.set_hash(&snapshot.hash.unwrap().bytes);
+                s.set_tree_reference(&snapshot.tree_ref.unwrap());
+            }
         }
-        let listing = v.to_json().to_string().as_bytes().to_vec();
+        let mut listing = Vec::new();
+        capnp::serialize_packed::write_message(&mut listing, &message).unwrap();
 
         // TODO(jos): make sure this operation is atomic or resumable.
         match self.blob_store.send_reply(blob_store::Msg::StoreNamed("root".to_owned(), listing)) {
@@ -321,16 +308,23 @@ impl<B: 'static + BlobStoreBackend + Clone + Send> Hat<B> {
             blob_store::Reply::RetrieveOk(r) => r,
             _ => panic!("Could not read root file"),
         };
-        let snapshots: Vec<RootItem> = str::from_utf8(&root[..])
-                                           .ok()
-                                           .and_then(|s| json::decode(s).ok())
-                                           .expect("Could not parse root content");
-        for s in snapshots.into_iter() {
-            match self.snapshot_index.send_reply(snapshot_index::Msg::Recover(s.snapshot_id,
-                                                                              s.family_name,
-                                                                              s.msg,
-                                                                              s.hash,
-                                                                              s.tree_ref)) {
+        let message_reader =
+            capnp::serialize_packed::read_message(&mut &root[..],
+                                                  capnp::message::ReaderOptions::new())
+                .unwrap();
+        let snapshot_list = message_reader.get_root::<root_capnp::snapshot_list::Reader>().unwrap();
+
+        for s in snapshot_list.get_snapshots().unwrap().iter() {
+            match self.snapshot_index
+                      .send_reply(snapshot_index::Msg::Recover(s.get_id(),
+                                                               s.get_family_name()
+                                                                .unwrap()
+                                                                .to_owned(),
+                                                               s.get_msg().unwrap().to_owned(),
+                                                               s.get_hash().unwrap().to_vec(),
+                                                               s.get_tree_reference()
+                                                                .unwrap()
+                                                                .to_vec())) {
                 snapshot_index::Reply::RecoverOk => (),
                 _ => panic!("Invalid reply from snapshot index"),
             }
