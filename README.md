@@ -1,13 +1,13 @@
-# The Hat Backup System
-
-
+Hat Backup System
+=================
 Disclaimer: This is not an official Google product.
 
 Warning: This is an incomplete work-in-progress.
 
 Warning: This project does currently NOT support security or privacy.
 
-## Project
+Project
+-------
 The goal of hat is to provide a backend-agnostic snapshotting backup system,
 complete with deduplication of file blocks and efficient navigation of backed up
 files.
@@ -20,16 +20,15 @@ system into a few sub-systems with clear responsibility.
 
 Disclaimer: The above text describes our goal and not the current status.
 
-
-## Status
+Status
+------
 This software is pre-alpha and should be considered severely unstable.
 
 This software should not be considered ready for any use; the code is currently
 provided for development and experimentation purposes only.
 
-
-## Roadmap to a first stable release:
-
+Roadmap to a first stable release
+---------------------------------
 **Cleanup:** 
 
 I am currently focusing on reaching a feature complete and useful state and as a result, I am skipping quickly over some implementation details. The following items will have to be revisited and cleaned up before a stable release:
@@ -43,7 +42,6 @@ I am currently focusing on reaching a feature complete and useful state and as a
 - Go through uses of 'unwrap', 'expect' etc and remove them where possible; preferably, the caller/initiater should handle errors.
 - Think about parallelism and change the pipeline of threads to make better use of it.
 - Figure out how to battle test the code on supported platforms.
-
 
 **Functionality:**
 
@@ -60,14 +58,15 @@ There are a bunch of lacking functionality needed before a feature complete rele
 - Make the API used for talking to the external storage easy to change (put it in separate put/get/del programs).
 - Add encryption through NaCL/sodiumdioxide; preferably as late as possible.
 
-
 **Future wishlist: (not blocking first release)**
+
 - Output a dot graph over current hash trees to show dependencies and reuse.
 - FSCK style metadata verification ("check" subcommand?).
 - Commit snapshots while indexing them (possibly through "weak" snapshots that are ignored by GC). The purpose is to allow checking out a partial snapshot.
 - Add "--pretend" to all subcommands and have it give a signal as to what would happen without it.
 
-## Building from source
+Building from source
+--------------------
 First, make sure you have the required system libraries and tools installed:
 * libsodium
 * libsqlite3
@@ -81,17 +80,18 @@ First, make sure you have the required system libraries and tools installed:
 2. Let Cargo build everything needed:
    * `cargo build --release`
 
-## Try the hat executable using Cargo (the binary is in target/release/)
+Try the hat executable using Cargo (the binary is in target/release/)
+---------------------------------------------------------------------
    * `cargo run --release snapshot my_snapshot /some/path/to/dir`
    * `cargo run --release commit my_snapshot`
    * `cargo run --release checkout my_snapshot output/dir`
 
-
-## License and copyright
+License and copyright
+---------------------
 See the files LICENSE and AUTHORS.
 
-
-## Contributions
+Contributions
+-------------
 We gladly accept contributions/fixes/improvements etc. via GitHub pull requests
 or any other reasonable means, as long as the author has signed the Google
 Contributor License.
@@ -106,8 +106,8 @@ https://developers.google.com/open-source/cla/corporate
 Please read and sign one of the above versions of the Contributor License,
 before sending your contribution. Thanks!
 
-
-## Authors
+Authors
+-------
 See the AUTHORS.txt file.
 
 This project is inspired by a previous version of the system written in Haskell:
