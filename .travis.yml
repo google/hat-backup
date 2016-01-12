@@ -4,9 +4,12 @@ rust: nightly
 before_install:
   - sudo apt-get update -qq
   - wget https://download.libsodium.org/libsodium/releases/LATEST.tar.gz
-  - tar xzf LATEST.tar.gz
+  - tar zxf LATEST.tar.gz
   - cd libsodium-* && ./configure && make && sudo make install && sudo ldconfig
   - sudo apt-get install -y libsqlite3-dev
+  - wget https://capnproto.org/capnproto-c++-0.5.3.tar.gz
+  - tar zxf capnproto-c++-0.5.3.tar.gz
+  - cd capnproto-c++-0.5.3 && ./configure && sudo make install && sudo ldconfig
 
 script:
   - cargo build --verbose
