@@ -13,3 +13,10 @@ struct Snapshot {
 struct SnapshotList {
 	snapshots @0 :List(Snapshot);
 }
+
+struct ChunkRef {
+	blobId @0 :Data;
+
+	offset @1: Int64;
+	length @2: Int64;
+}

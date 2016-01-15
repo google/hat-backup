@@ -21,7 +21,7 @@
 // use serialize::json;
 
 use rustc_serialize::json;
-use blob_store::BlobID;
+use blob_store::ChunkRef;
 use hash_index::{Hash, HASHBYTES};
 use std::str;
 
@@ -43,7 +43,7 @@ impl HashRef {
 
 
 pub trait HashTreeBackend {
-    fn fetch_chunk(&mut self, Hash, Option<BlobID>) -> Option<Vec<u8>>;
+    fn fetch_chunk(&mut self, Hash, Option<ChunkRef>) -> Option<Vec<u8>>;
     fn fetch_payload(&mut self, Hash) -> Option<Vec<u8>>;
     fn fetch_persistent_ref(&mut self, Hash) -> Option<Vec<u8>>;
     fn insert_chunk(&mut self, Hash, i64, Option<Vec<u8>>, Vec<u8>) -> Vec<u8>;
@@ -249,7 +249,8 @@ impl<B: HashTreeBackend + Clone> SimpleHashTreeReader<B> {
         }
 
         let data = backend.clone()
-                          .fetch_chunk(root_hash.clone(), root_ref.map(|r| BlobID::from_bytes(r)))
+                          .fetch_chunk(root_hash.clone(),
+                                       root_ref.map(|r| ChunkRef::from_bytes(r)))
                           .expect("Could not find tree root hash.");
 
         match hash_refs_from_bytes(&data[..]) {
@@ -271,7 +272,7 @@ impl<B: HashTreeBackend + Clone> SimpleHashTreeReader<B> {
 
             let hash = Hash { bytes: child.hash };
             let data = self.backend
-                           .fetch_chunk(hash, Some(BlobID::from_bytes(child.persistent_ref)))
+                           .fetch_chunk(hash, Some(ChunkRef::from_bytes(child.persistent_ref)))
                            .expect("Invalid hash ref");
 
             match hash_refs_from_bytes(&data[..]) {
@@ -315,7 +316,7 @@ mod tests {
 
     use std::sync::{Arc, Mutex};
 
-    use blob_store::BlobID;
+    use blob_store::ChunkRef;
     use hash_index::Hash;
     use std::collections::{BTreeMap, BTreeSet};
     use quickcheck;
@@ -340,9 +341,9 @@ mod tests {
     }
 
     impl HashTreeBackend for MemoryBackend {
-        fn fetch_chunk(&mut self, hash: Hash, ref_opt: Option<BlobID>) -> Option<Vec<u8>> {
+        fn fetch_chunk(&mut self, hash: Hash, ref_opt: Option<ChunkRef>) -> Option<Vec<u8>> {
             let hash = match ref_opt {
-                Some(b) => Hash { bytes: b.name },  // blob names are chunk hashes.
+                Some(b) => Hash { bytes: b.blob_id },  // blob names are chunk hashes.
                 None => hash,
             };
             let guarded_chunks = self.chunks.lock().unwrap();
@@ -377,10 +378,10 @@ mod tests {
 
             let len = hash.bytes.len();
 
-            BlobID {
-                name: hash.bytes,
-                begin: 0,
-                end: len,
+            ChunkRef {
+                blob_id: hash.bytes,
+                offset: 0,
+                length: len,
             }
             .as_bytes()
         }

@@ -130,7 +130,7 @@ impl HashStoreBackend {
         assert!(!hash.bytes.is_empty());
         match self.hash_index.send_reply(hash_index::Msg::FetchPersistentRef(hash)) {
             hash_index::Reply::PersistentRef(chunk_ref_bytes) => {
-                let chunk_ref = blob_store::BlobID::from_bytes(chunk_ref_bytes);
+                let chunk_ref = blob_store::ChunkRef::from_bytes(chunk_ref_bytes);
                 self.fetch_chunk_from_persistent_ref(chunk_ref)
             }
             _ => None,  // TODO: Do we need to distinguish `missing` from `unknown ref`?
@@ -138,7 +138,7 @@ impl HashStoreBackend {
     }
 
     fn fetch_chunk_from_persistent_ref(&mut self,
-                                       chunk_ref: blob_store::BlobID)
+                                       chunk_ref: blob_store::ChunkRef)
                                        -> Option<Vec<u8>> {
         match self.blob_store.send_reply(blob_store::Msg::Retrieve(chunk_ref)) {
             blob_store::Reply::RetrieveOk(chunk) => Some(chunk),
@@ -150,7 +150,7 @@ impl HashStoreBackend {
 impl HashTreeBackend for HashStoreBackend {
     fn fetch_chunk(&mut self,
                    hash: hash_index::Hash,
-                   persistent_ref: Option<blob_store::BlobID>)
+                   persistent_ref: Option<blob_store::ChunkRef>)
                    -> Option<Vec<u8>> {
         assert!(!hash.bytes.is_empty());
         if let Some(r) = persistent_ref {
@@ -204,7 +204,7 @@ impl HashTreeBackend for HashStoreBackend {
                 // We came first: this data-chunk is ours to process.
                 let local_hash_index = self.hash_index.clone();
 
-                let callback = Box::new(move |blobid: blob_store::BlobID| {
+                let callback = Box::new(move |blobid: blob_store::ChunkRef| {
                     local_hash_index.send_reply(hash_index::Msg::Commit(hash, blobid.as_bytes()));
                 });
                 match self.blob_store.send_reply(blob_store::Msg::Store(chunk, callback)) {

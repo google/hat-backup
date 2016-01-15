@@ -26,7 +26,7 @@ use tags;
 
 use blob_index::BlobIndex;
 use blob_store;
-use blob_store::{BlobID, BlobStore, BlobStoreProcess, BlobStoreBackend};
+use blob_store::{ChunkRef, BlobStore, BlobStoreProcess, BlobStoreBackend};
 
 use hash_index;
 use hash_index::{GcData, Hash, HashIndex, HashIndexProcess};
@@ -727,7 +727,7 @@ impl<B: 'static + BlobStoreBackend + Clone + Send> Hat<B> {
         for entry in entries.iter() {
             if let Some(bytes) = entry.persistent_ref {
                 live_blobs += 1;
-                let pref = BlobID::from_bytes(bytes);
+                let pref = ChunkRef::from_bytes(bytes);
                 match self.blob_store.send_reply(blob_store::Msg::Tag(pref, tags::Tag::Reserved)) {
                     blob_store::Reply::Ok => (),
                     _ => panic!("Unexpected reply from blob store."),

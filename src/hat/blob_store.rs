@@ -14,11 +14,13 @@
 
 //! Combines data chunks into larger blobs to be stored externally.
 
+use capnp;
+use root_capnp;
+
 use std::boxed::FnBox;
 use std::sync::{Arc, Mutex};
 use std::thread;
 
-use rustc_serialize;
 use rustc_serialize::hex::ToHex;
 
 use std::collections::BTreeMap;
@@ -26,7 +28,6 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::io::{Read, Write};
 use std::path::PathBuf;
-use std::str;
 
 use process::{Process, MsgHandler};
 
@@ -143,20 +144,39 @@ impl BlobStoreBackend for FileBackend {
 }
 
 
-#[derive(Debug, Clone, Eq, PartialEq, RustcEncodable, RustcDecodable)]
-pub struct BlobID {
-    pub name: Vec<u8>,
-    pub begin: usize,
-    pub end: usize,
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct ChunkRef {
+    pub blob_id: Vec<u8>,
+    pub offset: usize,
+    pub length: usize,
 }
 
-impl BlobID {
-    pub fn from_bytes(bytes: Vec<u8>) -> BlobID {
-        return rustc_serialize::json::decode(str::from_utf8(&bytes[..]).unwrap()).unwrap();
+impl ChunkRef {
+    pub fn from_bytes(bytes: Vec<u8>) -> ChunkRef {
+        let reader =
+            ::capnp::serialize_packed::read_message(&mut &bytes[..],
+                                                    ::capnp::message::ReaderOptions::new())
+                .unwrap();
+        let msg = reader.get_root::<root_capnp::chunk_ref::Reader>().unwrap();
+
+        ChunkRef {
+            blob_id: msg.get_blob_id().unwrap().to_owned(),
+            offset: msg.get_offset() as usize,
+            length: msg.get_length() as usize,
+        }
     }
 
     pub fn as_bytes(&self) -> Vec<u8> {
-        return rustc_serialize::json::encode(&self).unwrap().as_bytes().to_vec();
+        let mut message = ::capnp::message::Builder::new_default();
+        {
+            let mut root = message.init_root::<root_capnp::chunk_ref::Builder>();
+            root.set_blob_id(&self.blob_id[..]);
+            root.set_offset(self.offset as i64);
+            root.set_length(self.length as i64);
+        }
+        let mut out = Vec::new();
+        capnp::serialize_packed::write_message(&mut out, &message).unwrap();
+        out
     }
 }
 
@@ -164,16 +184,16 @@ impl BlobID {
 pub enum Msg {
     /// Store a new data chunk into the current blob. The callback is triggered after the blob
     /// containing the chunk has been committed to persistent storage (it is then safe to use the
-    /// `BlobID` as persistent reference).
-    Store(Vec<u8>, Box<FnBox(BlobID) + Send>),
-    /// Retrieve the data chunk identified by `BlobID`.
-    Retrieve(BlobID),
+    /// `ChunkRef` as persistent reference).
+    Store(Vec<u8>, Box<FnBox(ChunkRef) + Send>),
+    /// Retrieve the data chunk identified by `ChunkRef`.
+    Retrieve(ChunkRef),
     /// Store a full named blob (used for writing root).
     StoreNamed(String, Vec<u8>),
     /// Retrieve full named blob.
     RetrieveNamed(String),
     /// Tag helpers.
-    Tag(BlobID, tags::Tag),
+    Tag(ChunkRef, tags::Tag),
     TagAll(tags::Tag),
     DeleteByTag(tags::Tag),
     /// Flush the current blob, independent of its size.
@@ -183,7 +203,7 @@ pub enum Msg {
 
 #[derive(Eq, PartialEq, Debug)]
 pub enum Reply {
-    StoreOk(BlobID),
+    StoreOk(ChunkRef),
     StoreNamedOk(String),
     RetrieveOk(Vec<u8>),
     FlushOk,
@@ -197,7 +217,7 @@ pub struct BlobStore<B> {
     blob_index: BlobIndexProcess,
     blob_desc: blob_index::BlobDesc,
 
-    buffer_data: Vec<(BlobID, Vec<u8>, Box<FnBox(BlobID) + Send>)>,
+    buffer_data: Vec<(ChunkRef, Vec<u8>, Box<FnBox(ChunkRef) + Send>)>,
     buffer_data_len: usize,
 
     max_blob_size: usize,
@@ -310,27 +330,27 @@ impl<B: BlobStoreBackend> BlobStore<B> {
 impl<B: BlobStoreBackend> MsgHandler<Msg, Reply> for BlobStore<B> {
     fn handle(&mut self, msg: Msg, reply: Box<Fn(Reply)>) {
         match msg {
-            Msg::Store(blob, callback) => {
-                if blob.is_empty() {
-                    let id = BlobID {
-                        name: vec![0],
-                        begin: 0,
-                        end: 0,
+            Msg::Store(chunk, callback) => {
+                if chunk.is_empty() {
+                    let id = ChunkRef {
+                        blob_id: vec![0],
+                        offset: 0,
+                        length: 0,
                     };
                     let cb_id = id.clone();
                     thread::spawn(move || callback(cb_id));
                     return reply(Reply::StoreOk(id));
                 }
 
-                let new_size = self.buffer_data_len + blob.len();
-                let id = BlobID {
-                    name: self.blob_desc.name.clone(),
-                    begin: self.buffer_data_len,
-                    end: new_size,
+                let id = ChunkRef {
+                    blob_id: self.blob_desc.name.clone(),
+                    offset: self.buffer_data_len,
+                    length: chunk.len(),
                 };
 
+                let new_size = self.buffer_data_len + chunk.len();
                 self.buffer_data_len = new_size;
-                self.buffer_data.push((id.clone(), blob, callback));
+                self.buffer_data.push((id.clone(), chunk, callback));
 
                 // To avoid unnecessary blocking, we reply with the ID *before* possibly flushing.
                 reply(Reply::StoreOk(id));
@@ -339,11 +359,11 @@ impl<B: BlobStoreBackend> MsgHandler<Msg, Reply> for BlobStore<B> {
                 self.maybe_flush();
             }
             Msg::Retrieve(id) => {
-                if id.begin == 0 && id.end == 0 {
+                if id.offset == 0 && id.length == 0 {
                     return reply(Reply::RetrieveOk(vec![]));
                 }
-                let blob = self.backend_read(&id.name[..]);
-                let chunk = &blob[id.begin..id.end];
+                let blob = self.backend_read(&id.blob_id[..]);
+                let chunk = &blob[id.offset..id.offset + id.length];
                 return reply(Reply::RetrieveOk(chunk.to_vec()));
             }
             Msg::StoreNamed(name, data) => {
@@ -353,10 +373,10 @@ impl<B: BlobStoreBackend> MsgHandler<Msg, Reply> for BlobStore<B> {
             Msg::RetrieveNamed(name) => {
                 reply(Reply::RetrieveOk(self.backend_read(name.as_bytes())));
             }
-            Msg::Tag(blob, tag) => {
+            Msg::Tag(chunk, tag) => {
                 match self.blob_index.send_reply(blob_index::Msg::Tag(blob_index::BlobDesc {
                                                                           id: 0,
-                                                                          name: blob.name,
+                                                                          name: chunk.blob_id,
                                                                       },
                                                                       tag)) {
                     blob_index::Reply::Ok => reply(Reply::Ok),
@@ -496,7 +516,7 @@ pub mod tests {
             // Non-empty chunks must be in the backend now:
             for &(ref id, chunk) in ids.iter() {
                 if chunk.len() > 0 {
-                    match backend.retrieve(&id.name[..]) {
+                    match backend.retrieve(&id.blob_id[..]) {
                         Ok(_) => (),
                         Err(e) => panic!(e),
                     }
@@ -543,7 +563,7 @@ pub mod tests {
             // Non-empty chunks must be in the backend now:
             for &(ref id, chunk) in ids.iter() {
                 if chunk.len() > 0 {
-                    match backend.retrieve(&id.name[..]) {
+                    match backend.retrieve(&id.blob_id[..]) {
                         Ok(_) => (),
                         Err(e) => panic!(e),
                     }
@@ -565,13 +585,13 @@ pub mod tests {
 
     #[test]
     fn blobid_identity() {
-        fn prop(name: Vec<u8>, begin: usize, end: usize) -> bool {
-            let blob_id = BlobID {
-                name: name.to_vec(),
-                begin: begin,
-                end: end,
+        fn prop(name: Vec<u8>, offset: usize, length: usize) -> bool {
+            let blob_id = ChunkRef {
+                blob_id: name.to_vec(),
+                offset: offset,
+                length: length,
             };
-            BlobID::from_bytes(blob_id.as_bytes()) == blob_id
+            ChunkRef::from_bytes(blob_id.as_bytes()) == blob_id
         }
         quickcheck::quickcheck(prop as fn(Vec<u8>, usize, usize) -> bool);
     }
