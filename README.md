@@ -6,6 +6,8 @@ Warning: This is an incomplete work-in-progress.
 
 Warning: This project does currently NOT support security or privacy.
 
+[![Build Status](https://travis-ci.org/google/hat-backup.svg?branch=master)](https://travis-ci.org/google/hat-backup)
+
 Project
 -------
 The goal of hat is to provide a backend-agnostic snapshotting backup system,
