@@ -152,31 +152,38 @@ pub struct ChunkRef {
 }
 
 impl ChunkRef {
-    pub fn from_bytes(bytes: Vec<u8>) -> ChunkRef {
-        let reader =
-            ::capnp::serialize_packed::read_message(&mut &bytes[..],
-                                                    ::capnp::message::ReaderOptions::new())
-                .unwrap();
-        let msg = reader.get_root::<root_capnp::chunk_ref::Reader>().unwrap();
-
-        ChunkRef {
-            blob_id: msg.get_blob_id().unwrap().to_owned(),
-            offset: msg.get_offset() as usize,
-            length: msg.get_length() as usize,
-        }
+    pub fn from_bytes(bytes: &mut &[u8]) -> Result<ChunkRef, capnp::Error> {
+        let reader = try!(capnp::serialize_packed::read_message(bytes,
+                                                       capnp::message::ReaderOptions::new()));
+        let root = try!(reader.get_root::<root_capnp::chunk_ref::Reader>());
+        return Ok(try!(ChunkRef::read_msg(&root)));
     }
 
     pub fn as_bytes(&self) -> Vec<u8> {
         let mut message = ::capnp::message::Builder::new_default();
         {
             let mut root = message.init_root::<root_capnp::chunk_ref::Builder>();
-            root.set_blob_id(&self.blob_id[..]);
-            root.set_offset(self.offset as i64);
-            root.set_length(self.length as i64);
+            self.populate_msg(root.borrow());
         }
+
         let mut out = Vec::new();
         capnp::serialize_packed::write_message(&mut out, &message).unwrap();
         out
+    }
+
+    pub fn populate_msg(&self, msg: root_capnp::chunk_ref::Builder) {
+        let mut msg = msg;
+        msg.set_blob_id(&self.blob_id[..]);
+        msg.set_offset(self.offset as i64);
+        msg.set_length(self.length as i64);
+    }
+
+    pub fn read_msg(msg: &root_capnp::chunk_ref::Reader) -> Result<ChunkRef, capnp::Error> {
+        Ok(ChunkRef {
+            blob_id: try!(msg.get_blob_id()).to_owned(),
+            offset: msg.get_offset() as usize,
+            length: msg.get_length() as usize,
+        })
     }
 }
 
@@ -591,7 +598,8 @@ pub mod tests {
                 offset: offset,
                 length: length,
             };
-            ChunkRef::from_bytes(blob_id.as_bytes()) == blob_id
+            let blob_id_bytes = blob_id.as_bytes();
+            ChunkRef::from_bytes(&mut &blob_id_bytes[..]).unwrap() == blob_id
         }
         quickcheck::quickcheck(prop as fn(Vec<u8>, usize, usize) -> bool);
     }

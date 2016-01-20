@@ -14,6 +14,9 @@
 
 //! Local state for keys in the snapshot in progress (the "index").
 
+use blob_store;
+use hash_index;
+
 use time::Duration;
 
 use periodic_timer::PeriodicTimer;
@@ -63,7 +66,7 @@ pub enum Msg<KeyEntryT> {
 
     /// Update the `payload` and `persistent_ref` of an entry.
     /// Returns `UpdateOk`.
-    UpdateDataHash(KeyEntryT, Option<Vec<u8>>, Option<Vec<u8>>),
+    UpdateDataHash(KeyEntryT, Option<hash_index::Hash>, Option<blob_store::ChunkRef>),
 
     /// List a directory (aka. `level`) in the index.
     /// Returns `ListResult` with all the entries under the given parent.
@@ -77,7 +80,13 @@ pub enum Reply<KeyEntryT> {
     Entry(KeyEntryT),
     NotFound(KeyEntryT),
     UpdateOk,
-    ListResult(Vec<(u64, Vec<u8>, u64, u64, u64, Vec<u8>, Vec<u8>)>),
+    ListResult(Vec<(u64,
+                    Vec<u8>,
+                    u64,
+                    u64,
+                    u64,
+                    Vec<u8>,
+                    Option<blob_store::ChunkRef>)>),
     FlushOk,
 }
 
@@ -241,8 +250,10 @@ impl<A: KeyEntry<A>> MsgHandler<Msg<A>, Reply<A>> for KeyIndex {
                   WHERE \
                                                        parent={:?} AND rowid={:?} AND \
                                                        IFNULL(modified,0)<={}",
-                                                      hash_opt.unwrap().to_hex(),
-                                                      persistent_ref_opt.unwrap().to_hex(),
+                                                      hash_opt.unwrap().bytes.to_hex(),
+                                                      persistent_ref_opt.unwrap()
+                                                                        .as_bytes()
+                                                                        .to_hex(),
                                                       modified,
                                                       parent,
                                                       entry.id().expect("UpdateDataHash"),
@@ -253,8 +264,10 @@ impl<A: KeyEntry<A>> MsgHandler<Msg<A>, Reply<A>> for KeyIndex {
                                                        persistent_ref=x'{}'
                  \
                                                        WHERE parent={:?} AND rowid={:?}",
-                                                      hash_opt.unwrap().to_hex(),
-                                                      persistent_ref_opt.unwrap().to_hex(),
+                                                      hash_opt.unwrap().bytes.to_hex(),
+                                                      persistent_ref_opt.unwrap()
+                                                                        .as_bytes()
+                                                                        .to_hex(),
                                                       parent,
                                                       entry.id().expect("UpdateDataHash, None")));
                         }
@@ -314,7 +327,16 @@ impl<A: KeyEntry<A>> MsgHandler<Msg<A>, Reply<A>> for KeyIndex {
                     let modified = cursor.get_i64(3);
                     let accessed = cursor.get_i64(4);
                     let hash = cursor.get_blob(5).unwrap_or(&[]).to_owned();
-                    let persistent_ref = cursor.get_blob(6).unwrap_or(&[]).to_owned();
+                    let persistent_ref =
+                        cursor.get_blob(6)
+                              .and_then(|b| {
+                                  if b.is_empty() {
+                                      None
+                                  } else {
+                                      Some(blob_store::ChunkRef::from_bytes(&mut &b.to_owned()[..])
+                                               .unwrap())
+                                  }
+                              });
 
                     listing.push((id,
                                   name,

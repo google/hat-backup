@@ -26,7 +26,7 @@ use tags;
 
 use blob_index::BlobIndex;
 use blob_store;
-use blob_store::{ChunkRef, BlobStore, BlobStoreProcess, BlobStoreBackend};
+use blob_store::{BlobStore, BlobStoreProcess, BlobStoreBackend};
 
 use hash_index;
 use hash_index::{GcData, Hash, HashIndex, HashIndexProcess};
@@ -177,14 +177,17 @@ fn list_snapshot(backend: &key_store::HashStoreBackend,
                  out: &mpsc::Sender<BTreeMap<String, json::Json>>,
                  family: &Family,
                  dir_hash: Hash,
-                 dir_ref: Vec<u8>) {
+                 dir_ref: blob_store::ChunkRef) {
     for o in family.fetch_dir_data(dir_hash, dir_ref, backend.clone()) {
         for d in o.as_array().unwrap().into_iter() {
             if let Some(m) = d.as_object() {
                 out.send(m.clone()).unwrap();
 
                 if let Some(pref_raw) = m.get("dir_ref").and_then(|x| x.as_array()) {
-                    let pref = pref_raw.iter().map(|x| x.as_i64().unwrap() as u8).collect();
+                    let pref_bytes: Vec<u8> = pref_raw.iter()
+                                                      .map(|x| x.as_i64().unwrap() as u8)
+                                                      .collect();
+                    let pref = blob_store::ChunkRef::from_bytes(&mut &pref_bytes[..]).unwrap();
                     let bytes = m.get("dir_hash")
                                  .and_then(|x| x.as_array())
                                  .unwrap()
@@ -315,6 +318,8 @@ impl<B: 'static + BlobStoreBackend + Clone + Send> Hat<B> {
         let snapshot_list = message_reader.get_root::<root_capnp::snapshot_list::Reader>().unwrap();
 
         for s in snapshot_list.get_snapshots().unwrap().iter() {
+            let tree_ref = blob_store::ChunkRef::from_bytes(&mut s.get_tree_reference().unwrap())
+                               .unwrap();
             match self.snapshot_index
                       .send_reply(snapshot_index::Msg::Recover(s.get_id(),
                                                                s.get_family_name()
@@ -322,9 +327,7 @@ impl<B: 'static + BlobStoreBackend + Clone + Send> Hat<B> {
                                                                 .to_owned(),
                                                                s.get_msg().unwrap().to_owned(),
                                                                s.get_hash().unwrap().to_vec(),
-                                                               s.get_tree_reference()
-                                                                .unwrap()
-                                                                .to_vec())) {
+                                                               tree_ref)) {
                 snapshot_index::Reply::RecoverOk => (),
                 _ => panic!("Invalid reply from snapshot index"),
             }
@@ -529,9 +532,9 @@ impl<B: 'static + BlobStoreBackend + Clone + Send> Hat<B> {
         let (_info, dir_hash, dir_ref) =
             match self.snapshot_index
                       .send_reply(snapshot_index::Msg::Latest(family_name.clone())) {
-                snapshot_index::Reply::Snapshot(Some((i, h, r))) => (i, h, r),
-                snapshot_index::Reply::Snapshot(None) => {
-                    panic!("Tried to checkout family '{}' before first commit",
+                snapshot_index::Reply::Snapshot(Some((i, h, Some(r)))) => (i, h, r),
+                snapshot_index::Reply::Snapshot(_) => {
+                    panic!("Tried to checkout family '{}' before first completed commit",
                            family_name)
                 }
                 _ => panic!("Unexpected result from snapshot index"),
@@ -548,7 +551,7 @@ impl<B: 'static + BlobStoreBackend + Clone + Send> Hat<B> {
                         family: &Family,
                         output: &mut PathBuf,
                         dir_hash: Hash,
-                        dir_ref: Vec<u8>) {
+                        dir_ref: blob_store::ChunkRef) {
         fs::create_dir_all(&output).unwrap();
         for o in family.fetch_dir_data(dir_hash, dir_ref, self.hash_backend.clone()) {
             for d in o.as_array().unwrap().iter() {
@@ -572,22 +575,23 @@ impl<B: 'static + BlobStoreBackend + Clone + Send> Hat<B> {
                                  .map(|y| y.as_i64().unwrap() as u8);
                     let hash = Hash { bytes: bytes.collect() };
 
-                    let pref = m.get("dir_ref")
-                                .or(m.get("data_ref"))
-                                .and_then(|x| x.as_array())
-                                .unwrap()
-                                .iter()
-                                .map(|x| x.as_i64().unwrap() as u8)
-                                .collect();
+                    let pref_bytes: Vec<u8> = m.get("dir_ref")
+                                               .or(m.get("data_ref"))
+                                               .and_then(|x| x.as_array())
+                                               .unwrap()
+                                               .iter()
+                                               .map(|x| x.as_i64().unwrap() as u8)
+                                               .collect();
+                    let pref = blob_store::ChunkRef::from_bytes(&mut &pref_bytes[..]);
 
                     if m.contains_key("dir_hash") {
-                        self.checkout_dir_ref(family, output, hash, pref);
+                        self.checkout_dir_ref(family, output, hash, pref.unwrap());
                     } else if m.contains_key("data_hash") {
                         let mut fd = fs::File::create(&output).unwrap();
                         let tree_opt = hash_tree::SimpleHashTreeReader::open(self.hash_backend
                                                                                  .clone(),
                                                                              hash,
-                                                                             Some(pref));
+                                                                             pref.ok());
                         if let Some(tree) = tree_opt {
                             family.write_file_chunks(&mut fd, tree);
                         }
@@ -607,9 +611,9 @@ impl<B: 'static + BlobStoreBackend + Clone + Send> Hat<B> {
                       .send_reply(snapshot_index::Msg::Lookup(family_name.clone(), snapshot_id)) {
                 snapshot_index::Reply::Snapshot(opt) => {
                     match opt {
-                        Some((i, h, r)) => (i, h, r),
-                        None => {
-                            panic!("No such snapshot: {} with id {:?}",
+                        Some((i, h, Some(r))) => (i, h, r),
+                        _ => {
+                            panic!("No complete snapshot found for family {} with id {:?}",
                                    family_name,
                                    snapshot_id)
                         }
@@ -725,9 +729,8 @@ impl<B: 'static + BlobStoreBackend + Clone + Send> Hat<B> {
         }
         let mut live_blobs = 0;
         for entry in entries.iter() {
-            if let Some(bytes) = entry.persistent_ref {
+            if let Some(pref) = entry.persistent_ref {
                 live_blobs += 1;
-                let pref = ChunkRef::from_bytes(bytes);
                 match self.blob_store.send_reply(blob_store::Msg::Tag(pref, tags::Tag::Reserved)) {
                     blob_store::Reply::Ok => (),
                     _ => panic!("Unexpected reply from blob store."),
@@ -1031,7 +1034,7 @@ impl Family {
 
     pub fn fetch_dir_data<HTB: hash_tree::HashTreeBackend + Clone>(&self,
                                                                    dir_hash: Hash,
-                                                                   dir_ref: Vec<u8>,
+                                                                   dir_ref: blob_store::ChunkRef,
                                                                    backend: HTB)
                                                                    -> Vec<json::Json> {
         let mut out = Vec::new();
@@ -1048,7 +1051,7 @@ impl Family {
         out
     }
 
-    pub fn commit(&mut self, hash_ch: mpsc::Sender<Hash>) -> (Hash, Vec<u8>) {
+    pub fn commit(&mut self, hash_ch: mpsc::Sender<Hash>) -> (Hash, blob_store::ChunkRef) {
         let mut top_tree = self.key_store.hash_tree_writer();
         self.commit_to_tree(&mut top_tree, None, hash_ch);
 
@@ -1072,7 +1075,8 @@ impl Family {
             if !hash.is_empty() {
                 // This is a file, store its data hash:
                 m.insert("data_hash".to_owned(), hash.to_json());
-                m.insert("data_ref".to_owned(), data_ref.to_json());
+                m.insert("data_ref".to_owned(),
+                         data_ref.unwrap().as_bytes().to_json());
                 hash_ch.send(Hash { bytes: hash }).unwrap();
             } else {
                 drop(hash);
@@ -1083,7 +1087,7 @@ impl Family {
                 // Store a reference for the sub-tree in our tree:
                 let (dir_hash, dir_ref) = inner_tree.hash();
                 m.insert("dir_hash".to_owned(), dir_hash.bytes.to_json());
-                m.insert("dir_ref".to_owned(), dir_ref.to_json());
+                m.insert("dir_ref".to_owned(), dir_ref.as_bytes().to_json());
                 hash_ch.send(dir_hash).unwrap();
             }
 

@@ -14,6 +14,7 @@
 
 //! Local state for known hashes and their external location (blob reference).
 
+use blob_store;
 use std::boxed::FnBox;
 use std::sync::mpsc;
 use time::Duration;
@@ -75,9 +76,9 @@ pub struct HashEntry {
     /// A local payload to store inside the index, along with this entry.
     pub payload: Option<Vec<u8>>,
 
-    /// A reference to a location in the external persistent storage (a blob reference) that
+    /// A reference to a location in the external persistent storage (a chunk reference) that
     /// contains the data for this entry (e.g. an object-name and a byte range).
-    pub persistent_ref: Option<Vec<u8>>,
+    pub persistent_ref: Option<blob_store::ChunkRef>,
 }
 
 pub enum Msg {
@@ -113,7 +114,7 @@ pub enum Msg {
     /// A `Hash` is committed when it has been `finalized` in the external storage. `Commit`
     /// includes the persistent reference that the content is available at.
     /// Returns CommitOk.
-    Commit(Hash, Vec<u8>),
+    Commit(Hash, blob_store::ChunkRef),
 
     /// List all hash entries.
     List,
@@ -147,7 +148,7 @@ pub enum Reply {
     Entry(HashEntry),
 
     Payload(Option<Vec<u8>>),
-    PersistentRef(Vec<u8>),
+    PersistentRef(blob_store::ChunkRef),
 
     ReserveOk,
     CommitOk,
@@ -170,7 +171,7 @@ struct QueueEntry {
     id: i64,
     level: i64,
     payload: Option<Vec<u8>>,
-    persistent_ref: Option<Vec<u8>>,
+    persistent_ref: Option<blob_store::ChunkRef>,
 }
 
 pub struct HashIndex {
@@ -277,17 +278,25 @@ impl HashIndex {
         result_opt.map(|mut result| {
             let id = result.get_i64(0);
             let level = result.get_int(1) as i64;
-            let payload: Vec<u8> = result.get_blob(2).unwrap_or(&[]).to_vec();
-            let persistent_ref: Vec<u8> = result.get_blob(3).unwrap_or(&[]).to_vec();
+            let payload = result.get_blob(2).and_then(|b| {
+                if b.is_empty() {
+                    None
+                } else {
+                    Some(b.to_vec())
+                }
+            });
+            let persistent_ref = result.get_blob(3).and_then(|b| {
+                if b.is_empty() {
+                    None
+                } else {
+                    Some(blob_store::ChunkRef::from_bytes(&mut &b.to_owned()[..]).unwrap())
+                }
+            });
             QueueEntry {
                 id: id,
                 level: level,
-                payload: if payload.is_empty() {
-                    None
-                } else {
-                    Some(payload)
-                },
-                persistent_ref: Some(persistent_ref),
+                payload: payload,
+                persistent_ref: persistent_ref,
             }
         })
     }
@@ -312,7 +321,13 @@ impl HashIndex {
                         Some(p.to_vec())
                     }
                 }),
-                persistent_ref: result.get_blob(3).map(|p| p.to_vec()),
+                persistent_ref: result.get_blob(3).and_then(|b| {
+                    if b.is_empty() {
+                        None
+                    } else {
+                        Some(blob_store::ChunkRef::from_bytes(&mut &b.to_owned()[..]).unwrap())
+                    }
+                }),
             }
         });
     }
@@ -388,7 +403,8 @@ impl HashIndex {
                                insert_stm.bind_param(2, &Blob(hash_bytes.clone())));
                     assert_eq!(SQLITE_OK, insert_stm.bind_param(3, &Integer64(level)));
                     assert_eq!(SQLITE_OK, insert_stm.bind_param(4, &Blob(payload)));
-                    assert_eq!(SQLITE_OK, insert_stm.bind_param(5, &Blob(persistent_ref)));
+                    assert_eq!(SQLITE_OK,
+                               insert_stm.bind_param(5, &Blob(persistent_ref.as_bytes())));
 
                     assert_eq!(SQLITE_DONE, insert_stm.step());
 
@@ -509,11 +525,11 @@ impl HashIndex {
                                   family_id)[..]);
     }
 
-    fn commit(&mut self, hash: &Hash, blob_ref: &[u8]) {
+    fn commit(&mut self, hash: &Hash, chunk_ref: blob_store::ChunkRef) {
         // Update persistent reference for ready hash
         let queue_entry = self.locate(hash).expect("hash was committed");
         self.queue.update_value(&hash.bytes, |old_qe| {
-            QueueEntry { persistent_ref: Some(blob_ref.to_owned()), ..old_qe.clone() }
+            QueueEntry { persistent_ref: Some(chunk_ref.clone()), ..old_qe.clone() }
         });
         self.queue.set_ready(queue_entry.id);
 
@@ -532,7 +548,8 @@ impl HashIndex {
                 break;
             }
             assert_eq!(status, SQLITE_ROW);
-            if let Err(_) = sender.send(HashEntry {
+            if let Err(_) =
+                   sender.send(HashEntry {
                 hash: Hash { bytes: cursor.get_blob(0).unwrap_or(&[]).to_vec() },
                 level: cursor.get_int(1) as i64,
                 payload: cursor.get_blob(2).and_then(|p| {
@@ -542,7 +559,13 @@ impl HashIndex {
                         Some(p.to_vec())
                     }
                 }),
-                persistent_ref: cursor.get_blob(3).map(|p| p.to_vec()),
+                persistent_ref: cursor.get_blob(3).and_then(|b| {
+                    if b.is_empty() {
+                        None
+                    } else {
+                        Some(blob_store::ChunkRef::from_bytes(&mut &b.to_owned()[..]).unwrap())
+                    }
+                }),
             }) {
                 break;
             }
@@ -651,7 +674,7 @@ impl MsgHandler<Msg, Reply> for HashIndex {
 
             Msg::Commit(hash, persistent_ref) => {
                 assert!(!hash.bytes.is_empty());
-                self.commit(&hash, &persistent_ref);
+                self.commit(&hash, persistent_ref);
                 return reply(Reply::CommitOk);
             }
 

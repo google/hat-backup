@@ -20,3 +20,12 @@ struct ChunkRef {
 	offset @1: Int64;
 	length @2: Int64;
 }
+
+struct HashRef {
+	hash @0 :Data;
+	chunkRef @1 :ChunkRef;
+}
+
+struct HashRefList {
+	hashRefs @0 :List(HashRef);
+}

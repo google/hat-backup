@@ -23,6 +23,7 @@ use sqlite3::BindArg::{Blob, Integer64};
 use sqlite3::types::ResultCode::{SQLITE_ERROR, SQLITE_ROW, SQLITE_DONE, SQLITE_OK};
 use sqlite3::open;
 
+use blob_store;
 use hash_index;
 
 #[derive(Clone, Debug)]
@@ -38,7 +39,7 @@ pub enum Msg {
     Reserve(String),
 
     /// Update existing snapshot.
-    Update(SnapshotInfo, hash_index::Hash, Vec<u8>),
+    Update(SnapshotInfo, hash_index::Hash, blob_store::ChunkRef),
 
     /// ReadyCommit.
     ReadyCommit(SnapshotInfo),
@@ -71,14 +72,14 @@ pub enum Msg {
     Flush,
 
     /// Recover snapshot information.
-    Recover(i64, String, String, Vec<u8>, Vec<u8>),
+    Recover(i64, String, String, Vec<u8>, blob_store::ChunkRef),
 }
 
 pub enum Reply {
     Reserved(SnapshotInfo),
     UpdateOk,
     CommitOk,
-    Snapshot(Option<(SnapshotInfo, hash_index::Hash, Vec<u8>)>),
+    Snapshot(Option<(SnapshotInfo, hash_index::Hash, Option<blob_store::ChunkRef>)>),
     NotDone(Vec<SnapshotStatus>),
     All(Vec<SnapshotStatus>),
     FlushOk,
@@ -208,10 +209,11 @@ impl SnapshotIndex {
         return id;
     }
 
-    fn get_snapshot_info(&mut self,
-                         family_name: String,
-                         snapshot_id: i64)
-                         -> Option<(SnapshotInfo, hash_index::Hash, Vec<u8>)> {
+    fn get_snapshot_info
+        (&mut self,
+         family_name: String,
+         snapshot_id: i64)
+         -> Option<(SnapshotInfo, hash_index::Hash, Option<blob_store::ChunkRef>)> {
         let family_id = self.get_family_id(&family_name)
                             .expect(&format!("No such family: {}", family_name));
         let mut lookup = self.prepare_or_die("SELECT rowid, hash, tree_ref FROM snapshot_index \
@@ -227,7 +229,7 @@ impl SnapshotIndex {
                 snapshot_id: snapshot_id,
             },
                          hash_index::Hash { bytes: lookup.get_blob(1).unwrap().to_vec() },
-                         lookup.get_blob(2).unwrap().to_vec()));
+                         blob_store::ChunkRef::from_bytes(&mut lookup.get_blob(2).unwrap()).ok()));
         }
         assert_eq!(SQLITE_DONE, status);
         return None;
@@ -260,7 +262,7 @@ impl SnapshotIndex {
               snapshot: SnapshotInfo,
               msg: String,
               hash: hash_index::Hash,
-              tree_ref: Vec<u8>) {
+              tree_ref: blob_store::ChunkRef) {
         let mut update_stm = self.prepare_or_die("UPDATE snapshot_index SET msg=?, hash=?, \
                                                   tree_ref=? WHERE rowid=?");
 
@@ -268,7 +270,8 @@ impl SnapshotIndex {
                    update_stm.bind_param(1, &Blob(msg.as_bytes().to_vec())));
         assert_eq!(SQLITE_OK,
                    update_stm.bind_param(2, &Blob(hash.bytes.clone())));
-        assert_eq!(SQLITE_OK, update_stm.bind_param(3, &Blob(tree_ref)));
+        assert_eq!(SQLITE_OK,
+                   update_stm.bind_param(3, &Blob(tree_ref.as_bytes())));
         assert_eq!(SQLITE_OK,
                    update_stm.bind_param(4, &Integer64(snapshot.unique_id)));
 
@@ -284,9 +287,10 @@ impl SnapshotIndex {
         assert_eq!(SQLITE_DONE, update_stm.step());
     }
 
-    fn latest_snapshot(&mut self,
-                       family: String)
-                       -> Option<(SnapshotInfo, hash_index::Hash, Vec<u8>)> {
+    fn latest_snapshot
+        (&mut self,
+         family: String)
+         -> Option<(SnapshotInfo, hash_index::Hash, Option<blob_store::ChunkRef>)> {
         let family_id_opt = self.get_family_id(&family);
         family_id_opt.and_then(|family_id| {
 
@@ -303,7 +307,8 @@ impl SnapshotIndex {
                     snapshot_id: lookup_stm.get_i64(1),
                 },
                              hash_index::Hash { bytes: lookup_stm.get_blob(2).unwrap().to_vec() },
-                             lookup_stm.get_blob(3).unwrap().to_vec()));
+                             blob_store::ChunkRef::from_bytes(&mut lookup_stm.get_blob(3).unwrap())
+                                 .ok()));
             }
             return None;
         })
@@ -368,11 +373,11 @@ impl SnapshotIndex {
                family: String,
                msg: String,
                hash: Vec<u8>,
-               tree_ref: Vec<u8>) {
+               tree_ref: blob_store::ChunkRef) {
         let family_id = self.get_or_create_family_id(&family);
         let insert = match self.get_snapshot_info(family, snapshot_id) {
             Some((_info, h, r)) => {
-                if h.bytes != hash && r != tree_ref {
+                if h.bytes != hash || r.is_none() || r.unwrap() != tree_ref {
                     panic!("Snapshot already exists, but with different hash");
                 }
                 false
@@ -388,7 +393,8 @@ impl SnapshotIndex {
             assert_eq!(SQLITE_OK,
                        insert_stm.bind_param(3, &Blob(msg.as_bytes().to_vec())));
             assert_eq!(SQLITE_OK, insert_stm.bind_param(4, &Blob(hash)));
-            assert_eq!(SQLITE_OK, insert_stm.bind_param(5, &Blob(tree_ref)));
+            assert_eq!(SQLITE_OK,
+                       insert_stm.bind_param(5, &Blob(tree_ref.as_bytes())));
             assert_eq!(SQLITE_DONE, insert_stm.step());
         }
     }

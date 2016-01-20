@@ -37,7 +37,7 @@ pub type DirElem = (u64,
                     u64,
                     u64,
                     Vec<u8>,
-                    Vec<u8>,
+                    Option<blob_store::ChunkRef>,
                     Box<FnBox() -> Option<ReaderResult<HashStoreBackend>> + Send>);
 
 // Public structs
@@ -129,8 +129,7 @@ impl HashStoreBackend {
     fn fetch_chunk_from_hash(&mut self, hash: hash_index::Hash) -> Option<Vec<u8>> {
         assert!(!hash.bytes.is_empty());
         match self.hash_index.send_reply(hash_index::Msg::FetchPersistentRef(hash)) {
-            hash_index::Reply::PersistentRef(chunk_ref_bytes) => {
-                let chunk_ref = blob_store::ChunkRef::from_bytes(chunk_ref_bytes);
+            hash_index::Reply::PersistentRef(chunk_ref) => {
                 self.fetch_chunk_from_persistent_ref(chunk_ref)
             }
             _ => None,  // TODO: Do we need to distinguish `missing` from `unknown ref`?
@@ -159,7 +158,7 @@ impl HashTreeBackend for HashStoreBackend {
         return self.fetch_chunk_from_hash(hash);
     }
 
-    fn fetch_persistent_ref(&mut self, hash: hash_index::Hash) -> Option<Vec<u8>> {
+    fn fetch_persistent_ref(&mut self, hash: hash_index::Hash) -> Option<blob_store::ChunkRef> {
         assert!(!hash.bytes.is_empty());
         loop {
             match self.hash_index.send_reply(hash_index::Msg::FetchPersistentRef(hash.clone())) {
@@ -184,7 +183,7 @@ impl HashTreeBackend for HashStoreBackend {
                     level: i64,
                     payload: Option<Vec<u8>>,
                     chunk: Vec<u8>)
-                    -> Vec<u8> {
+                    -> blob_store::ChunkRef {
         assert!(!hash.bytes.is_empty());
 
         let mut hash_entry = hash_index::HashEntry {
@@ -204,14 +203,14 @@ impl HashTreeBackend for HashStoreBackend {
                 // We came first: this data-chunk is ours to process.
                 let local_hash_index = self.hash_index.clone();
 
-                let callback = Box::new(move |blobid: blob_store::ChunkRef| {
-                    local_hash_index.send_reply(hash_index::Msg::Commit(hash, blobid.as_bytes()));
+                let callback = Box::new(move |chunk_ref: blob_store::ChunkRef| {
+                    local_hash_index.send_reply(hash_index::Msg::Commit(hash, chunk_ref));
                 });
                 match self.blob_store.send_reply(blob_store::Msg::Store(chunk, callback)) {
-                    blob_store::Reply::StoreOk(blob_ref) => {
-                        hash_entry.persistent_ref = Some(blob_ref.as_bytes());
+                    blob_store::Reply::StoreOk(chunk_ref) => {
+                        hash_entry.persistent_ref = Some(chunk_ref.clone());
                         self.hash_index.send_reply(hash_index::Msg::UpdateReserved(hash_entry));
-                        return blob_ref.as_bytes();
+                        return chunk_ref;
                     }
                     _ => panic!("Unexpected reply from BlobStore."),
                 };
@@ -265,7 +264,7 @@ impl
                             SimpleHashTreeReader::open(
                             HashStoreBackend::new(local_hash_index.clone(),
                                                   local_blob_store.clone()),
-                              local_hash, Some(local_ref)))
+                              local_hash, local_ref))
                  ));
             }
             return reply(Reply::ListResult(my_entries));
@@ -334,7 +333,7 @@ impl
         // Update hash in key index.
         // It is OK that this has is not yet valid, as we check hashes at snapshot time.
         match self.index.send_reply(
-            key_index::Msg::UpdateDataHash(entry, Some(hash.bytes), Some(persistent_ref))) {
+            key_index::Msg::UpdateDataHash(entry, Some(hash), Some(persistent_ref))) {
             key_index::Reply::UpdateOk => (),
             _ => panic!("Unexpected reply from key index."),
         };
@@ -595,7 +594,7 @@ mod tests {
                         }
                         None => {
                             assert_eq!(hash, b"".to_vec());
-                            assert_eq!(persistent_ref, b"".to_vec());
+                            assert_eq!(persistent_ref, None);
                         }
                     }
 
