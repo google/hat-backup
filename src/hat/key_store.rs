@@ -29,7 +29,7 @@ use key_index;
 #[cfg(test)]
 use key_index::KeyIndex;
 
-pub type KeyStoreProcess<KE, IT> = Process<Msg<KE, IT>, Reply>;
+pub type KeyStoreProcess<IT> = Process<Msg<IT>, Reply>;
 
 pub type DirElem = (u64,
                     Vec<u8>,
@@ -41,11 +41,11 @@ pub type DirElem = (u64,
                     Box<FnBox() -> Option<ReaderResult<HashStoreBackend>> + Send>);
 
 // Public structs
-pub enum Msg<KE, IT> {
+pub enum Msg<IT> {
     /// Insert a key into the index. If this key has associated data a "chunk-iterator creator"
     /// can be passed along with it. If the data turns out to be unreadable, this iterator proc
     /// can return `None`. Returns `Id` with the new entry ID.
-    Insert(KE, Option<Box<FnBox() -> Option<IT> + Send>>),
+    Insert(KeyEntry, Option<Box<FnBox() -> Option<IT> + Send>>),
 
     /// List a "directory" (aka. a `level`) in the index.
     /// Returns `ListResult` with all the entries under the given parent.
@@ -63,18 +63,18 @@ pub enum Reply {
 }
 
 #[derive(Clone)]
-pub struct KeyStore<KE: Send> {
-    index: KeyIndexProcess<KE>,
+pub struct KeyStore {
+    index: KeyIndexProcess,
     hash_index: hash_index::HashIndexProcess,
     blob_store: blob_store::BlobStoreProcess,
 }
 
 // Implementations
-impl<KE: 'static + KeyEntry<KE> + Send> KeyStore<KE> {
-    pub fn new(index: KeyIndexProcess<KE>,
+impl KeyStore {
+    pub fn new(index: KeyIndexProcess,
                hash_index: hash_index::HashIndexProcess,
                blob_store: blob_store::BlobStoreProcess)
-               -> KeyStore<KE> {
+               -> KeyStore {
         KeyStore {
             index: index,
             hash_index: hash_index,
@@ -85,7 +85,7 @@ impl<KE: 'static + KeyEntry<KE> + Send> KeyStore<KE> {
     #[cfg(test)]
     pub fn new_for_testing<B: 'static + blob_store::BlobStoreBackend + Send + Clone>
         (backend: B)
-         -> KeyStore<KE> {
+         -> KeyStore {
         let ki_p = Process::new(Box::new(move || KeyIndex::new_for_testing()));
         let hi_p = Process::new(Box::new(move || hash_index::HashIndex::new_for_testing()));
         let bs_p = Process::new(Box::new(move || {
@@ -220,7 +220,7 @@ impl HashTreeBackend for HashStoreBackend {
     }
 }
 
-fn file_size_warning(name: Vec<u8>, wanted: u64, got: u64) {
+fn file_size_warning(name: &[u8], wanted: u64, got: u64) {
     if wanted < got {
         println!("Warning: File grew while reading it: {:?} (wanted {}, got {})",
                  name,
@@ -234,112 +234,118 @@ fn file_size_warning(name: Vec<u8>, wanted: u64, got: u64) {
     }
 }
 
-impl
-  <KE: 'static + KeyEntry<KE> + Send + Clone, IT: Iterator<Item=Vec<u8>>>
-  MsgHandler<Msg<KE, IT>, Reply> for KeyStore<KE>
-{
-  fn handle(&mut self, msg: Msg<KE, IT>, reply: Box<Fn(Reply)>) {
-    match msg {
-      Msg::Flush => {
-        self.flush();
-        return reply(Reply::FlushOk);
-      },
+impl<IT: Iterator<Item = Vec<u8>>> MsgHandler<Msg<IT>, Reply> for KeyStore {
+    fn handle(&mut self, msg: Msg<IT>, reply: Box<Fn(Reply)>) {
+        match msg {
+            Msg::Flush => {
+                self.flush();
+                return reply(Reply::FlushOk);
+            }
 
-      Msg::ListDir(parent) => {
-        match self.index.send_reply(key_index::Msg::ListDir(parent)) {
-          key_index::Reply::ListResult(entries) => {
-            // TODO(jos): Rewrite this tuple hell
-            let mut my_entries: Vec<DirElem> = Vec::with_capacity(entries.len());
-            for (id, name, created, modified, accessed, hash, persistent_ref) in entries.into_iter()
-            {
-              let local_hash = hash_index::Hash{bytes: hash.clone()};
-              let local_ref = persistent_ref.clone();
+            Msg::ListDir(parent) => {
+                match self.index.send_reply(key_index::Msg::ListDir(parent)) {
+                    key_index::Reply::ListResult(entries) => {
+                        // TODO(jos): Rewrite this tuple hell
+                        let mut my_entries: Vec<DirElem> = Vec::with_capacity(entries.len());
+                        for (id, name, created, modified, accessed, hash, persistent_ref) in
+                            entries.into_iter() {
+                            let local_hash = hash_index::Hash { bytes: hash.clone() };
+                            let local_ref = persistent_ref.clone();
 
-              let local_hash_index = self.hash_index.clone();
-              let local_blob_store = self.blob_store.clone();
+                            let local_hash_index = self.hash_index.clone();
+                            let local_blob_store = self.blob_store.clone();
 
-              my_entries.push(
-                (id, name, created, modified, accessed, hash, persistent_ref,
-                   Box::new(move||
-                            SimpleHashTreeReader::open(
+                            my_entries.push((id,
+                                             name,
+                                             created,
+                                             modified,
+                                             accessed,
+                                             hash,
+                                             persistent_ref,
+                                             Box::new(move || {
+                                SimpleHashTreeReader::open(
                             HashStoreBackend::new(local_hash_index.clone(),
                                                   local_blob_store.clone()),
-                              local_hash, local_ref))
-                 ));
-            }
-            return reply(Reply::ListResult(my_entries));
-          },
-          _ => panic!("Unexpected result from key index."),
-        }
-      },
-
-      Msg::Insert(org_entry, chunk_it_opt) => {
-        let entry = match self.index.send_reply(key_index::Msg::LookupExact(org_entry)) {
-          key_index::Reply::Entry(entry) => {
-            match entry.data_hash() {
-              None => entry,
-              Some(bytes) => {
-                match self.hash_index.send_reply(
-                    hash_index::Msg::HashExists(hash_index::Hash{bytes:bytes})) {
-                  hash_index::Reply::HashKnown => {
-                    return reply(Reply::Id(entry.id().unwrap()));
-                  },
-                  _ => entry,
+                              local_hash, local_ref)
+                            })));
+                        }
+                        return reply(Reply::ListResult(my_entries));
+                    }
+                    _ => panic!("Unexpected result from key index."),
                 }
-              }
             }
-          },
-          key_index::Reply::NotFound(entry) => {
-            match self.index.send_reply(key_index::Msg::Insert(entry)) {
-              key_index::Reply::Entry(entry) => entry,
-              _ => panic!("Could not insert entry into key index."),
+
+            Msg::Insert(org_entry, chunk_it_opt) => {
+                let entry = match self.index.send_reply(key_index::Msg::LookupExact(org_entry)) {
+                    key_index::Reply::Entry(entry) => {
+                        if entry.data_hash.is_some() {
+                            match self.hash_index
+                                      .send_reply(hash_index::Msg::HashExists(hash_index::Hash {
+                                          bytes: entry.data_hash.clone().unwrap(),
+                                      })) {
+                                hash_index::Reply::HashKnown => {
+                                    return reply(Reply::Id(entry.id.unwrap()));
+                                }
+                                _ => entry,
+                            }
+                        } else {
+                            entry
+                        }
+                    }
+                    key_index::Reply::NotFound(entry) => {
+                        match self.index.send_reply(key_index::Msg::Insert(entry)) {
+                            key_index::Reply::Entry(entry) => entry,
+                            _ => panic!("Could not insert entry into key index."),
+                        }
+                    }
+                    _ => panic!("Unexpected reply from key index."),
+                };
+
+                // Send out the ID early to allow the client to continue its key discovery routine.
+                // The bounded input-channel will prevent the client from overflowing us.
+                assert!(entry.id.is_some());
+                reply(Reply::Id(entry.id.unwrap().clone()));
+
+
+                // Setup hash tree structure
+                let mut tree = self.hash_tree_writer();
+
+                // Check if we have an data source:
+                let it_opt = chunk_it_opt.and_then(|open| open());
+                if it_opt.is_none() {
+                    // No data is associated with this entry.
+                    self.index.send_reply(key_index::Msg::UpdateDataHash(entry, None, None));
+                    // Bail out before storing data that does not exist:
+                    return;
+                }
+
+                // Read and insert all file chunks:
+                // (see HashStoreBackend::insert_chunk above)
+                let mut bytes_read = 0u64;
+                for chunk in it_opt.unwrap() {
+                    bytes_read += chunk.len() as u64;
+                    tree.append(chunk);
+                }
+
+                // Warn the user if we did not read the expected size:
+                entry.data_length.map(|s| {
+                    file_size_warning(&entry.name, s, bytes_read);
+                });
+
+                // Get top tree hash:
+                let (hash, persistent_ref) = tree.hash();
+
+                // Update hash in key index.
+                // It is OK that this has is not yet valid, as we check hashes at snapshot time.
+                match self.index.send_reply(key_index::Msg::UpdateDataHash(entry,
+                                                                           Some(hash),
+                                                                           Some(persistent_ref))) {
+                    key_index::Reply::UpdateOk => (),
+                    _ => panic!("Unexpected reply from key index."),
+                };
             }
-          },
-          _ => panic!("Unexpected reply from key index."),
-        };
-
-        // Send out the ID early to allow the client to continue its key discovery routine.
-        // The bounded input-channel will prevent the client from overflowing us.
-        assert!(entry.id().is_some());
-        reply(Reply::Id(entry.id().unwrap().clone()));
-
-
-        // Setup hash tree structure
-        let mut tree = self.hash_tree_writer();
-
-        // Check if we have an data source:
-        let it_opt = chunk_it_opt.and_then(|open| open());
-        if it_opt.is_none() {
-          // No data is associated with this entry.
-          self.index.send_reply(key_index::Msg::UpdateDataHash(entry, None, None));
-          // Bail out before storing data that does not exist:
-          return;
         }
-
-        // Read and insert all file chunks:
-        // (see HashStoreBackend::insert_chunk above)
-        let mut bytes_read = 0u64;
-        for chunk in it_opt.unwrap() {
-          bytes_read += chunk.len() as u64;
-          tree.append(chunk);
-        }
-
-        // Warn the user if we did not read the expected size:
-        entry.size().map(|s| { file_size_warning(entry.name(), s, bytes_read); });
-
-        // Get top tree hash:
-        let (hash, persistent_ref) = tree.hash();
-
-        // Update hash in key index.
-        // It is OK that this has is not yet valid, as we check hashes at snapshot time.
-        match self.index.send_reply(
-            key_index::Msg::UpdateDataHash(entry, Some(hash), Some(persistent_ref))) {
-            key_index::Reply::UpdateOk => (),
-            _ => panic!("Unexpected reply from key index."),
-        };
-      }
     }
-  }
 }
 
 
@@ -365,76 +371,8 @@ mod tests {
 
     #[derive(Clone, Debug)]
     struct KeyEntryStub {
-        parent_id: Option<u64>,
-
-        id: Option<u64>,
-        name: Vec<u8>,
-
+        key_entry: KeyEntry,
         data: Option<Vec<Vec<u8>>>,
-
-        created: Option<u64>,
-        modified: Option<u64>,
-        accessed: Option<u64>,
-
-        data_hash: Option<Vec<u8>>,
-    }
-
-    impl KeyEntry<KeyEntryStub> for KeyEntryStub {
-        fn id(&self) -> Option<u64> {
-            self.id.clone()
-        }
-
-        fn parent_id(&self) -> Option<u64> {
-            self.parent_id.clone()
-        }
-
-        fn name(&self) -> Vec<u8> {
-            self.name.to_owned()
-        }
-
-        fn size(&self) -> Option<u64> {
-            None
-        }
-
-        fn permissions(&self) -> Option<u64> {
-            None
-        }
-
-        fn created(&self) -> Option<u64> {
-            self.created
-        }
-
-        fn accessed(&self) -> Option<u64> {
-            self.accessed
-        }
-
-        fn modified(&self) -> Option<u64> {
-            self.modified
-        }
-
-        fn user_id(&self) -> Option<u64> {
-            None
-        }
-
-        fn group_id(&self) -> Option<u64> {
-            None
-        }
-
-        fn data_hash(&self) -> Option<Vec<u8>> {
-            self.data_hash.clone()
-        }
-
-        fn with_id(self, id: Option<u64>) -> KeyEntryStub {
-            let mut x = self;
-            x.id = id;
-            return x;
-        }
-
-        fn with_data_hash(self, data_hash: Option<Vec<u8>>) -> KeyEntryStub {
-            let mut x = self;
-            x.data_hash = data_hash;
-            return x;
-        }
     }
 
     impl Iterator for KeyEntryStub {
@@ -488,16 +426,23 @@ mod tests {
                 let modified: u64 = thread_rng().gen_range(0, 1 << 63);
                 let accessed: u64 = thread_rng().gen_range(0, 1 << 63);
                 let new_root = KeyEntryStub {
-                    id: None,
-                    parent_id: None, // updated by insert_and_update_fs()
-
-                    name: random_ascii_bytes(),
                     data: data_opt,
-                    data_hash: None,
+                    key_entry: KeyEntry {
+                        id: None,
+                        parent_id: None, // updated by insert_and_update_fs()
 
-                    created: Some(created),
-                    modified: Some(accessed),
-                    accessed: Some(modified),
+                        name: random_ascii_bytes(),
+                        data_hash: None,
+                        data_length: None,
+
+                        created: Some(created),
+                        modified: Some(accessed),
+                        accessed: Some(modified),
+
+                        permissions: None,
+                        user_id: None,
+                        group_id: None,
+                    },
                 };
 
                 files.push(FileSystem {
@@ -513,14 +458,20 @@ mod tests {
         let modified: u64 = thread_rng().gen_range(0, 1 << 63);
         let accessed: u64 = thread_rng().gen_range(0, 1 << 63);
         let root = KeyEntryStub {
-            parent_id: None,
-            id: None, // updated by insert_and_update_fs()
-            name: b"root".to_vec(),
             data: None,
-            data_hash: None,
-            created: Some(created),
-            modified: Some(modified),
-            accessed: Some(accessed),
+            key_entry: KeyEntry {
+                parent_id: None,
+                id: None, // updated by insert_and_update_fs()
+                name: b"root".to_vec(),
+                data_hash: None,
+                data_length: None,
+                created: Some(created),
+                modified: Some(modified),
+                accessed: Some(accessed),
+                permissions: None,
+                user_id: None,
+                group_id: None,
+            },
         };
 
         FileSystem {
@@ -529,10 +480,9 @@ mod tests {
         }
     }
 
-    fn insert_and_update_fs(fs: &mut FileSystem,
-                            ks_p: KeyStoreProcess<KeyEntryStub, KeyEntryStub>) {
+    fn insert_and_update_fs(fs: &mut FileSystem, ks_p: KeyStoreProcess<KeyEntryStub>) {
         let local_file = fs.file.clone();
-        let id = match ks_p.send_reply(Msg::Insert(fs.file.clone(),
+        let id = match ks_p.send_reply(Msg::Insert(fs.file.key_entry.clone(),
                                                    if fs.file.data.is_some() {
                                                        Some(Box::new(move || Some(local_file)))
                                                    } else {
@@ -542,18 +492,16 @@ mod tests {
             _ => panic!("unexpected reply from key store"),
         };
 
-        fs.file.id = Some(id);
+        fs.file.key_entry.id = Some(id);
 
         for f in fs.filelist.iter_mut() {
-            f.file.parent_id = Some(id);
+            f.file.key_entry.parent_id = Some(id);
             insert_and_update_fs(f, ks_p.clone());
         }
     }
 
-    fn verify_filesystem(fs: &FileSystem,
-                         ks_p: KeyStoreProcess<KeyEntryStub, KeyEntryStub>)
-                         -> usize {
-        let listing = match ks_p.send_reply(Msg::ListDir(fs.file.id())) {
+    fn verify_filesystem(fs: &FileSystem, ks_p: KeyStoreProcess<KeyEntryStub>) -> usize {
+        let listing = match ks_p.send_reply(Msg::ListDir(fs.file.key_entry.id)) {
             Reply::ListResult(ls) => ls,
             _ => panic!("Unexpected result from key store."),
         };
@@ -571,13 +519,13 @@ mod tests {
             let mut found = false;
 
             for dir in fs.filelist.iter() {
-                if dir.file.name() == name {
+                if dir.file.key_entry.name == name {
                     found = true;
 
-                    assert_eq!(dir.file.id().unwrap(), id);
-                    assert_eq!(dir.file.created().unwrap_or(0), created);
-                    assert_eq!(dir.file.accessed().unwrap_or(0), accessed);
-                    assert_eq!(dir.file.modified().unwrap_or(0), modified);
+                    assert_eq!(dir.file.key_entry.id.unwrap(), id);
+                    assert_eq!(dir.file.key_entry.created.unwrap_or(0), created);
+                    assert_eq!(dir.file.key_entry.accessed.unwrap_or(0), accessed);
+                    assert_eq!(dir.file.key_entry.modified.unwrap_or(0), modified);
 
                     match dir.file.data {
                         Some(ref original) => {
@@ -637,7 +585,7 @@ mod tests {
     #[bench]
     fn insert_1_key_x_128000_zeros(bench: &mut Bencher) {
         let backend = DevNullBackend;
-        let ks_p: KeyStoreProcess<KeyEntryStub, KeyEntryStub> = Process::new(Box::new(move || {
+        let ks_p: KeyStoreProcess<KeyEntryStub> = Process::new(Box::new(move || {
             KeyStore::new_for_testing(backend)
         }));
 
@@ -648,17 +596,24 @@ mod tests {
             i += 1;
 
             let entry = KeyEntryStub {
-                parent_id: None,
-                id: None,
-                name: format!("{}", i).as_bytes().to_vec(),
                 data: Some(vec![bytes.clone()]),
-                data_hash: None,
-                created: None,
-                modified: None,
-                accessed: None,
+                key_entry: KeyEntry {
+                    parent_id: None,
+                    id: None,
+                    name: format!("{}", i).as_bytes().to_vec(),
+                    created: None,
+                    modified: None,
+                    accessed: None,
+                    group_id: None,
+                    user_id: None,
+                    permissions: None,
+                    data_hash: None,
+                    data_length: None,
+                },
             };
-            ks_p.send_reply(Msg::Insert(entry.clone(), Some(Box::new(move || Some(entry)))));
 
+            ks_p.send_reply(Msg::Insert(entry.key_entry.clone(),
+                                        Some(Box::new(move || Some(entry)))));
         });
 
         bench.bytes = 128 * 1024;
@@ -669,7 +624,7 @@ mod tests {
     #[bench]
     fn insert_1_key_x_128000_unique(bench: &mut Bencher) {
         let backend = DevNullBackend;
-        let ks_p: KeyStoreProcess<KeyEntryStub, KeyEntryStub> = Process::new(Box::new(move || {
+        let ks_p: KeyStoreProcess<KeyEntryStub> = Process::new(Box::new(move || {
             KeyStore::new_for_testing(backend)
         }));
 
@@ -685,17 +640,24 @@ mod tests {
             my_bytes[2] = (i / 65536) as u8;
 
             let entry = KeyEntryStub {
-                parent_id: None,
-                id: None,
-                name: format!("{}", i).as_bytes().to_vec(),
                 data: Some(vec![my_bytes]),
-                data_hash: None,
-                created: None,
-                modified: None,
-                accessed: None,
+                key_entry: KeyEntry {
+                    parent_id: None,
+                    id: None,
+                    name: format!("{}", i).as_bytes().to_vec(),
+                    created: None,
+                    modified: None,
+                    accessed: None,
+                    group_id: None,
+                    user_id: None,
+                    permissions: None,
+                    data_hash: None,
+                    data_length: None,
+                },
             };
-            ks_p.send_reply(Msg::Insert(entry.clone(), Some(Box::new(move || Some(entry)))));
 
+            ks_p.send_reply(Msg::Insert(entry.key_entry.clone(),
+                                        Some(Box::new(move || Some(entry)))));
         });
 
         bench.bytes = 128 * 1024;
@@ -706,24 +668,31 @@ mod tests {
     #[bench]
     fn insert_1_key_x_16_x_128000_zeros(bench: &mut Bencher) {
         let backend = DevNullBackend;
-        let ks_p: KeyStoreProcess<KeyEntryStub, KeyEntryStub> = Process::new(Box::new(move || {
+        let ks_p: KeyStoreProcess<KeyEntryStub> = Process::new(Box::new(move || {
             KeyStore::new_for_testing(backend)
         }));
 
         bench.iter(|| {
             let bytes = vec![0u8; 128*1024];
-            let entry = KeyEntryStub {
-                parent_id: None,
-                id: None,
-                name: vec![1u8, 2, 3].to_vec(),
-                data: Some(vec![bytes; 16]),
-                data_hash: None,
-                created: None,
-                modified: None,
-                accessed: None,
-            };
 
-            ks_p.send_reply(Msg::Insert(entry.clone(), Some(Box::new(move || Some(entry)))));
+            let entry = KeyEntryStub {
+                data: Some(vec![bytes; 16]),
+                key_entry: KeyEntry {
+                    parent_id: None,
+                    id: None,
+                    name: vec![1u8, 2, 3].to_vec(),
+                    created: None,
+                    modified: None,
+                    accessed: None,
+                    group_id: None,
+                    user_id: None,
+                    permissions: None,
+                    data_hash: None,
+                    data_length: None,
+                },
+            };
+            ks_p.send_reply(Msg::Insert(entry.key_entry.clone(),
+                                        Some(Box::new(move || Some(entry)))));
 
             match ks_p.send_reply(Msg::Flush) {
                 Reply::FlushOk => (),
@@ -739,7 +708,7 @@ mod tests {
     #[bench]
     fn insert_1_key_x_16_x_128000_unique(bench: &mut Bencher) {
         let backend = DevNullBackend;
-        let ks_p: KeyStoreProcess<KeyEntryStub, KeyEntryStub> = Process::new(Box::new(move || {
+        let ks_p: KeyStoreProcess<KeyEntryStub> = Process::new(Box::new(move || {
             KeyStore::new_for_testing(backend)
         }));
 
@@ -762,17 +731,24 @@ mod tests {
             }
 
             let entry = KeyEntryStub {
-                parent_id: None,
-                id: None,
-                name: vec![1u8, 2, 3],
                 data: Some(chunks),
-                data_hash: None,
-                created: None,
-                modified: None,
-                accessed: None,
+                key_entry: KeyEntry {
+                    parent_id: None,
+                    id: None,
+                    name: vec![1u8, 2, 3],
+                    created: None,
+                    modified: None,
+                    accessed: None,
+                    group_id: None,
+                    user_id: None,
+                    permissions: None,
+                    data_hash: None,
+                    data_length: None,
+                },
             };
 
-            ks_p.send_reply(Msg::Insert(entry.clone(), Some(Box::new(move || Some(entry)))));
+            ks_p.send_reply(Msg::Insert(entry.key_entry.clone(),
+                                        Some(Box::new(move || Some(entry)))));
 
             match ks_p.send_reply(Msg::Flush) {
                 Reply::FlushOk => (),

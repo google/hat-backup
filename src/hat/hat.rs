@@ -756,13 +756,10 @@ impl<B: 'static + BlobStoreBackend + Clone + Send> Hat<B> {
 }
 
 struct FileEntry {
-    name: Vec<u8>,
-    id: Option<u64>,
-    parent_id: Option<u64>,
+    key_entry: KeyEntry,
     metadata: fs::Metadata,
     full_path: PathBuf,
     link_path: Option<PathBuf>,
-    data_hash: Option<Vec<u8>>,
 }
 
 impl FileEntry {
@@ -771,14 +768,24 @@ impl FileEntry {
         let link_path = fs::read_link(&full_path).ok();
 
         if filename_opt.is_some() {
+            let md = fs::metadata(&full_path).unwrap();
             Ok(FileEntry {
-                name: filename_opt.unwrap().bytes().collect(),
-                id: None,
-                parent_id: parent.clone(),
-                metadata: fs::metadata(&full_path).unwrap(),
+                key_entry: KeyEntry {
+                    name: filename_opt.unwrap().bytes().collect(),
+                    created: Some(md.ctime_nsec() as u64),
+                    modified: Some(md.mtime_nsec() as u64),
+                    accessed: Some(md.atime_nsec() as u64),
+                    parent_id: parent.clone(),
+                    data_length: Some(md.len()),
+                    data_hash: None,
+                    id: None,
+                    permissions: None,
+                    user_id: None,
+                    group_id: None,
+                },
+                metadata: md,
                 full_path: full_path.clone(),
                 link_path: link_path,
-                data_hash: None,
             })
         } else {
             Err("Could not parse filename."[..].to_owned())
@@ -803,67 +810,11 @@ impl FileEntry {
 impl Clone for FileEntry {
     fn clone(&self) -> FileEntry {
         FileEntry {
-            name: self.name.clone(),
-            id: self.id.clone(),
-            parent_id: self.parent_id.clone(),
             metadata: fs::metadata(&self.full_path).unwrap(),
             full_path: self.full_path.clone(),
             link_path: self.link_path.clone(),
-            data_hash: self.data_hash.clone(),
+            key_entry: self.key_entry.clone(),
         }
-    }
-}
-
-impl KeyEntry<FileEntry> for FileEntry {
-    fn name(&self) -> Vec<u8> {
-        self.name.clone()
-    }
-    fn id(&self) -> Option<u64> {
-        self.id.clone()
-    }
-    fn parent_id(&self) -> Option<u64> {
-        self.parent_id.clone()
-    }
-
-    fn size(&self) -> Option<u64> {
-        Some(self.metadata.len())
-    }
-
-    fn created(&self) -> Option<u64> {
-        Some(self.metadata.ctime_nsec() as u64)
-    }
-    fn modified(&self) -> Option<u64> {
-        Some(self.metadata.mtime_nsec() as u64)
-    }
-    fn accessed(&self) -> Option<u64> {
-        Some(self.metadata.atime_nsec() as u64)
-    }
-
-    fn permissions(&self) -> Option<u64> {
-        None
-    }
-    fn user_id(&self) -> Option<u64> {
-        None
-    }
-    fn group_id(&self) -> Option<u64> {
-        None
-    }
-
-    fn data_hash(&self) -> Option<Vec<u8>> {
-        self.data_hash.clone()
-    }
-
-    fn with_id(self, id: Option<u64>) -> FileEntry {
-        let mut x = self;
-        x.id = id;
-
-        x
-    }
-    fn with_data_hash(self, hash: Option<Vec<u8>>) -> FileEntry {
-        let mut x = self;
-        x.data_hash = hash;
-
-        x
     }
 }
 
@@ -898,11 +849,11 @@ impl Iterator for FileIterator {
 struct InsertPathHandler {
     count: sync::Arc<sync::atomic::AtomicIsize>,
     last_print: sync::Arc<sync::Mutex<time::Timespec>>,
-    key_store: KeyStoreProcess<FileEntry, FileIterator>,
+    key_store: KeyStoreProcess<FileIterator>,
 }
 
 impl InsertPathHandler {
-    pub fn new(key_store: KeyStoreProcess<FileEntry, FileIterator>) -> InsertPathHandler {
+    pub fn new(key_store: KeyStoreProcess<FileIterator>) -> InsertPathHandler {
         InsertPathHandler {
             count: sync::Arc::new(sync::atomic::AtomicIsize::new(0)),
             last_print: sync::Arc::new(sync::Mutex::new(time::now().to_timespec())),
@@ -937,17 +888,21 @@ impl listdir::PathHandler<Option<u64>> for InsertPathHandler {
                 let local_root = path;
                 let local_file_entry = file_entry.clone();
 
-                match self.key_store.send_reply(key_store::Msg::Insert(
-          file_entry,
-          if is_directory { None }
-          else { Some(Box::new(move|| {
-            match local_file_entry.file_iterator() {
-              Err(e) => {println!("Skipping '{}': {}", local_root.display(), e.to_string());
-                         None},
-              Ok(it) => { Some(it) }
-            }
-          }))
-          }))
+                match self.key_store.send_reply(
+                    key_store::Msg::Insert(
+                      file_entry.key_entry,
+                      if is_directory { None }
+                      else { Some(Box::new(move|| {
+                              match local_file_entry.file_iterator() {
+                                  Err(e) => {
+                                      println!("Skipping '{}': {}",
+                                               local_root.display(), e.to_string());
+                                      None
+                                  },
+                                  Ok(it) => { Some(it) }
+                                }
+                            }))
+                            }))
         {
           key_store::Reply::Id(id) => {
             if is_directory { return Some(Some(id)) }
@@ -978,8 +933,8 @@ fn try_a_few_times_then_panic<F>(f: F, msg: &str)
 #[derive(Clone)]
 struct Family {
     name: String,
-    key_store: KeyStore<FileEntry>,
-    key_store_process: KeyStoreProcess<FileEntry, FileIterator>,
+    key_store: KeyStore,
+    key_store_process: KeyStoreProcess<FileIterator>,
 }
 
 impl Family {

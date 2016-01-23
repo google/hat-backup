@@ -30,43 +30,41 @@ use sqlite3::open;
 use rustc_serialize::hex::ToHex;
 
 
-pub trait KeyEntry<KE> {
-    fn id(&self) -> Option<u64>;
-    fn parent_id(&self) -> Option<u64>;
+#[derive(Clone, Debug)]
+pub struct KeyEntry {
+    pub id: Option<u64>,
+    pub parent_id: Option<u64>,
 
-    fn name(&self) -> Vec<u8>;
-    fn size(&self) -> Option<u64>;
+    pub name: Vec<u8>,
 
     // TODO(jos): SQLite3 supports only i64 precisely. Do we propagate this type or convert to it?
     // Currently, values larger than 1<<63 gets converted to doubles silently and breaks.
-    fn created(&self) -> Option<u64>;
-    fn modified(&self) -> Option<u64>;
-    fn accessed(&self) -> Option<u64>;
+    pub created: Option<u64>,
+    pub modified: Option<u64>,
+    pub accessed: Option<u64>,
 
-    fn permissions(&self) -> Option<u64>;
-    fn user_id(&self) -> Option<u64>;
-    fn group_id(&self) -> Option<u64>;
+    pub permissions: Option<u64>,
+    pub user_id: Option<u64>,
+    pub group_id: Option<u64>,
 
-    fn data_hash(&self) -> Option<Vec<u8>>;
-
-    fn with_id(self, Option<u64>) -> KE;
-    fn with_data_hash(self, Option<Vec<u8>>) -> KE;
+    pub data_hash: Option<Vec<u8>>,
+    pub data_length: Option<u64>,
 }
 
-pub type KeyIndexProcess<KE> = Process<Msg<KE>, Reply<KE>>;
+pub type KeyIndexProcess = Process<Msg, Reply>;
 
-pub enum Msg<KeyEntryT> {
+pub enum Msg {
     /// Insert an entry in the key index.
     /// Returns `Id` with the new entry ID.
-    Insert(KeyEntryT),
+    Insert(KeyEntry),
 
     /// Lookup an entry in the key index, to see if it exists.
     /// Returns either `Id` with the found entry ID or `Notfound`.
-    LookupExact(KeyEntryT),
+    LookupExact(KeyEntry),
 
     /// Update the `payload` and `persistent_ref` of an entry.
     /// Returns `UpdateOk`.
-    UpdateDataHash(KeyEntryT, Option<hash_index::Hash>, Option<blob_store::ChunkRef>),
+    UpdateDataHash(KeyEntry, Option<hash_index::Hash>, Option<blob_store::ChunkRef>),
 
     /// List a directory (aka. `level`) in the index.
     /// Returns `ListResult` with all the entries under the given parent.
@@ -76,9 +74,9 @@ pub enum Msg<KeyEntryT> {
     Flush,
 }
 
-pub enum Reply<KeyEntryT> {
-    Entry(KeyEntryT),
-    NotFound(KeyEntryT),
+pub enum Reply {
+    Entry(KeyEntry),
+    NotFound(KeyEntry),
     UpdateOk,
     ListResult(Vec<(u64,
                     Vec<u8>,
@@ -187,29 +185,30 @@ impl Drop for KeyIndex {
     }
 }
 
-impl<A: KeyEntry<A>> MsgHandler<Msg<A>, Reply<A>> for KeyIndex {
-    fn handle(&mut self, msg: Msg<A>, reply: Box<Fn(Reply<A>)>) {
+impl MsgHandler<Msg, Reply> for KeyIndex {
+    fn handle(&mut self, msg: Msg, reply: Box<Fn(Reply)>) {
         match msg {
 
             Msg::Insert(entry) => {
-                let parent = entry.parent_id().unwrap_or(0);
+                let parent = entry.parent_id.unwrap_or(0);
 
                 self.exec_or_die(&format!("INSERT OR REPLACE INTO key_index (parent, name, \
                                            created, modified, accessed)
            VALUES \
                                            ({:?}, x'{}', {}, {}, {})",
                                           parent,
-                                          entry.name().to_hex(),
-                                          entry.created().unwrap_or(0),
-                                          entry.modified().unwrap_or(0),
-                                          entry.accessed().unwrap_or(0)));
+                                          entry.name.to_hex(),
+                                          entry.created.unwrap_or(0),
+                                          entry.modified.unwrap_or(0),
+                                          entry.accessed.unwrap_or(0)));
 
-                let id = self.dbh.get_last_insert_rowid();
-                return reply(Reply::Entry(entry.with_id(Some(i64_to_u64_or_panic(id)))));
+                let mut entry = entry;
+                entry.id = Some(i64_to_u64_or_panic(self.dbh.get_last_insert_rowid()));
+                return reply(Reply::Entry(entry));
             }
 
             Msg::LookupExact(entry) => {
-                let parent = entry.parent_id().unwrap_or(0);
+                let parent = entry.parent_id.unwrap_or(0);
                 let mut cursor = self.prepare_or_die(&format!("SELECT rowid, hash FROM \
                                                                key_index
            WHERE \
@@ -220,28 +219,30 @@ impl<A: KeyEntry<A>> MsgHandler<Msg<A>, Reply<A>> for KeyIndex {
            LIMIT \
                                                                1",
                                                               parent,
-                                                              entry.name().to_hex(),
-                                                              entry.created().unwrap_or(0),
-                                                              entry.modified().unwrap_or(0),
-                                                              entry.accessed().unwrap_or(0)));
+                                                              entry.name.to_hex(),
+                                                              entry.created.unwrap_or(0),
+                                                              entry.modified.unwrap_or(0),
+                                                              entry.accessed.unwrap_or(0)));
                 if cursor.step() == SQLITE_ROW {
                     let id = i64_to_u64_or_panic(cursor.get_i64(0));
                     let hash_opt = cursor.get_blob(1).map(|s| s.to_vec());
                     assert!(cursor.step() == SQLITE_DONE);
-                    return reply(Reply::Entry(entry.with_id(Some(id))
-                                                   .with_data_hash(hash_opt)));
+                    let mut entry = entry;
+                    entry.id = Some(id);
+                    entry.data_hash = hash_opt;
+                    return reply(Reply::Entry(entry));
                 } else {
                     return reply(Reply::NotFound(entry));
                 }
             }
 
             Msg::UpdateDataHash(entry, hash_opt, persistent_ref_opt) => {
-                let parent = entry.parent_id().unwrap_or(0);
+                let parent = entry.parent_id.unwrap_or(0);
 
                 assert!(hash_opt.is_some() == persistent_ref_opt.is_some());
 
                 if hash_opt.is_some() && persistent_ref_opt.is_some() {
-                    match entry.modified() {
+                    match entry.modified {
                         Some(modified) => {
                             self.exec_or_die(&format!("UPDATE key_index SET hash=x'{}', \
                                                        persistent_ref=x'{}'
@@ -256,7 +257,7 @@ impl<A: KeyEntry<A>> MsgHandler<Msg<A>, Reply<A>> for KeyIndex {
                                                                         .to_hex(),
                                                       modified,
                                                       parent,
-                                                      entry.id().expect("UpdateDataHash"),
+                                                      entry.id.expect("UpdateDataHash"),
                                                       modified));
                         }
                         None => {
@@ -269,11 +270,11 @@ impl<A: KeyEntry<A>> MsgHandler<Msg<A>, Reply<A>> for KeyIndex {
                                                                         .as_bytes()
                                                                         .to_hex(),
                                                       parent,
-                                                      entry.id().expect("UpdateDataHash, None")));
+                                                      entry.id.expect("UpdateDataHash, None")));
                         }
                     }
                 } else {
-                    match entry.modified() {
+                    match entry.modified {
                         Some(modified) => {
                             self.exec_or_die(&format!("UPDATE key_index SET hash=NULL, \
                                                        persistent_ref=NULL
@@ -284,7 +285,7 @@ impl<A: KeyEntry<A>> MsgHandler<Msg<A>, Reply<A>> for KeyIndex {
                                                        IFNULL(modified, 0)<={}",
                                                       modified,
                                                       parent,
-                                                      entry.id().expect("UpdateDataHash2"),
+                                                      entry.id.expect("UpdateDataHash2"),
                                                       modified));
                         }
                         None => {
@@ -293,7 +294,7 @@ impl<A: KeyEntry<A>> MsgHandler<Msg<A>, Reply<A>> for KeyIndex {
                  \
                                                        WHERE parent={:?} AND rowid={}",
                                                       parent,
-                                                      entry.id().expect("UpdateDataHash2, None")));
+                                                      entry.id.expect("UpdateDataHash2, None")));
                         }
                     }
                 }
@@ -351,66 +352,4 @@ impl<A: KeyEntry<A>> MsgHandler<Msg<A>, Reply<A>> for KeyIndex {
             }
         }
     }
-}
-
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    struct TestEntry {
-        id: Option<u64>,
-        parent: Option<u64>,
-        name: Vec<u8>,
-        data_hash: Option<Vec<u8>>,
-    }
-    impl KeyEntry<TestEntry> for TestEntry {
-        fn id(&self) -> Option<u64> {
-            None
-        }
-        fn parent_id(&self) -> Option<u64> {
-            self.parent.clone()
-        }
-        fn name(&self) -> Vec<u8> {
-            self.name.clone()
-        }
-
-        fn size(&self) -> Option<u64> {
-            None
-        }
-
-        fn created(&self) -> Option<u64> {
-            None
-        }
-        fn modified(&self) -> Option<u64> {
-            None
-        }
-        fn accessed(&self) -> Option<u64> {
-            None
-        }
-
-        fn permissions(&self) -> Option<u64> {
-            None
-        }
-        fn user_id(&self) -> Option<u64> {
-            None
-        }
-        fn group_id(&self) -> Option<u64> {
-            None
-        }
-        fn data_hash(&self) -> Option<Vec<u8>> {
-            self.data_hash.clone()
-        }
-        fn with_id(self, id: Option<u64>) -> TestEntry {
-            let mut x = self;
-            x.id = id;
-            return x;
-        }
-        fn with_data_hash(self, data_hash: Option<Vec<u8>>) -> TestEntry {
-            let mut x = self;
-            x.data_hash = data_hash;
-            return x;
-        }
-    }
-
 }
