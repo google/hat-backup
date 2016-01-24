@@ -16,10 +16,7 @@
 
 
 use capnp;
-use rustc_serialize::json;
-use rustc_serialize::json::ToJson;
 use std::str;
-use std::collections::BTreeMap;
 
 use process::Process;
 use tags;
@@ -174,29 +171,18 @@ fn hash_index_name(root: &PathBuf) -> String {
 }
 
 fn list_snapshot(backend: &key_store::HashStoreBackend,
-                 out: &mpsc::Sender<BTreeMap<String, json::Json>>,
+                 out: &mpsc::Sender<Hash>,
                  family: &Family,
                  dir_hash: Hash,
                  dir_ref: blob_store::ChunkRef) {
-    for o in family.fetch_dir_data(dir_hash, dir_ref, backend.clone()) {
-        for d in o.as_array().unwrap().into_iter() {
-            if let Some(m) = d.as_object() {
-                out.send(m.clone()).unwrap();
-
-                if let Some(pref_raw) = m.get("dir_ref").and_then(|x| x.as_array()) {
-                    let pref_bytes: Vec<u8> = pref_raw.iter()
-                                                      .map(|x| x.as_i64().unwrap() as u8)
-                                                      .collect();
-                    let pref = blob_store::ChunkRef::from_bytes(&mut &pref_bytes[..]).unwrap();
-                    let bytes = m.get("dir_hash")
-                                 .and_then(|x| x.as_array())
-                                 .unwrap()
-                                 .iter()
-                                 .map(|y| y.as_i64().unwrap() as u8);
-                    let hash = Hash { bytes: bytes.collect() };
-                    list_snapshot(backend, out, family, hash, pref);
-                }
-            }
+    for (entry, hash, pref) in family.fetch_dir_data(dir_hash, dir_ref, backend.clone()) {
+        if entry.data_hash.is_some() {
+            // File.
+            out.send(hash).unwrap();
+        } else {
+            // Directory.
+            out.send(hash.clone()).unwrap();
+            list_snapshot(backend, out, family, hash, pref);
         }
     }
 }
@@ -553,52 +539,26 @@ impl<B: 'static + BlobStoreBackend + Clone + Send> Hat<B> {
                         dir_hash: Hash,
                         dir_ref: blob_store::ChunkRef) {
         fs::create_dir_all(&output).unwrap();
-        for o in family.fetch_dir_data(dir_hash, dir_ref, self.hash_backend.clone()) {
-            for d in o.as_array().unwrap().iter() {
-                if let Some(ref m) = d.as_object() {
-                    let name: Vec<u8> = m.get("name")
-                                         .unwrap()
-                                         .as_array()
-                                         .unwrap()
-                                         .iter()
-                                         .map(|x| x.as_i64().unwrap() as u8)
-                                         .collect();
-                    output.push(str::from_utf8(&name[..]).unwrap());
-                    println!("{}", output.display());
+        for (entry, hash, pref) in family.fetch_dir_data(dir_hash,
+                                                         dir_ref,
+                                                         self.hash_backend.clone()) {
+            assert!(entry.name.len() > 0);
 
-                    // TODO(jos): Replace all uses of JSON with cap'n proto.
-                    let bytes = m.get("dir_hash")
-                                 .or(m.get("data_hash"))
-                                 .and_then(|x| x.as_array())
-                                 .unwrap()
-                                 .iter()
-                                 .map(|y| y.as_i64().unwrap() as u8);
-                    let hash = Hash { bytes: bytes.collect() };
+            output.push(str::from_utf8(&entry.name[..]).unwrap());
+            println!("{}", output.display());
 
-                    let pref_bytes: Vec<u8> = m.get("dir_ref")
-                                               .or(m.get("data_ref"))
-                                               .and_then(|x| x.as_array())
-                                               .unwrap()
-                                               .iter()
-                                               .map(|x| x.as_i64().unwrap() as u8)
-                                               .collect();
-                    let pref = blob_store::ChunkRef::from_bytes(&mut &pref_bytes[..]);
-
-                    if m.contains_key("dir_hash") {
-                        self.checkout_dir_ref(family, output, hash, pref.unwrap());
-                    } else if m.contains_key("data_hash") {
-                        let mut fd = fs::File::create(&output).unwrap();
-                        let tree_opt = hash_tree::SimpleHashTreeReader::open(self.hash_backend
-                                                                                 .clone(),
-                                                                             hash,
-                                                                             pref.ok());
-                        if let Some(tree) = tree_opt {
-                            family.write_file_chunks(&mut fd, tree);
-                        }
-                    }
-                    output.pop();
+            if entry.data_hash.is_some() {
+                let mut fd = fs::File::create(&output).unwrap();
+                let tree_opt = hash_tree::SimpleHashTreeReader::open(self.hash_backend.clone(),
+                                                                     hash,
+                                                                     Some(pref));
+                if let Some(tree) = tree_opt {
+                    family.write_file_chunks(&mut fd, tree);
                 }
+            } else {
+                self.checkout_dir_ref(family, output, hash, pref);
             }
+            output.pop();
         }
     }
 
@@ -643,15 +603,8 @@ impl<B: 'static + BlobStoreBackend + Clone + Send> Hat<B> {
             drop(sender);
 
             let (id_sender, id_receiver) = mpsc::channel();
-            for m in receiver.iter() {
-                let hash = m.get("dir_hash")
-                            .or(m.get("data_hash"))
-                            .and_then(|x| x.as_array())
-                            .unwrap()
-                            .iter()
-                            .map(|y| y.as_i64().unwrap() as u8)
-                            .collect();
-                match local_hash_index.send_reply(hash_index::Msg::GetID(Hash { bytes: hash })) {
+            for hash in receiver.iter() {
+                match local_hash_index.send_reply(hash_index::Msg::GetID(hash)) {
                     hash_index::Reply::HashID(id) => id_sender.send(id).unwrap(),
                     _ => panic!("Unexpected reply from hash index."),
                 }
@@ -990,20 +943,79 @@ impl Family {
         }
     }
 
-    pub fn fetch_dir_data<HTB: hash_tree::HashTreeBackend + Clone>(&self,
-                                                                   dir_hash: Hash,
-                                                                   dir_ref: blob_store::ChunkRef,
-                                                                   backend: HTB)
-                                                                   -> Vec<json::Json> {
+    pub fn fetch_dir_data<HTB: hash_tree::HashTreeBackend + Clone>
+        (&self,
+         dir_hash: Hash,
+         dir_ref: blob_store::ChunkRef,
+         backend: HTB)
+         -> Vec<(KeyEntry, Hash, blob_store::ChunkRef)> {
         let mut out = Vec::new();
         let it = hash_tree::SimpleHashTreeReader::open(backend, dir_hash, Some(dir_ref))
                      .expect("unable to open dir");
+
         for chunk in it {
             if chunk.is_empty() {
                 continue;
             }
-            let m = json::Json::from_str(str::from_utf8(&chunk[..]).unwrap()).unwrap();
-            out.push(m);
+            let reader =
+                capnp::serialize_packed::read_message(&mut &chunk[..],
+                                                      capnp::message::ReaderOptions::new())
+                    .unwrap();
+
+            let list = reader.get_root::<root_capnp::file_list::Reader>().unwrap();
+            for f in list.get_files().unwrap().iter() {
+                if f.get_name().unwrap().len() == 0 {
+                    // Empty entry at end.
+                    // TODO(jos): Can we get rid of these?
+                    break;
+                }
+                let entry = KeyEntry {
+                    id: Some(f.get_id()),
+                    name: f.get_name().unwrap().to_owned(),
+                    created: match f.get_created().which().unwrap() {
+                        root_capnp::file::created::Unknown(()) => None,
+                        root_capnp::file::created::Timestamp(ts) => Some(ts),
+                    },
+                    modified: match f.get_modified().which().unwrap() {
+                        root_capnp::file::modified::Unknown(()) => None,
+                        root_capnp::file::modified::Timestamp(ts) => Some(ts),
+                    },
+                    accessed: match f.get_accessed().which().unwrap() {
+                        root_capnp::file::accessed::Unknown(()) => None,
+                        root_capnp::file::accessed::Timestamp(ts) => Some(ts),
+                    },
+                    data_hash: match f.get_content().which().unwrap() {
+                        root_capnp::file::content::Data(r) => {
+                            Some(r.unwrap().get_hash().unwrap().to_owned())
+                        }
+                        root_capnp::file::content::Directory(_) => None,
+                    },
+                    // TODO(jos): Implement support for these remaining fields.
+                    user_id: None,
+                    group_id: None,
+                    permissions: None,
+                    data_length: None,
+                    parent_id: None,
+                };
+                let hash = match f.get_content().which().unwrap() {
+                    root_capnp::file::content::Data(r) => r.unwrap().get_hash().unwrap().to_owned(),
+                    root_capnp::file::content::Directory(d) => {
+                        d.unwrap().get_hash().unwrap().to_owned()
+                    }
+                };
+                let pref = match f.get_content().which().unwrap() {
+                    root_capnp::file::content::Data(r) => {
+                        blob_store::ChunkRef::read_msg(&r.unwrap().get_chunk_ref().unwrap())
+                            .unwrap()
+                    }
+                    root_capnp::file::content::Directory(d) => {
+                        blob_store::ChunkRef::read_msg(&d.unwrap().get_chunk_ref().unwrap())
+                            .unwrap()
+                    }
+                };
+
+                out.push((entry, Hash { bytes: hash }, pref));
+            }
         }
 
         out
@@ -1020,45 +1032,92 @@ impl Family {
                           tree: &mut hash_tree::SimpleHashTreeWriter<key_store::HashStoreBackend>,
                           dir_id: Option<u64>,
                           hash_ch: mpsc::Sender<Hash>) {
-        let mut keys = Vec::new();
 
-        for (entry, data_ref, _data_res_open) in self.list_from_key_store(dir_id).into_iter() {
-            let mut m = BTreeMap::new();
-            m.insert("id".to_owned(), entry.id.to_json());
-            m.insert("name".to_owned(), entry.name.to_json());
-            m.insert("ct".to_owned(), entry.created.to_json());
-            m.insert("at".to_owned(), entry.accessed.to_json());
+        let files_at_a_time = 1024;
+        let mut it = self.list_from_key_store(dir_id).into_iter().enumerate();
 
-            if let Some(hash_bytes) = entry.data_hash {
-                // This is a file, store its data hash:
-                m.insert("data_hash".to_owned(), hash_bytes.to_json());
-                m.insert("data_ref".to_owned(),
-                         data_ref.unwrap().as_bytes().to_json());
-                hash_ch.send(Hash { bytes: hash_bytes }).unwrap();
-            } else {
-                drop(data_ref);  // May not use data reference without hash.
+        loop {
+            let mut current_msg_is_empty = true;
+            let mut files_msg = capnp::message::Builder::new_default();
 
-                // This is a directory, recurse!
-                let mut inner_tree = self.key_store.hash_tree_writer();
-                self.commit_to_tree(&mut inner_tree, entry.id, hash_ch.clone());
-                // Store a reference for the sub-tree in our tree:
-                let (dir_hash, dir_ref) = inner_tree.hash();
-                m.insert("dir_hash".to_owned(), dir_hash.bytes.to_json());
-                m.insert("dir_ref".to_owned(), dir_ref.as_bytes().to_json());
-                hash_ch.send(dir_hash).unwrap();
+            {
+                let files_root = files_msg.init_root::<root_capnp::file_list::Builder>();
+                let mut files = files_root.init_files(files_at_a_time as u32);
+
+                for (idx, (entry, data_ref, _data_res_open)) in it.by_ref().take(files_at_a_time) {
+                    current_msg_is_empty = false;
+                    let mut file_msg = files.borrow().get(idx as u32);
+
+                    file_msg.set_id(entry.id.unwrap_or(0));
+                    file_msg.set_name(&entry.name);
+
+                    match entry.created {
+                        None => file_msg.borrow().init_created().set_unknown(()),
+                        Some(ts) => file_msg.borrow().init_created().set_timestamp(ts),
+                    }
+
+                    match entry.modified {
+                        None => file_msg.borrow().init_modified().set_unknown(()),
+                        Some(ts) => file_msg.borrow().init_modified().set_timestamp(ts),
+                    }
+
+                    match entry.accessed {
+                        None => file_msg.borrow().init_accessed().set_unknown(()),
+                        Some(ts) => file_msg.borrow().init_accessed().set_timestamp(ts),
+                    }
+
+                    if let Some(hash_bytes) = entry.data_hash {
+                        // This is a file, store its data hash:
+                        let mut hash_ref_msg = capnp::message::Builder::new_default();
+                        let mut hash_ref_root =
+                            hash_ref_msg.init_root::<root_capnp::hash_ref::Builder>();
+
+                        // Populate data hash and ChunkRef.
+                        hash_ref_root.set_hash(&hash_bytes);
+                        data_ref.expect("has data")
+                                .populate_msg(hash_ref_root.borrow().init_chunk_ref());
+                        // Set as file content.
+                        file_msg.borrow()
+                                .init_content()
+                                .set_data(hash_ref_root.as_reader())
+                                .unwrap();
+                        hash_ch.send(Hash { bytes: hash_bytes }).unwrap();
+                    } else {
+                        drop(data_ref);  // May not use data reference without hash.
+
+                        // This is a directory, recurse!
+                        let mut inner_tree = self.key_store.hash_tree_writer();
+                        self.commit_to_tree(&mut inner_tree, entry.id, hash_ch.clone());
+                        // Store a reference for the sub-tree in our tree:
+                        let (dir_hash, dir_ref) = inner_tree.hash();
+
+                        let mut hash_ref_msg = capnp::message::Builder::new_default();
+                        let mut hash_ref_root =
+                            hash_ref_msg.init_root::<root_capnp::hash_ref::Builder>();
+
+                        // Populate directory hash and ChunkRef.
+                        hash_ref_root.set_hash(&dir_hash.bytes);
+                        dir_ref.populate_msg(hash_ref_root.borrow().init_chunk_ref());
+                        // Set as directory content.
+                        file_msg.borrow()
+                                .init_content()
+                                .set_directory(hash_ref_root.as_reader())
+                                .unwrap();
+
+                        hash_ch.send(dir_hash).unwrap();
+                    }
+                }
             }
-
-            keys.push(json::Json::Object(m).to_json());
 
             // Flush to our own tree when we have a decent amount.
             // The tree prevents large directories from clogging ram.
-            if keys.len() >= 1000 {
-                tree.append(keys.to_json().to_string().as_bytes().to_vec());
-                keys.clear();
+            if current_msg_is_empty {
+                break;
+            } else {
+                let mut buf = vec![];
+                capnp::serialize_packed::write_message(&mut buf, &files_msg).unwrap();
+                tree.append(buf);
             }
-        }
-        if !keys.is_empty() {
-            tree.append(keys.to_json().to_string().as_bytes().to_vec());
         }
     }
 }

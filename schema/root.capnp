@@ -44,3 +44,30 @@ struct HashRef {
 struct HashRefList {
 	hashRefs @0 :List(HashRef);
 }
+
+struct File {
+	id @0 :UInt64;
+	name @1 :Data;
+
+	created :union {
+		unknown @2 :Void;
+		timestamp @3 :Int64;
+	}
+	modified :union {
+		unknown @4 :Void;
+		timestamp @5 :Int64;
+	}
+	accessed :union {
+		unknown @6 :Void;
+		timestamp @7 :Int64;
+	}
+
+	content :union {
+		data @8 :HashRef;
+		directory @9 :HashRef;
+	}
+}
+
+struct FileList {
+	files @0 :List(File);
+}
