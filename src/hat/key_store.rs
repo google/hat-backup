@@ -425,8 +425,8 @@ mod tests {
                         data_length: None,
 
                         created: Some(created),
-                        modified: Some(accessed),
-                        accessed: Some(modified),
+                        modified: Some(modified),
+                        accessed: if thread_rng().gen() { None } else { Some(accessed) },
 
                         permissions: None,
                         user_id: None,
@@ -456,7 +456,7 @@ mod tests {
                 data_length: None,
                 created: Some(created),
                 modified: Some(modified),
-                accessed: Some(accessed),
+                accessed: if thread_rng().gen() { None } else { Some(accessed) },
                 permissions: None,
                 user_id: None,
                 group_id: None,
@@ -505,12 +505,12 @@ mod tests {
                     found = true;
 
                     assert_eq!(dir.file.key_entry.id, entry.id);
-                    assert_eq!(dir.file.key_entry.created.unwrap_or(0),
-                               entry.created.unwrap());
-                    assert_eq!(dir.file.key_entry.accessed.unwrap_or(0),
-                               entry.accessed.unwrap());
-                    assert_eq!(dir.file.key_entry.modified.unwrap_or(0),
-                               entry.modified.unwrap());
+                    assert_eq!(dir.file.key_entry.created,
+                               entry.created);
+                    assert_eq!(dir.file.key_entry.accessed,
+                               entry.accessed);
+                    assert_eq!(dir.file.key_entry.modified,
+                               entry.modified);
 
                     match dir.file.data {
                         Some(ref original) => {

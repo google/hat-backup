@@ -24,7 +24,8 @@ use process::{Process, MsgHandler};
 use sqlite3::database::Database;
 
 use sqlite3::cursor::Cursor;
-use sqlite3::types::ResultCode::{SQLITE_ROW, SQLITE_DONE};
+use sqlite3::types::ColumnType;
+use sqlite3::types::ResultCode;
 use sqlite3::open;
 
 use rustc_serialize::hex::ToHex;
@@ -181,20 +182,21 @@ impl Drop for KeyIndex {
 
 impl MsgHandler<Msg, Reply> for KeyIndex {
     fn handle(&mut self, msg: Msg, reply: Box<Fn(Reply)>) {
+        let unwrap_u64_or_null = |x:Option<u64>| { x.map_or("NULL".to_string(), |v| v.to_string())};
         match msg {
 
             Msg::Insert(entry) => {
                 let parent = entry.parent_id.unwrap_or(0);
 
-                self.exec_or_die(&format!("INSERT OR REPLACE INTO key_index (parent, name, \
+                self.exec_or_die(&format!("INSERT OR REPLACE INTO key_index (parent, name,
                                            created, modified, accessed)
-           VALUES \
+                                           VALUES
                                            ({:?}, x'{}', {}, {}, {})",
                                           parent,
                                           entry.name.to_hex(),
-                                          entry.created.unwrap_or(0),
-                                          entry.modified.unwrap_or(0),
-                                          entry.accessed.unwrap_or(0)));
+                                          unwrap_u64_or_null(entry.created),
+                                          unwrap_u64_or_null(entry.modified),
+                                          unwrap_u64_or_null(entry.accessed)));
 
                 let mut entry = entry;
                 entry.id = Some(i64_to_u64_or_panic(self.dbh.get_last_insert_rowid()));
@@ -214,13 +216,13 @@ impl MsgHandler<Msg, Reply> for KeyIndex {
                                                                1",
                                                               parent,
                                                               entry.name.to_hex(),
-                                                              entry.created.unwrap_or(0),
-                                                              entry.modified.unwrap_or(0),
-                                                              entry.accessed.unwrap_or(0)));
-                if cursor.step() == SQLITE_ROW {
+                                                              unwrap_u64_or_null(entry.created),
+                                                              unwrap_u64_or_null(entry.modified),
+                                                              unwrap_u64_or_null(entry.accessed)));
+                if cursor.step() == ResultCode::SQLITE_ROW {
                     let id = i64_to_u64_or_panic(cursor.get_i64(0));
                     let hash_opt = cursor.get_blob(1).map(|s| s.to_vec());
-                    assert!(cursor.step() == SQLITE_DONE);
+                    assert!(cursor.step() == ResultCode::SQLITE_DONE);
                     let mut entry = entry;
                     entry.id = Some(id);
                     entry.data_hash = hash_opt;
@@ -315,12 +317,17 @@ impl MsgHandler<Msg, Reply> for KeyIndex {
                                                                parent={:?}",
                                                               parent));
 
-                while cursor.step() == SQLITE_ROW {
+                let get_u64_opt = |c: &mut Cursor, i: isize| match c.get_column_type(i) {
+                    ColumnType::SQLITE_NULL => None,
+                    ColumnType::SQLITE_INTEGER => Some(c.get_i64(i) as u64),
+                    _ => unreachable!(),
+                };
+                while cursor.step() == ResultCode::SQLITE_ROW {
                     let id = i64_to_u64_or_panic(cursor.get_i64(0));
                     let name = cursor.get_blob(1).expect("name").to_owned();
-                    let created = cursor.get_i64(2);
-                    let modified = cursor.get_i64(3);
-                    let accessed = cursor.get_i64(4);
+                    let created = get_u64_opt(&mut cursor, 2);
+                    let modified = get_u64_opt(&mut cursor, 3);
+                    let accessed = get_u64_opt(&mut cursor, 4);
                     let hash = cursor.get_blob(5).map(|s| s.to_vec());
                     let persistent_ref =
                         cursor.get_blob(6)
@@ -336,9 +343,9 @@ impl MsgHandler<Msg, Reply> for KeyIndex {
                     listing.push((KeyEntry {
                         id: Some(id),
                         name: name,
-                        created: Some(created as u64),
-                        modified: Some(modified as u64),
-                        accessed: Some(accessed as u64),
+                        created: created,
+                        modified: modified,
+                        accessed: accessed,
                         data_hash: hash,
                         data_length: None,
                         // TODO(jos): Implement support for remaining fields.
