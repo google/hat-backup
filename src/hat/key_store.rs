@@ -31,14 +31,9 @@ use key_index::KeyIndex;
 
 pub type KeyStoreProcess<IT> = Process<Msg<IT>, Reply>;
 
-pub type DirElem = (u64,
-                    Vec<u8>,
-                    u64,
-                    u64,
-                    u64,
-                    Vec<u8>,
+pub type DirElem = (KeyEntry,
                     Option<blob_store::ChunkRef>,
-                    Box<FnBox() -> Option<ReaderResult<HashStoreBackend>> + Send>);
+                    Option<Box<FnBox() -> Option<ReaderResult<HashStoreBackend>> + Send>>);
 
 // Public structs
 pub enum Msg<IT> {
@@ -247,27 +242,21 @@ impl<IT: Iterator<Item = Vec<u8>>> MsgHandler<Msg<IT>, Reply> for KeyStore {
                     key_index::Reply::ListResult(entries) => {
                         // TODO(jos): Rewrite this tuple hell
                         let mut my_entries: Vec<DirElem> = Vec::with_capacity(entries.len());
-                        for (id, name, created, modified, accessed, hash, persistent_ref) in
-                            entries.into_iter() {
-                            let local_hash = hash_index::Hash { bytes: hash.clone() };
-                            let local_ref = persistent_ref.clone();
+                        for (entry, persistent_ref) in entries.into_iter() {
+                            let open_fn = entry.data_hash.as_ref().map(|bytes| {
+                                let local_hash = hash_index::Hash { bytes: bytes.clone() };
+                                let local_ref = persistent_ref.clone();
+                                let local_hash_index = self.hash_index.clone();
+                                let local_blob_store = self.blob_store.clone();
+                                Box::new(move || {
+                                    SimpleHashTreeReader::open(
+                                        HashStoreBackend::new(local_hash_index.clone(),
+                                                              local_blob_store.clone()),
+                                        local_hash, local_ref) })
+                                    as Box<FnBox() -> Option<ReaderResult<HashStoreBackend>> + Send>
+                            });
 
-                            let local_hash_index = self.hash_index.clone();
-                            let local_blob_store = self.blob_store.clone();
-
-                            my_entries.push((id,
-                                             name,
-                                             created,
-                                             modified,
-                                             accessed,
-                                             hash,
-                                             persistent_ref,
-                                             Box::new(move || {
-                                SimpleHashTreeReader::open(
-                            HashStoreBackend::new(local_hash_index.clone(),
-                                                  local_blob_store.clone()),
-                              local_hash, local_ref)
-                            })));
+                            my_entries.push((entry, persistent_ref, open_fn));
                         }
                         return reply(Reply::ListResult(my_entries));
                     }
@@ -508,28 +497,24 @@ mod tests {
 
         assert_eq!(fs.filelist.len(), listing.len());
 
-        for (id,
-             name,
-             created,
-             modified,
-             accessed,
-             hash,
-             persistent_ref,
-             tree_data) in listing {
+        for (entry, persistent_ref, tree_data) in listing {
             let mut found = false;
 
             for dir in fs.filelist.iter() {
-                if dir.file.key_entry.name == name {
+                if dir.file.key_entry.name == entry.name {
                     found = true;
 
-                    assert_eq!(dir.file.key_entry.id.unwrap(), id);
-                    assert_eq!(dir.file.key_entry.created.unwrap_or(0), created);
-                    assert_eq!(dir.file.key_entry.accessed.unwrap_or(0), accessed);
-                    assert_eq!(dir.file.key_entry.modified.unwrap_or(0), modified);
+                    assert_eq!(dir.file.key_entry.id, entry.id);
+                    assert_eq!(dir.file.key_entry.created.unwrap_or(0),
+                               entry.created.unwrap());
+                    assert_eq!(dir.file.key_entry.accessed.unwrap_or(0),
+                               entry.accessed.unwrap());
+                    assert_eq!(dir.file.key_entry.modified.unwrap_or(0),
+                               entry.modified.unwrap());
 
                     match dir.file.data {
                         Some(ref original) => {
-                            let it = match tree_data() {
+                            let it = match tree_data.expect("has data")() {
                                 None => panic!("No data."),
                                 Some(it) => it,
                             };
@@ -541,7 +526,7 @@ mod tests {
                             assert_eq!(original.len(), chunk_count);
                         }
                         None => {
-                            assert_eq!(hash, b"".to_vec());
+                            assert_eq!(entry.data_hash, None);
                             assert_eq!(persistent_ref, None);
                         }
                     }

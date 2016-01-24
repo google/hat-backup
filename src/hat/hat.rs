@@ -959,22 +959,25 @@ impl Family {
 
     pub fn checkout_in_dir(&self, output_dir: PathBuf, dir_id: Option<u64>) {
         let mut path = output_dir;
-        for (id, name, _, _, _, hash, _, data_res_open) in self.list_from_key_store(dir_id)
-                                                               .into_iter() {
+        for (entry, _ref, read_fn_opt) in self.list_from_key_store(dir_id).into_iter() {
             // Extend directory with filename:
-            path.push(str::from_utf8(&name[..]).unwrap());
+            path.push(str::from_utf8(&entry.name[..]).unwrap());
 
-            if hash.is_empty() {
-                // This is a directory, recurse!
-                fs::create_dir_all(&path).unwrap();
-                self.checkout_in_dir(path.clone(), Some(id));
-            } else {
-                // This is a file, write it
-                let mut fd = fs::File::create(&path).unwrap();
-                if let Some(data_res) = data_res_open() {
-                    self.write_file_chunks(&mut fd, data_res);
+            match read_fn_opt {
+                None => {
+                    // This is a directory, recurse!
+                    fs::create_dir_all(&path).unwrap();
+                    self.checkout_in_dir(path.clone(), entry.id);
+                }
+                Some(read_fn) => {
+                    // This is a file, write it
+                    let mut fd = fs::File::create(&path).unwrap();
+                    if let Some(tree) = read_fn() {
+                        self.write_file_chunks(&mut fd, tree);
+                    }
                 }
             }
+
             // Prepare for next filename:
             path.pop();
         }
@@ -1019,26 +1022,25 @@ impl Family {
                           hash_ch: mpsc::Sender<Hash>) {
         let mut keys = Vec::new();
 
-        for (id, name, ctime, _mtime, atime, hash, data_ref, _) in
-            self.list_from_key_store(dir_id).into_iter() {
+        for (entry, data_ref, _data_res_open) in self.list_from_key_store(dir_id).into_iter() {
             let mut m = BTreeMap::new();
-            m.insert("id".to_owned(), id.to_json());
-            m.insert("name".to_owned(), name.to_json());
-            m.insert("ct".to_owned(), ctime.to_json());
-            m.insert("at".to_owned(), atime.to_json());
+            m.insert("id".to_owned(), entry.id.to_json());
+            m.insert("name".to_owned(), entry.name.to_json());
+            m.insert("ct".to_owned(), entry.created.to_json());
+            m.insert("at".to_owned(), entry.accessed.to_json());
 
-            if !hash.is_empty() {
+            if let Some(hash_bytes) = entry.data_hash {
                 // This is a file, store its data hash:
-                m.insert("data_hash".to_owned(), hash.to_json());
+                m.insert("data_hash".to_owned(), hash_bytes.to_json());
                 m.insert("data_ref".to_owned(),
                          data_ref.unwrap().as_bytes().to_json());
-                hash_ch.send(Hash { bytes: hash }).unwrap();
+                hash_ch.send(Hash { bytes: hash_bytes }).unwrap();
             } else {
-                drop(hash);
-                drop(data_ref);
+                drop(data_ref);  // May not use data reference without hash.
+
                 // This is a directory, recurse!
                 let mut inner_tree = self.key_store.hash_tree_writer();
-                self.commit_to_tree(&mut inner_tree, Some(id), hash_ch.clone());
+                self.commit_to_tree(&mut inner_tree, entry.id, hash_ch.clone());
                 // Store a reference for the sub-tree in our tree:
                 let (dir_hash, dir_ref) = inner_tree.hash();
                 m.insert("dir_hash".to_owned(), dir_hash.bytes.to_json());

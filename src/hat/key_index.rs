@@ -78,13 +78,7 @@ pub enum Reply {
     Entry(KeyEntry),
     NotFound(KeyEntry),
     UpdateOk,
-    ListResult(Vec<(u64,
-                    Vec<u8>,
-                    u64,
-                    u64,
-                    u64,
-                    Vec<u8>,
-                    Option<blob_store::ChunkRef>)>),
+    ListResult(Vec<(KeyEntry, Option<blob_store::ChunkRef>)>),
     FlushOk,
 }
 
@@ -327,7 +321,7 @@ impl MsgHandler<Msg, Reply> for KeyIndex {
                     let created = cursor.get_i64(2);
                     let modified = cursor.get_i64(3);
                     let accessed = cursor.get_i64(4);
-                    let hash = cursor.get_blob(5).unwrap_or(&[]).to_owned();
+                    let hash = cursor.get_blob(5).map(|s| s.to_vec());
                     let persistent_ref =
                         cursor.get_blob(6)
                               .and_then(|b| {
@@ -339,12 +333,20 @@ impl MsgHandler<Msg, Reply> for KeyIndex {
                                   }
                               });
 
-                    listing.push((id,
-                                  name,
-                                  created as u64,
-                                  modified as u64,
-                                  accessed as u64,
-                                  hash,
+                    listing.push((KeyEntry {
+                        id: Some(id),
+                        name: name,
+                        created: Some(created as u64),
+                        modified: Some(modified as u64),
+                        accessed: Some(accessed as u64),
+                        data_hash: hash,
+                        data_length: None,
+                        // TODO(jos): Implement support for remaining fields.
+                        parent_id: None,
+                        permissions: None,
+                        group_id: None,
+                        user_id: None,
+                    },
                                   persistent_ref));
                 }
 
