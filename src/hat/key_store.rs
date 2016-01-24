@@ -240,7 +240,6 @@ impl<IT: Iterator<Item = Vec<u8>>> MsgHandler<Msg<IT>, Reply> for KeyStore {
             Msg::ListDir(parent) => {
                 match self.index.send_reply(key_index::Msg::ListDir(parent)) {
                     key_index::Reply::ListResult(entries) => {
-                        // TODO(jos): Rewrite this tuple hell
                         let mut my_entries: Vec<DirElem> = Vec::with_capacity(entries.len());
                         for (entry, persistent_ref) in entries.into_iter() {
                             let open_fn = entry.data_hash.as_ref().map(|bytes| {
@@ -409,11 +408,6 @@ mod tests {
                     Some(v)
                 };
 
-                // TODO(jos): Either deny values outside the supported range or support them.
-                // Currently, values larger than 1<<63 gets converted to doubles silently.
-                let created: u64 = thread_rng().gen_range(0, 1 << 63);
-                let modified: u64 = thread_rng().gen_range(0, 1 << 63);
-                let accessed: u64 = thread_rng().gen_range(0, 1 << 63);
                 let new_root = KeyEntryStub {
                     data: data_opt,
                     key_entry: KeyEntry {
@@ -424,9 +418,9 @@ mod tests {
                         data_hash: None,
                         data_length: None,
 
-                        created: Some(created),
-                        modified: Some(modified),
-                        accessed: if thread_rng().gen() { None } else { Some(accessed) },
+                        created: thread_rng().gen(),
+                        modified: thread_rng().gen(),
+                        accessed: thread_rng().gen(),
 
                         permissions: None,
                         user_id: None,
@@ -443,9 +437,6 @@ mod tests {
             files
         }
 
-        let created: u64 = thread_rng().gen_range(0, 1 << 63);
-        let modified: u64 = thread_rng().gen_range(0, 1 << 63);
-        let accessed: u64 = thread_rng().gen_range(0, 1 << 63);
         let root = KeyEntryStub {
             data: None,
             key_entry: KeyEntry {
@@ -454,9 +445,9 @@ mod tests {
                 name: b"root".to_vec(),
                 data_hash: None,
                 data_length: None,
-                created: Some(created),
-                modified: Some(modified),
-                accessed: if thread_rng().gen() { None } else { Some(accessed) },
+                created: thread_rng().gen(),
+                modified: thread_rng().gen(),
+                accessed: thread_rng().gen(),
                 permissions: None,
                 user_id: None,
                 group_id: None,
@@ -505,12 +496,9 @@ mod tests {
                     found = true;
 
                     assert_eq!(dir.file.key_entry.id, entry.id);
-                    assert_eq!(dir.file.key_entry.created,
-                               entry.created);
-                    assert_eq!(dir.file.key_entry.accessed,
-                               entry.accessed);
-                    assert_eq!(dir.file.key_entry.modified,
-                               entry.modified);
+                    assert_eq!(dir.file.key_entry.created, entry.created);
+                    assert_eq!(dir.file.key_entry.accessed, entry.accessed);
+                    assert_eq!(dir.file.key_entry.modified, entry.modified);
 
                     match dir.file.data {
                         Some(ref original) => {

@@ -38,11 +38,9 @@ pub struct KeyEntry {
 
     pub name: Vec<u8>,
 
-    // TODO(jos): SQLite3 supports only i64 precisely. Do we propagate this type or convert to it?
-    // Currently, values larger than 1<<63 gets converted to doubles silently and breaks.
-    pub created: Option<u64>,
-    pub modified: Option<u64>,
-    pub accessed: Option<u64>,
+    pub created: Option<i64>,
+    pub modified: Option<i64>,
+    pub accessed: Option<i64>,
 
     pub permissions: Option<u64>,
     pub user_id: Option<u64>,
@@ -182,21 +180,25 @@ impl Drop for KeyIndex {
 
 impl MsgHandler<Msg, Reply> for KeyIndex {
     fn handle(&mut self, msg: Msg, reply: Box<Fn(Reply)>) {
-        let unwrap_u64_or_null = |x:Option<u64>| { x.map_or("NULL".to_string(), |v| v.to_string())};
+        let unwrap_i64_or_null = |x: Option<i64>| x.map_or("NULL".to_string(), |v| v.to_string());
+
         match msg {
 
             Msg::Insert(entry) => {
                 let parent = entry.parent_id.unwrap_or(0);
 
                 self.exec_or_die(&format!("INSERT OR REPLACE INTO key_index (parent, name,
+                                           \
                                            created, modified, accessed)
+                                           \
                                            VALUES
+                                           \
                                            ({:?}, x'{}', {}, {}, {})",
                                           parent,
                                           entry.name.to_hex(),
-                                          unwrap_u64_or_null(entry.created),
-                                          unwrap_u64_or_null(entry.modified),
-                                          unwrap_u64_or_null(entry.accessed)));
+                                          unwrap_i64_or_null(entry.created),
+                                          unwrap_i64_or_null(entry.modified),
+                                          unwrap_i64_or_null(entry.accessed)));
 
                 let mut entry = entry;
                 entry.id = Some(i64_to_u64_or_panic(self.dbh.get_last_insert_rowid()));
@@ -216,9 +218,9 @@ impl MsgHandler<Msg, Reply> for KeyIndex {
                                                                1",
                                                               parent,
                                                               entry.name.to_hex(),
-                                                              unwrap_u64_or_null(entry.created),
-                                                              unwrap_u64_or_null(entry.modified),
-                                                              unwrap_u64_or_null(entry.accessed)));
+                                                              unwrap_i64_or_null(entry.created),
+                                                              unwrap_i64_or_null(entry.modified),
+                                                              unwrap_i64_or_null(entry.accessed)));
                 if cursor.step() == ResultCode::SQLITE_ROW {
                     let id = i64_to_u64_or_panic(cursor.get_i64(0));
                     let hash_opt = cursor.get_blob(1).map(|s| s.to_vec());
@@ -317,17 +319,19 @@ impl MsgHandler<Msg, Reply> for KeyIndex {
                                                                parent={:?}",
                                                               parent));
 
-                let get_u64_opt = |c: &mut Cursor, i: isize| match c.get_column_type(i) {
-                    ColumnType::SQLITE_NULL => None,
-                    ColumnType::SQLITE_INTEGER => Some(c.get_i64(i) as u64),
-                    _ => unreachable!(),
+                let get_i64_opt = |c: &mut Cursor, i: isize| {
+                    match c.get_column_type(i) {
+                        ColumnType::SQLITE_NULL => None,
+                        ColumnType::SQLITE_INTEGER => Some(c.get_i64(i)),
+                        _ => unreachable!(),
+                    }
                 };
                 while cursor.step() == ResultCode::SQLITE_ROW {
                     let id = i64_to_u64_or_panic(cursor.get_i64(0));
                     let name = cursor.get_blob(1).expect("name").to_owned();
-                    let created = get_u64_opt(&mut cursor, 2);
-                    let modified = get_u64_opt(&mut cursor, 3);
-                    let accessed = get_u64_opt(&mut cursor, 4);
+                    let created = get_i64_opt(&mut cursor, 2);
+                    let modified = get_i64_opt(&mut cursor, 3);
+                    let accessed = get_i64_opt(&mut cursor, 4);
                     let hash = cursor.get_blob(5).map(|s| s.to_vec());
                     let persistent_ref =
                         cursor.get_blob(6)

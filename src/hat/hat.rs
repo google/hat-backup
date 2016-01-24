@@ -772,9 +772,9 @@ impl FileEntry {
             Ok(FileEntry {
                 key_entry: KeyEntry {
                     name: filename_opt.unwrap().bytes().collect(),
-                    created: Some(md.ctime_nsec() as u64),
-                    modified: Some(md.mtime_nsec() as u64),
-                    accessed: Some(md.atime_nsec() as u64),
+                    created: Some(md.ctime_nsec()),
+                    modified: Some(md.mtime_nsec()),
+                    accessed: Some(md.atime_nsec()),
                     parent_id: parent.clone(),
                     data_length: Some(md.len()),
                     data_hash: None,
