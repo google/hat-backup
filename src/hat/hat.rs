@@ -884,7 +884,7 @@ fn try_a_few_times_then_panic<F>(f: F, msg: &str)
 
 
 #[derive(Clone)]
-struct Family {
+pub struct Family {
     name: String,
     key_store: KeyStore,
     key_store_process: KeyStoreProcess<FileIterator>,
