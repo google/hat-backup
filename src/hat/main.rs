@@ -43,7 +43,6 @@ extern crate sodiumoxide;
 
 // SQLite
 extern crate sqlite3;
-extern crate libsqlite3_sys;
 #[macro_use] 
 extern crate diesel;
 

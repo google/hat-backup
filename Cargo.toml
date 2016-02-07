@@ -19,7 +19,6 @@ clap = "*"
 num = "*"
 rustc-serialize = "*"
 time = "*"
-libsqlite3-sys = "0.4.*"
 
 sodiumoxide = "*"
 threadpool = "*"
