@@ -5,6 +5,9 @@ dependencies = [
  "capnp 0.6.2 (registry+https://github.com/rust-lang/crates.io-index)",
  "capnpc 0.6.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "clap 2.0.5 (registry+https://github.com/rust-lang/crates.io-index)",
+ "diesel 0.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "diesel_codegen 0.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "libsqlite3-sys 0.4.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "num 0.1.30 (registry+https://github.com/rust-lang/crates.io-index)",
  "quickcheck 0.2.25 (registry+https://github.com/rust-lang/crates.io-index)",
  "rand 0.3.13 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -44,6 +47,11 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 
 [[package]]
 name = "byteorder"
+version = "0.3.13"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[package]]
+name = "byteorder"
 version = "0.4.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 
@@ -72,6 +80,24 @@ dependencies = [
  "bitflags 0.4.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "strsim 0.4.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "vec_map 0.4.0 (registry+https://github.com/rust-lang/crates.io-index)",
+]
+
+[[package]]
+name = "diesel"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+dependencies = [
+ "byteorder 0.3.13 (registry+https://github.com/rust-lang/crates.io-index)",
+ "libc 0.2.6 (registry+https://github.com/rust-lang/crates.io-index)",
+ "libsqlite3-sys 0.4.0 (registry+https://github.com/rust-lang/crates.io-index)",
+]
+
+[[package]]
+name = "diesel_codegen"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+dependencies = [
+ "diesel 0.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
 [[package]]
@@ -105,6 +131,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 [[package]]
 name = "libsodium-sys"
 version = "0.0.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+dependencies = [
+ "libc 0.2.6 (registry+https://github.com/rust-lang/crates.io-index)",
+ "pkg-config 0.3.6 (registry+https://github.com/rust-lang/crates.io-index)",
+]
+
+[[package]]
+name = "libsqlite3-sys"
+version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 dependencies = [
  "libc 0.2.6 (registry+https://github.com/rust-lang/crates.io-index)",

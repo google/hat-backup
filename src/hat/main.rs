@@ -18,7 +18,6 @@
 
 #![warn(non_upper_case_globals)]
 #![warn(non_camel_case_types)]
-#![warn(unused_qualifications)]
 
 // Unstable APIs:
 #![feature(test)]
@@ -29,6 +28,10 @@
 
 #![feature(fnbox)]
 
+#![feature(custom_derive, custom_attribute, plugin)]
+#![plugin(diesel_codegen)]
+
+
 // Standard Rust imports
 extern crate rand;
 extern crate test;
@@ -37,13 +40,18 @@ extern crate time;
 // Rust bindings
 extern crate capnp;
 extern crate sodiumoxide;
+
+// SQLite
 extern crate sqlite3;
+extern crate libsqlite3_sys;
+#[macro_use] 
+extern crate diesel;
 
 extern crate rustc_serialize;
 extern crate threadpool;
 
 // Argument parsing
-#[macro_use]
+#[macro_use] 
 extern crate clap;
 
 // Testing
@@ -56,6 +64,7 @@ use std::path::PathBuf;
 use std::borrow::ToOwned;
 
 use clap::{App, SubCommand};
+
 
 mod cumulative_counter;
 mod ordered_collection;
