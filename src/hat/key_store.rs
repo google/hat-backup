@@ -554,7 +554,6 @@ mod tests {
         quickcheck::quickcheck(prop as fn(u8) -> bool);
     }
 
-
     #[bench]
     fn insert_1_key_x_128000_zeros(bench: &mut Bencher) {
         let backend = DevNullBackend;
@@ -592,7 +591,6 @@ mod tests {
         bench.bytes = 128 * 1024;
 
     }
-
 
     #[bench]
     fn insert_1_key_x_128000_unique(bench: &mut Bencher) {
@@ -676,8 +674,6 @@ mod tests {
         bench.bytes = 16 * (128 * 1024);
     }
 
-
-
     #[bench]
     fn insert_1_key_x_16_x_128000_unique(bench: &mut Bencher) {
         let backend = DevNullBackend;
@@ -732,4 +728,91 @@ mod tests {
         bench.bytes = 16 * (128 * 1024);
     }
 
+    #[bench]
+    fn insert_1_key_unchanged_empty(bench: &mut Bencher) {
+        let backend = DevNullBackend;
+        let ks_p: KeyStoreProcess<KeyEntryStub> = Process::new(Box::new(move || {
+            KeyStore::new_for_testing(backend)
+        }));
+
+        bench.iter(|| {
+            let entry = KeyEntryStub {
+                data: None,
+                key_entry: KeyEntry {
+                    parent_id: None,
+                    id: None,
+                    name: vec![1u8, 2, 3].to_vec(),
+                    created: Some(0),
+                    modified: Some(0),
+                    accessed: Some(0),
+                    group_id: None,
+                    user_id: None,
+                    permissions: None,
+                    data_hash: None,
+                    data_length: None,
+                },
+            };
+            ks_p.send_reply(Msg::Insert(entry.key_entry.clone(), None));
+        });
+    }
+
+    #[bench]
+    fn insert_1_key_updated_empty(bench: &mut Bencher) {
+        let backend = DevNullBackend;
+        let ks_p: KeyStoreProcess<KeyEntryStub> = Process::new(Box::new(move || {
+            KeyStore::new_for_testing(backend)
+        }));
+
+        let mut i = 0;
+        bench.iter(|| {
+            i += 1;
+            let entry = KeyEntryStub {
+                data: None,
+                key_entry: KeyEntry {
+                    parent_id: None,
+                    id: None,
+                    name: vec![1u8, 2, 3].to_vec(),
+                    created: Some(i),
+                    modified: Some(i),
+                    accessed: Some(i),
+                    group_id: None,
+                    user_id: None,
+                    permissions: None,
+                    data_hash: None,
+                    data_length: None,
+                },
+            };
+            ks_p.send_reply(Msg::Insert(entry.key_entry.clone(), None));
+        });
+    }
+
+    #[bench]
+    fn insert_1_key_unique_empty(bench: &mut Bencher) {
+        let backend = DevNullBackend;
+        let ks_p: KeyStoreProcess<KeyEntryStub> = Process::new(Box::new(move || {
+            KeyStore::new_for_testing(backend)
+        }));
+
+        let mut i = 0;
+        bench.iter(|| {
+            i += 1;
+            let entry = KeyEntryStub {
+                data: None,
+                key_entry: KeyEntry {
+                    parent_id: None,
+                    id: None,
+                    name: format!("{}", i).as_bytes().to_vec(),
+                    created: Some(i),
+                    modified: Some(i),
+                    accessed: Some(i),
+                    group_id: None,
+                    user_id: None,
+                    permissions: None,
+                    data_hash: None,
+                    data_length: None,
+                },
+            };
+            ks_p.send_reply(Msg::Insert(entry.key_entry.clone(), None));
+        });
+    }
 }
