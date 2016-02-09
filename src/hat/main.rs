@@ -43,14 +43,14 @@ extern crate sodiumoxide;
 
 // SQLite
 extern crate sqlite3;
-#[macro_use] 
+#[macro_use]
 extern crate diesel;
 
 extern crate rustc_serialize;
 extern crate threadpool;
 
 // Argument parsing
-#[macro_use] 
+#[macro_use]
 extern crate clap;
 
 // Testing

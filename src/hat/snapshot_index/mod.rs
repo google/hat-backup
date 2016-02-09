@@ -112,8 +112,7 @@ pub struct SnapshotIndex {
 
 impl SnapshotIndex {
     pub fn new(path: String) -> SnapshotIndex {
-        let conn = SqliteConnection::establish(&path)
-            .expect("Could not open SQLite database");
+        let conn = SqliteConnection::establish(&path).expect("Could not open SQLite database");
 
         let si = SnapshotIndex { conn: conn };
 
@@ -129,8 +128,8 @@ impl SnapshotIndex {
 
     fn last_insert_rowid(&self) -> i64 {
         diesel::select(diesel::expression::sql("last_insert_rowid()"))
-                       .first::<i64>(&self.conn)
-                       .unwrap()
+            .first::<i64>(&self.conn)
+            .unwrap()
     }
 
     fn get_family_id(&mut self, name_: &str) -> Option<i64> {
@@ -147,10 +146,10 @@ impl SnapshotIndex {
         use self::schema::snapshots::dsl::*;
 
         let count = diesel::delete(snapshots.find(info.unique_id)
-                                   .filter(family_id.eq(info.family_id))
-                                   .filter(snapshot_id.eq(info.snapshot_id)))
-            .execute(&self.conn)
-            .expect("Error deleting snapshots");
+                                            .filter(family_id.eq(info.family_id))
+                                            .filter(snapshot_id.eq(info.snapshot_id)))
+                        .execute(&self.conn)
+                        .expect("Error deleting snapshots");
         assert!(count <= 1);
     }
 
@@ -161,11 +160,10 @@ impl SnapshotIndex {
             None => {
                 use self::schema::family::dsl::*;
 
-                let new = self::schema::NewFamily{
-                    name: name_,
-                };
+                let new = self::schema::NewFamily { name: name_ };
 
-                diesel::insert(&new).into(family)
+                diesel::insert(&new)
+                    .into(family)
                     .execute(&self.conn)
                     .expect("Error inserting family");
                 self.last_insert_rowid()
@@ -175,14 +173,14 @@ impl SnapshotIndex {
 
     fn get_latest_snapshot_id(&mut self, family_id_: i64) -> Option<i64> {
         use self::schema::snapshots::dsl::*;
-        use diesel::expression::{max};
+        use diesel::expression::max;
 
         snapshots.filter(family_id.eq(family_id_))
-            .select(max(snapshot_id).nullable())
-            .first::<Option<i64>>(&self.conn)
-            .optional()
-            .expect("Error reading latest snapshot id")
-            .and_then(|x| x)
+                 .select(max(snapshot_id).nullable())
+                 .first::<Option<i64>>(&self.conn)
+                 .optional()
+                 .expect("Error reading latest snapshot id")
+                 .and_then(|x| x)
     }
 
     fn get_snapshot_info
@@ -194,20 +192,22 @@ impl SnapshotIndex {
         use self::schema::family::dsl::{family, name};
 
         let row_opt = snapshots.inner_join(family)
-            .filter(name.eq(family_name_))
-            .filter(snapshot_id.eq(snapshot_id_))
-            .select((id, tag, family_id, snapshot_id, msg, hash, tree_ref))
-            .first::<self::schema::Snapshot>(&self.conn)
-            .optional()
-            .expect("Error reading snapshot info");
+                               .filter(name.eq(family_name_))
+                               .filter(snapshot_id.eq(snapshot_id_))
+                               .select((id, tag, family_id, snapshot_id, msg, hash, tree_ref))
+                               .first::<self::schema::Snapshot>(&self.conn)
+                               .optional()
+                               .expect("Error reading snapshot info");
 
-        row_opt.map(|snap| (
-            SnapshotInfo{
+        row_opt.map(|snap| {
+            (SnapshotInfo {
                 unique_id: snap.id,
                 family_id: snap.family_id,
-                snapshot_id: snap.snapshot_id},
-            hash_index::Hash { bytes: snap.hash.unwrap().to_vec() },
-            blob_store::ChunkRef::from_bytes(&mut &snap.tree_ref.unwrap()[..]).ok()))
+                snapshot_id: snap.snapshot_id,
+            },
+             hash_index::Hash { bytes: snap.hash.unwrap().to_vec() },
+             blob_store::ChunkRef::from_bytes(&mut &snap.tree_ref.unwrap()[..]).ok())
+        })
     }
 
     fn reserve_snapshot(&mut self, family_: String) -> SnapshotInfo {
@@ -216,7 +216,7 @@ impl SnapshotIndex {
         let family_id_ = self.get_or_create_family_id(&family_);
         let snapshot_id_ = 1 + self.get_latest_snapshot_id(family_id_).unwrap_or(0);
 
-        let new = self::schema::NewSnapshot{
+        let new = self::schema::NewSnapshot {
             family_id: family_id_,
             snapshot_id: snapshot_id_,
             tag: tags::Tag::Reserved as i32,
@@ -225,7 +225,8 @@ impl SnapshotIndex {
             tree_ref: None,
         };
 
-        diesel::insert(&new).into(snapshots)
+        diesel::insert(&new)
+            .into(snapshots)
             .execute(&self.conn)
             .expect("Error inserting snapshot");
 
@@ -245,11 +246,9 @@ impl SnapshotIndex {
         use self::schema::snapshots::dsl::*;
 
         diesel::update(snapshots.find(snapshot_.unique_id))
-            .set((
-                msg.eq(Some(msg_)),
-                hash.eq(Some(hash_.bytes)),
-                tree_ref.eq(Some(tree_ref_.as_bytes())),
-                ))
+            .set((msg.eq(Some(msg_)),
+                  hash.eq(Some(hash_.bytes)),
+                  tree_ref.eq(Some(tree_ref_.as_bytes()))))
             .execute(&self.conn)
             .expect("Error updating snapshot");
     }
@@ -272,68 +271,73 @@ impl SnapshotIndex {
             use self::schema::snapshots::dsl::*;
 
             let row_opt = snapshots.filter(family_id.eq(family_id_))
-                     .order(snapshot_id.desc())
-                     .first::<self::schema::Snapshot>(&self.conn)
-                     .optional()
-                     .expect("Error reading latest snapshot");
+                                   .order(snapshot_id.desc())
+                                   .first::<self::schema::Snapshot>(&self.conn)
+                                   .optional()
+                                   .expect("Error reading latest snapshot");
 
-            row_opt.map(|snap| (
-                SnapshotInfo{
+            row_opt.map(|snap| {
+                (SnapshotInfo {
                     unique_id: snap.id,
                     family_id: snap.family_id,
-                    snapshot_id: snap.snapshot_id},
-                hash_index::Hash { bytes: snap.hash.unwrap().to_vec() },
-                blob_store::ChunkRef::from_bytes(&mut &snap.tree_ref.unwrap()[..]).ok()))
+                    snapshot_id: snap.snapshot_id,
+                },
+                 hash_index::Hash { bytes: snap.hash.unwrap().to_vec() },
+                 blob_store::ChunkRef::from_bytes(&mut &snap.tree_ref.unwrap()[..]).ok())
+            })
         })
     }
 
     fn list_all(&mut self, skip_tag: Option<tags::Tag>) -> Vec<SnapshotStatus> {
         use diesel::*;
         use self::schema::snapshots::dsl::*;
-        use self::schema::family::dsl::{family};
+        use self::schema::family::dsl::family;
         let rows = match skip_tag {
-            None =>
+                       None =>
                 snapshots.inner_join(family)
                          .load::<(self::schema::Snapshot, self::schema::Family)>(&self.conn),
-            Some(skip) =>
+                       Some(skip) =>
                 snapshots.inner_join(family)
                          .filter(tag.ne(skip as i32))
                          .load::<(self::schema::Snapshot, self::schema::Family)>(&self.conn),
-        }.unwrap();
+                   }
+                   .unwrap();
 
-        rows.into_iter().map(|(snap, fam)| {
-            let status = match tags::tag_from_num(snap.tag as i64) {
-                Some(tags::Tag::Reserved) | Some(tags::Tag::InProgress) => {
-                    WorkStatus::CommitInProgress
+        rows.into_iter()
+            .map(|(snap, fam)| {
+                let status = match tags::tag_from_num(snap.tag as i64) {
+                    Some(tags::Tag::Reserved) | Some(tags::Tag::InProgress) => {
+                        WorkStatus::CommitInProgress
+                    }
+                    Some(tags::Tag::Complete) | Some(tags::Tag::Done) | None => {
+                        WorkStatus::CommitComplete
+                    }
+                    Some(tags::Tag::WillDelete) => WorkStatus::DeleteInProgress,
+                    Some(tags::Tag::ReadyDelete) | Some(tags::Tag::DeleteComplete) => {
+                        WorkStatus::DeleteComplete
+                    }
+                };
+                let hash_ = snap.hash.and_then(|bytes| {
+                    if bytes.is_empty() {
+                        None
+                    } else {
+                        Some(hash_index::Hash { bytes: bytes })
+                    }
+                });
+                SnapshotStatus {
+                    family_name: fam.name,
+                    msg: snap.msg,
+                    hash: hash_,
+                    tree_ref: snap.tree_ref,
+                    status: status,
+                    info: SnapshotInfo {
+                        unique_id: snap.id,
+                        snapshot_id: snap.snapshot_id,
+                        family_id: fam.id,
+                    },
                 }
-                Some(tags::Tag::Complete) | Some(tags::Tag::Done) | None => {
-                    WorkStatus::CommitComplete
-                }
-                Some(tags::Tag::WillDelete) => WorkStatus::DeleteInProgress,
-                Some(tags::Tag::ReadyDelete) | Some(tags::Tag::DeleteComplete) => {
-                    WorkStatus::DeleteComplete
-                }
-            };
-            let hash_ = snap.hash.and_then(|bytes| {
-                if bytes.is_empty() {
-                    None
-                } else {
-                    Some(hash_index::Hash{bytes: bytes})
-                }
-            });
-            SnapshotStatus{
-                family_name: fam.name,
-                msg: snap.msg,
-                hash: hash_,
-                tree_ref: snap.tree_ref,
-                status: status,
-                info: SnapshotInfo{
-                    unique_id: snap.id,
-                    snapshot_id: snap.snapshot_id,
-                    family_id: fam.id,
-                },
-            }
-        }).collect()
+            })
+            .collect()
     }
 
     fn recover(&mut self,
@@ -356,7 +360,7 @@ impl SnapshotIndex {
             use self::schema::snapshots::dsl::*;
 
             let tree_bytes = tree_ref_.as_bytes();
-            let new = self::schema::NewSnapshot{
+            let new = self::schema::NewSnapshot {
                 family_id: family_id_,
                 snapshot_id: snapshot_id_,
                 msg: Some(&msg_[..]),
@@ -365,7 +369,8 @@ impl SnapshotIndex {
                 tag: tags::Tag::Done as i32,
             };
 
-            diesel::insert(&new).into(snapshots)
+            diesel::insert(&new)
+                .into(snapshots)
                 .execute(&self.conn)
                 .expect("Error inserting new snapshot");
         }

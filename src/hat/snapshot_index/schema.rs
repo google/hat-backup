@@ -23,7 +23,8 @@ table! {
 }
 
 joinable!(snapshots -> family (family_id));
-select_column_workaround!(snapshots -> family (id, tag, family_id, snapshot_id, msg, hash, tree_ref));
+select_column_workaround!(snapshots -> family (id, tag, family_id, snapshot_id, msg,
+                                               hash, tree_ref));
 select_column_workaround!(family -> snapshots (id, name));
 
 
