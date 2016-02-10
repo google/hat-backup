@@ -27,12 +27,12 @@ threadpool = "*"
 git = "https://github.com/linuxfood/rustsqlite"
 
 [dependencies.diesel]
-diesel = "0.5.*"
+version = "0.5.*"
 default-features = false
 features = ["sqlite"]
 
 [dependencies.diesel_codegen]
-diesel_codegen = "0.5.*"
+version = "0.5.*"
 default-features = false
 features = ["nightly", "sqlite"]
 
