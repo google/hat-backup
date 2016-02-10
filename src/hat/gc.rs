@@ -19,7 +19,7 @@ use std::mem;
 use std::sync::{mpsc, Arc, Mutex};
 
 use hash_index::GcData;
-use snapshot_index::SnapshotInfo;
+use snapshot::SnapshotInfo;
 use tags;
 
 

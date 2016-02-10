@@ -80,14 +80,14 @@ mod hash_tree;
 mod blob_index;
 mod blob_store;
 
-mod keys;
+mod key;
 
 mod gc;
 mod gc_noop;
 mod gc_rc;
 mod tags;
 
-mod snapshot_index;
+mod snapshot;
 
 
 pub mod root_capnp {

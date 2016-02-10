@@ -16,7 +16,7 @@
 use std::boxed::FnBox;
 use std::sync::mpsc;
 
-use snapshot_index::SnapshotInfo;
+use snapshot::SnapshotInfo;
 use gc;
 
 
