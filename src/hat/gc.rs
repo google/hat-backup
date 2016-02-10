@@ -19,7 +19,7 @@ use std::mem;
 use std::sync::{mpsc, Arc, Mutex};
 
 use hash::GcData;
-use snapshot::SnapshotInfo;
+use snapshot;
 use tags;
 
 
@@ -69,12 +69,12 @@ pub fn mark_tree<B>(backend: &mut Box<B>, root: Id, tag: tags::Tag)
 
 
 pub trait Gc {
-    fn register(&mut self, snapshot: SnapshotInfo, refs: mpsc::Receiver<Id>);
-    fn register_final(&mut self, snapshot: SnapshotInfo, final_ref: Id);
-    fn register_cleanup(&mut self, snapshot: SnapshotInfo, final_ref: Id);
+    fn register(&mut self, snapshot: snapshot::Info, refs: mpsc::Receiver<Id>);
+    fn register_final(&mut self, snapshot: snapshot::Info, final_ref: Id);
+    fn register_cleanup(&mut self, snapshot: snapshot::Info, final_ref: Id);
 
     fn deregister(&mut self,
-                  snapshot: SnapshotInfo,
+                  snapshot: snapshot::Info,
                   final_ref: Id,
                   Box<FnBox() -> mpsc::Receiver<Id>>);
 
@@ -120,11 +120,11 @@ impl SafeMemoryBackend {
         self.backend.lock().unwrap().parents.insert(hash_id, childs);
     }
 
-    fn insert_snapshot(&mut self, info: &SnapshotInfo, refs: Vec<Id>) {
+    fn insert_snapshot(&mut self, info: &snapshot::Info, refs: Vec<Id>) {
         self.backend.lock().unwrap().snapshot_refs.insert(info.unique_id, refs);
     }
 
-    fn list_snapshot_refs(&self, info: SnapshotInfo) -> mpsc::Receiver<Id> {
+    fn list_snapshot_refs(&self, info: snapshot::Info) -> mpsc::Receiver<Id> {
         let (sender, receiver) = mpsc::channel();
         let refs = self.backend
                        .lock()
@@ -253,7 +253,7 @@ pub fn gc_test<GC>(snapshots: Vec<Vec<u8>>,
 
     let mut infos = vec![];
     for (i, refs) in snapshots.iter().enumerate() {
-        let info = SnapshotInfo {
+        let info = snapshot::Info {
             unique_id: i as i64,
             family_id: 1,
             snapshot_id: i as i64,
@@ -314,7 +314,7 @@ pub fn resume_register_test<GC>(mk_gc: Box<FnBox(SafeMemoryBackend) -> Box<GC>>,
     let mut gc = mk_gc(backend.clone());
 
     let refs = vec![1, 2, 3, 4, 5];
-    let info = SnapshotInfo {
+    let info = snapshot::Info {
         unique_id: 1,
         family_id: 1,
         snapshot_id: 1,
@@ -364,7 +364,7 @@ pub fn resume_deregister_test<GC>(mk_gc: Box<FnBox(SafeMemoryBackend) -> Box<GC>
     let mut gc = mk_gc(backend.clone());
 
     let refs = vec![1, 2, 3, 4, 5];
-    let info = SnapshotInfo {
+    let info = snapshot::Info {
         unique_id: 1,
         family_id: 1,
         snapshot_id: 1,

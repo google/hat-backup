@@ -17,7 +17,7 @@ use std::boxed::FnBox;
 use std::sync::mpsc;
 
 use hash::GcData;
-use snapshot::SnapshotInfo;
+use snapshot;
 use gc;
 use tags;
 
@@ -41,7 +41,7 @@ impl<B: gc::GcBackend> GcRc<B> {
 
 
 impl<B: gc::GcBackend> gc::Gc for GcRc<B> {
-    fn register(&mut self, _snapshot: SnapshotInfo, refs: mpsc::Receiver<gc::Id>) {
+    fn register(&mut self, _snapshot: snapshot::Info, refs: mpsc::Receiver<gc::Id>) {
         // Start off with a commit to disable automatic commit and run register as one transaction.
         self.backend.manual_commit();
 
@@ -58,7 +58,7 @@ impl<B: gc::GcBackend> gc::Gc for GcRc<B> {
         }
     }
 
-    fn register_final(&mut self, _snapshot: SnapshotInfo, ref_final: gc::Id) {
+    fn register_final(&mut self, _snapshot: snapshot::Info, ref_final: gc::Id) {
         // Increment final counter and tag it as ready.
         self.backend.update_data(ref_final,
                                  DATA_FAMILY,
@@ -71,13 +71,13 @@ impl<B: gc::GcBackend> gc::Gc for GcRc<B> {
         self.backend.set_tag(ref_final, tags::Tag::InProgress);
     }
 
-    fn register_cleanup(&mut self, _snapshot: SnapshotInfo, ref_final: gc::Id) {
+    fn register_cleanup(&mut self, _snapshot: snapshot::Info, ref_final: gc::Id) {
         // Clear tag of final reference.
         self.backend.set_tag(ref_final, tags::Tag::Done);
     }
 
     fn deregister(&mut self,
-                  _snapshot: SnapshotInfo,
+                  _snapshot: snapshot::Info,
                   ref_final: gc::Id,
                   refs: Box<FnBox() -> mpsc::Receiver<gc::Id>>) {
         // Start off with a commit to disable automatic commit.

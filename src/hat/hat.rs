@@ -25,7 +25,6 @@ use blob;
 use hash;
 use key;
 
-use snapshot::{SnapshotInfo, SnapshotIndex, SnapshotIndexProcess};
 use snapshot;
 
 use listdir;
@@ -137,7 +136,7 @@ impl gc::GcBackend for GcBackend {
 
 pub struct Hat<B> {
     repository_root: PathBuf,
-    snapshot_index: SnapshotIndexProcess,
+    snapshot_index: snapshot::IndexProcess,
     blob_store: blob::StoreProcess,
     hash_index: hash::IndexProcess,
     blob_backend: B,
@@ -193,7 +192,7 @@ impl<B: 'static + blob::StoreBackend + Clone + Send> Hat<B> {
         let snapshot_index_path = snapshot_index_name(repository_root);
         let blob_index_path = blob_index_name(repository_root);
         let hash_index_path = hash_index_name(repository_root);
-        let si_p = Process::new(Box::new(move || SnapshotIndex::new(snapshot_index_path)));
+        let si_p = Process::new(Box::new(move || snapshot::Index::new(snapshot_index_path)));
         let bi_p = Process::new(Box::new(move || blob::Index::new(blob_index_path)));
         let hi_p = Process::new(Box::new(move || hash::Index::new(hash_index_path)));
 
@@ -394,7 +393,7 @@ impl<B: 'static + blob::StoreBackend + Clone + Send> Hat<B> {
         assert_eq!(need_work.len(), 0);
     }
 
-    pub fn commit(&mut self, family_name: String, resume_info: Option<SnapshotInfo>) {
+    pub fn commit(&mut self, family_name: String, resume_info: Option<snapshot::Info>) {
         let family = self.open_family(family_name.clone())
                          .expect(&format!("Could not open family '{}'", family_name));
 
@@ -402,7 +401,7 @@ impl<B: 'static + blob::StoreBackend + Clone + Send> Hat<B> {
         //  Reserve the snapshot and commit the reservation.
         //  Register all but the last hashes.
         //  (the last hash is a special-case, as the GC use it to save meta-data for resuming)
-        let snapshot_info = match resume_info {
+        let snap_info = match resume_info {
             Some(info) => info,  // Resume already started commit.
             None => {
                 // Create new commit.
@@ -432,7 +431,7 @@ impl<B: 'static + blob::StoreBackend + Clone + Send> Hat<B> {
             let (s, r) = mpsc::channel();
 
             thread::spawn(move || s.send(local_family.commit(hash_sender)));
-            self.gc.register(snapshot_info.clone(), hash_id_receiver);
+            self.gc.register(snap_info.clone(), hash_id_receiver);
 
             r.recv().unwrap()
         };
@@ -444,9 +443,8 @@ impl<B: 'static + blob::StoreBackend + Clone + Send> Hat<B> {
         // Tag 2:
         // We update the snapshot entry with the tree hash, which we then register.
         // When the GC has seen the final hash, we flush everything so far.
-        match self.snapshot_index.send_reply(snapshot::Msg::Update(snapshot_info.clone(),
-                                                                   hash.clone(),
-                                                                   top_ref)) {
+        match self.snapshot_index
+                  .send_reply(snapshot::Msg::Update(snap_info.clone(), hash.clone(), top_ref)) {
             snapshot::Reply::UpdateOk => (),
             _ => panic!("Snapshot index update failed"),
         };
@@ -457,34 +455,34 @@ impl<B: 'static + blob::StoreBackend + Clone + Send> Hat<B> {
         // After a successful flush, all GC work is done.
         // The GC must be able to tell if it has completed or not.
         let hash_id = get_hash_id(&self.hash_index, hash.clone()).unwrap();
-        self.gc.register_final(snapshot_info.clone(), hash_id);
+        self.gc.register_final(snap_info.clone(), hash_id);
         family.flush();
-        self.commit_finalize(family, snapshot_info, hash);
+        self.commit_finalize(family, snap_info, hash);
     }
 
     fn commit_finalize_by_name(&mut self,
                                family_name: String,
-                               snapshot_info: SnapshotInfo,
+                               snap_info: snapshot::Info,
                                hash: hash::Hash) {
         let family = self.open_family(family_name).expect("Unknown family name");
-        self.commit_finalize(family, snapshot_info, hash);
+        self.commit_finalize(family, snap_info, hash);
     }
 
-    fn commit_finalize(&mut self, family: Family, snapshot_info: SnapshotInfo, hash: hash::Hash) {
+    fn commit_finalize(&mut self, family: Family, snap_info: snapshot::Info, hash: hash::Hash) {
         // Commit locally. Let the GC perform any needed cleanup.
         match self.snapshot_index
-                  .send_reply(snapshot::Msg::ReadyCommit(snapshot_info.clone())) {
+                  .send_reply(snapshot::Msg::ReadyCommit(snap_info.clone())) {
             snapshot::Reply::UpdateOk => (),
             _ => panic!("Invalid reply from snapshot index"),
         };
         self.flush_snapshot_index();
 
         let hash_id = get_hash_id(&self.hash_index, hash).unwrap();
-        self.gc.register_cleanup(snapshot_info.clone(), hash_id);
+        self.gc.register_cleanup(snap_info.clone(), hash_id);
         family.flush();
 
         // Tag 0: All is done.
-        match self.snapshot_index.send_reply(snapshot::Msg::Commit(snapshot_info)) {
+        match self.snapshot_index.send_reply(snapshot::Msg::Commit(snap_info)) {
             snapshot::Reply::CommitOk => (),
             _ => panic!("Invalid reply from snapshot index"),
         };
@@ -618,26 +616,29 @@ impl<B: 'static + blob::StoreBackend + Clone + Send> Hat<B> {
 
     fn deregister_finalize_by_name(&mut self,
                                    family_name: String,
-                                   snapshot_info: SnapshotInfo,
+                                   snap_info: snapshot::Info,
                                    hash_id: gc::Id) {
         let family = self.open_family(family_name).expect("Unknown family name");
-        self.deregister_finalize(family, snapshot_info, hash_id);
+        self.deregister_finalize(family, snap_info, hash_id);
     }
 
-    fn deregister_finalize(&mut self, family: Family, info: SnapshotInfo, final_ref: gc::Id) {
+    fn deregister_finalize(&mut self,
+                           family: Family,
+                           snap_info: snapshot::Info,
+                           final_ref: gc::Id) {
         // Mark the snapshot to enable resuming.
-        match self.snapshot_index.send_reply(snapshot::Msg::ReadyDelete(info.clone())) {
+        match self.snapshot_index.send_reply(snapshot::Msg::ReadyDelete(snap_info.clone())) {
             snapshot::Reply::UpdateOk => (),
             _ => panic!("Unexpected reply from snapshot index."),
         }
         self.flush_snapshot_index();
 
         // Clear GC state.
-        self.gc.register_cleanup(info.clone(), final_ref);
+        self.gc.register_cleanup(snap_info.clone(), final_ref);
         family.flush();
 
         // Delete snapshot metadata.
-        self.snapshot_index.send_reply(snapshot::Msg::Delete(info));
+        self.snapshot_index.send_reply(snapshot::Msg::Delete(snap_info));
         self.flush_snapshot_index();
 
         match self.snapshot_index.send_reply(snapshot::Msg::Flush) {

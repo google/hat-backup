@@ -28,25 +28,25 @@ mod schema;
 
 
 #[derive(Clone, Debug)]
-pub struct SnapshotInfo {
+pub struct Info {
     pub unique_id: i64,
     pub family_id: i64,
     pub snapshot_id: i64,
 }
 
-pub type SnapshotIndexProcess = process::Process<Msg, Reply>;
+pub type IndexProcess = process::Process<Msg, Reply>;
 
 pub enum Msg {
     Reserve(String),
 
     /// Update existing snapshot.
-    Update(SnapshotInfo, hash::Hash, blob::ChunkRef),
+    Update(Info, hash::Hash, blob::ChunkRef),
 
     /// ReadyCommit.
-    ReadyCommit(SnapshotInfo),
+    ReadyCommit(Info),
 
     /// Register a new snapshot by its family name, hash and persistent reference.
-    Commit(SnapshotInfo),
+    Commit(Info),
 
     /// Extract latest snapshot data for family.
     Latest(String),
@@ -55,13 +55,13 @@ pub enum Msg {
     Lookup(String, i64),
 
     /// We are deleting this snapshot.
-    WillDelete(SnapshotInfo),
+    WillDelete(Info),
 
     /// We are ready to delete of this snapshot.
-    ReadyDelete(SnapshotInfo),
+    ReadyDelete(Info),
 
     /// Delete snapshot.
-    Delete(SnapshotInfo),
+    Delete(Info),
 
     /// List incomplete snapshots (either committing or deleting).
     ListNotDone,
@@ -77,12 +77,12 @@ pub enum Msg {
 }
 
 pub enum Reply {
-    Reserved(SnapshotInfo),
+    Reserved(Info),
     UpdateOk,
     CommitOk,
-    Snapshot(Option<(SnapshotInfo, hash::Hash, Option<blob::ChunkRef>)>),
-    NotDone(Vec<SnapshotStatus>),
-    All(Vec<SnapshotStatus>),
+    Snapshot(Option<(Info, hash::Hash, Option<blob::ChunkRef>)>),
+    NotDone(Vec<Status>),
+    All(Vec<Status>),
     FlushOk,
     RecoverOk,
 }
@@ -96,9 +96,9 @@ pub enum WorkStatus {
 }
 
 #[derive(Debug)]
-pub struct SnapshotStatus {
+pub struct Status {
     pub family_name: String,
-    pub info: SnapshotInfo,
+    pub info: Info,
     pub hash: Option<hash::Hash>,
     pub msg: Option<String>,
     pub tree_ref: Option<Vec<u8>>,
@@ -106,15 +106,15 @@ pub struct SnapshotStatus {
 }
 
 
-pub struct SnapshotIndex {
+pub struct Index {
     conn: SqliteConnection,
 }
 
-impl SnapshotIndex {
-    pub fn new(path: String) -> SnapshotIndex {
+impl Index {
+    pub fn new(path: String) -> Index {
         let conn = SqliteConnection::establish(&path).expect("Could not open SQLite database");
 
-        let si = SnapshotIndex { conn: conn };
+        let si = Index { conn: conn };
 
         diesel::migrations::run_pending_migrations(&si.conn).unwrap();
         si.conn.begin_transaction().unwrap();
@@ -122,8 +122,8 @@ impl SnapshotIndex {
     }
 
     #[cfg(test)]
-    pub fn new_for_testing() -> SnapshotIndex {
-        SnapshotIndex::new(":memory:".to_string())
+    pub fn new_for_testing() -> Index {
+        Index::new(":memory:".to_string())
     }
 
     fn last_insert_rowid(&self) -> i64 {
@@ -142,7 +142,7 @@ impl SnapshotIndex {
               .expect("Error reading family")
     }
 
-    fn delete_snapshot(&self, info: SnapshotInfo) {
+    fn delete_snapshot(&self, info: Info) {
         use self::schema::snapshots::dsl::*;
 
         let count = diesel::delete(snapshots.find(info.unique_id)
@@ -186,7 +186,7 @@ impl SnapshotIndex {
     fn get_snapshot_info(&mut self,
                          family_name_: String,
                          snapshot_id_: i64)
-                         -> Option<(SnapshotInfo, hash::Hash, Option<blob::ChunkRef>)> {
+                         -> Option<(Info, hash::Hash, Option<blob::ChunkRef>)> {
         use self::schema::snapshots::dsl::*;
         use self::schema::family::dsl::{family, name};
 
@@ -199,7 +199,7 @@ impl SnapshotIndex {
                                .expect("Error reading snapshot info");
 
         row_opt.map(|snap| {
-            (SnapshotInfo {
+            (Info {
                 unique_id: snap.id,
                 family_id: snap.family_id,
                 snapshot_id: snap.snapshot_id,
@@ -209,7 +209,7 @@ impl SnapshotIndex {
         })
     }
 
-    fn reserve_snapshot(&mut self, family_: String) -> SnapshotInfo {
+    fn reserve_snapshot(&mut self, family_: String) -> Info {
         use self::schema::snapshots::dsl::*;
 
         let family_id_ = self.get_or_create_family_id(&family_);
@@ -230,7 +230,7 @@ impl SnapshotIndex {
             .expect("Error inserting snapshot");
 
         let unique_id_ = self.last_insert_rowid();
-        return SnapshotInfo {
+        return Info {
             unique_id: unique_id_,
             family_id: family_id_,
             snapshot_id: snapshot_id_,
@@ -238,7 +238,7 @@ impl SnapshotIndex {
     }
 
     fn update(&mut self,
-              snapshot_: SnapshotInfo,
+              snapshot_: Info,
               msg_: String,
               hash_: hash::Hash,
               tree_ref_: blob::ChunkRef) {
@@ -252,7 +252,7 @@ impl SnapshotIndex {
             .expect("Error updating snapshot");
     }
 
-    fn set_tag(&mut self, snapshot_: SnapshotInfo, tag_: tags::Tag) {
+    fn set_tag(&mut self, snapshot_: Info, tag_: tags::Tag) {
         use self::schema::snapshots::dsl::*;
 
         diesel::update(snapshots.find(snapshot_.unique_id))
@@ -263,7 +263,7 @@ impl SnapshotIndex {
 
     fn latest_snapshot(&mut self,
                        family: String)
-                       -> Option<(SnapshotInfo, hash::Hash, Option<blob::ChunkRef>)> {
+                       -> Option<(Info, hash::Hash, Option<blob::ChunkRef>)> {
         let family_id_opt = self.get_family_id(&family);
         family_id_opt.and_then(|family_id_| {
             use self::schema::snapshots::dsl::*;
@@ -275,7 +275,7 @@ impl SnapshotIndex {
                                    .expect("Error reading latest snapshot");
 
             row_opt.map(|snap| {
-                (SnapshotInfo {
+                (Info {
                     unique_id: snap.id,
                     family_id: snap.family_id,
                     snapshot_id: snap.snapshot_id,
@@ -286,7 +286,7 @@ impl SnapshotIndex {
         })
     }
 
-    fn list_all(&mut self, skip_tag: Option<tags::Tag>) -> Vec<SnapshotStatus> {
+    fn list_all(&mut self, skip_tag: Option<tags::Tag>) -> Vec<Status> {
         use diesel::*;
         use self::schema::snapshots::dsl::*;
         use self::schema::family::dsl::family;
@@ -322,13 +322,13 @@ impl SnapshotIndex {
                         Some(::hash::Hash { bytes: bytes })
                     }
                 });
-                SnapshotStatus {
+                Status {
                     family_name: fam.name,
                     msg: snap.msg,
                     hash: hash_,
                     tree_ref: snap.tree_ref,
                     status: status,
-                    info: SnapshotInfo {
+                    info: Info {
                         unique_id: snap.id,
                         snapshot_id: snap.snapshot_id,
                         family_id: fam.id,
@@ -381,7 +381,7 @@ impl SnapshotIndex {
 }
 
 
-impl process::MsgHandler<Msg, Reply> for SnapshotIndex {
+impl process::MsgHandler<Msg, Reply> for Index {
     fn handle(&mut self, msg: Msg, reply: Box<Fn(Reply)>) {
         match msg {
 
