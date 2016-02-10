@@ -22,16 +22,13 @@ use hash_index;
 
 use process::{Process, MsgHandler};
 
-use key_index::{KeyIndexProcess, KeyEntry};
-use key_index;
+mod index;
+pub use self::index::{Index, IndexProcess, Entry};
 
 
-#[cfg(test)]
-use key_index::KeyIndex;
+pub type StoreProcess<IT> = Process<Msg<IT>, Reply>;
 
-pub type KeyStoreProcess<IT> = Process<Msg<IT>, Reply>;
-
-pub type DirElem = (KeyEntry,
+pub type DirElem = (Entry,
                     Option<blob_store::ChunkRef>,
                     Option<Box<FnBox() -> Option<ReaderResult<HashStoreBackend>> + Send>>);
 
@@ -40,7 +37,7 @@ pub enum Msg<IT> {
     /// Insert a key into the index. If this key has associated data a "chunk-iterator creator"
     /// can be passed along with it. If the data turns out to be unreadable, this iterator proc
     /// can return `None`. Returns `Id` with the new entry ID.
-    Insert(KeyEntry, Option<Box<FnBox() -> Option<IT> + Send>>),
+    Insert(Entry, Option<Box<FnBox() -> Option<IT> + Send>>),
 
     /// List a "directory" (aka. a `level`) in the index.
     /// Returns `ListResult` with all the entries under the given parent.
@@ -58,19 +55,19 @@ pub enum Reply {
 }
 
 #[derive(Clone)]
-pub struct KeyStore {
-    index: KeyIndexProcess,
+pub struct Store {
+    index: index::IndexProcess,
     hash_index: hash_index::HashIndexProcess,
     blob_store: blob_store::BlobStoreProcess,
 }
 
 // Implementations
-impl KeyStore {
-    pub fn new(index: KeyIndexProcess,
+impl Store {
+    pub fn new(index: index::IndexProcess,
                hash_index: hash_index::HashIndexProcess,
                blob_store: blob_store::BlobStoreProcess)
-               -> KeyStore {
-        KeyStore {
+               -> Store {
+        Store {
             index: index,
             hash_index: hash_index,
             blob_store: blob_store,
@@ -78,15 +75,14 @@ impl KeyStore {
     }
 
     #[cfg(test)]
-    pub fn new_for_testing<B: 'static + blob_store::BlobStoreBackend + Send + Clone>
-        (backend: B)
-         -> KeyStore {
-        let ki_p = Process::new(Box::new(move || KeyIndex::new_for_testing()));
+    pub fn new_for_testing<B: 'static + blob_store::BlobStoreBackend + Send + Clone>(backend: B)
+                                                                                     -> Store {
+        let ki_p = Process::new(Box::new(move || index::Index::new_for_testing()));
         let hi_p = Process::new(Box::new(move || hash_index::HashIndex::new_for_testing()));
         let bs_p = Process::new(Box::new(move || {
             blob_store::BlobStore::new_for_testing(backend, 1024)
         }));
-        KeyStore {
+        Store {
             index: ki_p,
             hash_index: hi_p,
             blob_store: bs_p,
@@ -96,7 +92,7 @@ impl KeyStore {
     pub fn flush(&mut self) {
         self.blob_store.send_reply(blob_store::Msg::Flush);
         self.hash_index.send_reply(hash_index::Msg::Flush);
-        self.index.send_reply(key_index::Msg::Flush);
+        self.index.send_reply(index::Msg::Flush);
     }
 
     pub fn hash_tree_writer(&mut self) -> SimpleHashTreeWriter<HashStoreBackend> {
@@ -229,7 +225,7 @@ fn file_size_warning(name: &[u8], wanted: u64, got: u64) {
     }
 }
 
-impl<IT: Iterator<Item = Vec<u8>>> MsgHandler<Msg<IT>, Reply> for KeyStore {
+impl<IT: Iterator<Item = Vec<u8>>> MsgHandler<Msg<IT>, Reply> for Store {
     fn handle(&mut self, msg: Msg<IT>, reply: Box<Fn(Reply)>) {
         match msg {
             Msg::Flush => {
@@ -238,8 +234,8 @@ impl<IT: Iterator<Item = Vec<u8>>> MsgHandler<Msg<IT>, Reply> for KeyStore {
             }
 
             Msg::ListDir(parent) => {
-                match self.index.send_reply(key_index::Msg::ListDir(parent)) {
-                    key_index::Reply::ListResult(entries) => {
+                match self.index.send_reply(index::Msg::ListDir(parent)) {
+                    index::Reply::ListResult(entries) => {
                         let mut my_entries: Vec<DirElem> = Vec::with_capacity(entries.len());
                         for (entry, persistent_ref) in entries.into_iter() {
                             let open_fn = entry.data_hash.as_ref().map(|bytes| {
@@ -264,8 +260,8 @@ impl<IT: Iterator<Item = Vec<u8>>> MsgHandler<Msg<IT>, Reply> for KeyStore {
             }
 
             Msg::Insert(org_entry, chunk_it_opt) => {
-                let entry = match self.index.send_reply(key_index::Msg::LookupExact(org_entry)) {
-                    key_index::Reply::Entry(entry) => {
+                let entry = match self.index.send_reply(index::Msg::LookupExact(org_entry)) {
+                    index::Reply::Entry(entry) => {
                         if entry.data_hash.is_some() {
                             match self.hash_index
                                       .send_reply(hash_index::Msg::HashExists(hash_index::Hash {
@@ -280,9 +276,9 @@ impl<IT: Iterator<Item = Vec<u8>>> MsgHandler<Msg<IT>, Reply> for KeyStore {
                             entry
                         }
                     }
-                    key_index::Reply::NotFound(entry) => {
-                        match self.index.send_reply(key_index::Msg::Insert(entry)) {
-                            key_index::Reply::Entry(entry) => entry,
+                    index::Reply::NotFound(entry) => {
+                        match self.index.send_reply(index::Msg::Insert(entry)) {
+                            index::Reply::Entry(entry) => entry,
                             _ => panic!("Could not insert entry into key index."),
                         }
                     }
@@ -302,7 +298,7 @@ impl<IT: Iterator<Item = Vec<u8>>> MsgHandler<Msg<IT>, Reply> for KeyStore {
                 let it_opt = chunk_it_opt.and_then(|open| open());
                 if it_opt.is_none() {
                     // No data is associated with this entry.
-                    self.index.send_reply(key_index::Msg::UpdateDataHash(entry, None, None));
+                    self.index.send_reply(index::Msg::UpdateDataHash(entry, None, None));
                     // Bail out before storing data that does not exist:
                     return;
                 }
@@ -325,10 +321,10 @@ impl<IT: Iterator<Item = Vec<u8>>> MsgHandler<Msg<IT>, Reply> for KeyStore {
 
                 // Update hash in key index.
                 // It is OK that this has is not yet valid, as we check hashes at snapshot time.
-                match self.index.send_reply(key_index::Msg::UpdateDataHash(entry,
-                                                                           Some(hash),
-                                                                           Some(persistent_ref))) {
-                    key_index::Reply::UpdateOk => (),
+                match self.index.send_reply(index::Msg::UpdateDataHash(entry,
+                                                                       Some(hash),
+                                                                       Some(persistent_ref))) {
+                    index::Reply::UpdateOk => (),
                     _ => panic!("Unexpected reply from key index."),
                 };
             }
@@ -341,9 +337,7 @@ impl<IT: Iterator<Item = Vec<u8>>> MsgHandler<Msg<IT>, Reply> for KeyStore {
 mod tests {
     use super::*;
 
-    use key_index::KeyEntry;
     use blob_store::tests::{MemoryBackend, DevNullBackend};
-
     use process::Process;
 
     use rand::Rng;
@@ -358,12 +352,12 @@ mod tests {
     }
 
     #[derive(Clone, Debug)]
-    struct KeyEntryStub {
-        key_entry: KeyEntry,
+    struct EntryStub {
+        key_entry: Entry,
         data: Option<Vec<Vec<u8>>>,
     }
 
-    impl Iterator for KeyEntryStub {
+    impl Iterator for EntryStub {
         type Item = Vec<u8>;
 
         fn next(&mut self) -> Option<Vec<u8>> {
@@ -382,7 +376,7 @@ mod tests {
 
     #[derive(Clone, Debug)]
     struct FileSystem {
-        file: KeyEntryStub,
+        file: EntryStub,
         filelist: Vec<FileSystem>,
     }
 
@@ -408,9 +402,9 @@ mod tests {
                     Some(v)
                 };
 
-                let new_root = KeyEntryStub {
+                let new_root = EntryStub {
                     data: data_opt,
-                    key_entry: KeyEntry {
+                    key_entry: Entry {
                         id: None,
                         parent_id: None, // updated by insert_and_update_fs()
 
@@ -437,9 +431,9 @@ mod tests {
             files
         }
 
-        let root = KeyEntryStub {
+        let root = EntryStub {
             data: None,
-            key_entry: KeyEntry {
+            key_entry: Entry {
                 parent_id: None,
                 id: None, // updated by insert_and_update_fs()
                 name: b"root".to_vec(),
@@ -460,7 +454,7 @@ mod tests {
         }
     }
 
-    fn insert_and_update_fs(fs: &mut FileSystem, ks_p: KeyStoreProcess<KeyEntryStub>) {
+    fn insert_and_update_fs(fs: &mut FileSystem, ks_p: StoreProcess<EntryStub>) {
         let local_file = fs.file.clone();
         let id = match ks_p.send_reply(Msg::Insert(fs.file.key_entry.clone(),
                                                    if fs.file.data.is_some() {
@@ -480,7 +474,7 @@ mod tests {
         }
     }
 
-    fn verify_filesystem(fs: &FileSystem, ks_p: KeyStoreProcess<KeyEntryStub>) -> usize {
+    fn verify_filesystem(fs: &FileSystem, ks_p: StoreProcess<EntryStub>) -> usize {
         let listing = match ks_p.send_reply(Msg::ListDir(fs.file.key_entry.id)) {
             Reply::ListResult(ls) => ls,
             _ => panic!("Unexpected result from key store."),
@@ -537,7 +531,7 @@ mod tests {
     fn identity() {
         fn prop(size: u8) -> bool {
             let backend = MemoryBackend::new();
-            let ks_p = Process::new(Box::new(move || KeyStore::new_for_testing(backend)));
+            let ks_p = Process::new(Box::new(move || Store::new_for_testing(backend)));
 
             let mut fs = rng_filesystem(size as usize);
             insert_and_update_fs(&mut fs, ks_p.clone());
@@ -557,8 +551,8 @@ mod tests {
     #[bench]
     fn insert_1_key_x_128000_zeros(bench: &mut Bencher) {
         let backend = DevNullBackend;
-        let ks_p: KeyStoreProcess<KeyEntryStub> = Process::new(Box::new(move || {
-            KeyStore::new_for_testing(backend)
+        let ks_p: StoreProcess<EntryStub> = Process::new(Box::new(move || {
+            Store::new_for_testing(backend)
         }));
 
         let bytes = vec![0u8; 128*1024];
@@ -567,9 +561,9 @@ mod tests {
         bench.iter(|| {
             i += 1;
 
-            let entry = KeyEntryStub {
+            let entry = EntryStub {
                 data: Some(vec![bytes.clone()]),
-                key_entry: KeyEntry {
+                key_entry: Entry {
                     parent_id: None,
                     id: None,
                     name: format!("{}", i).as_bytes().to_vec(),
@@ -595,8 +589,8 @@ mod tests {
     #[bench]
     fn insert_1_key_x_128000_unique(bench: &mut Bencher) {
         let backend = DevNullBackend;
-        let ks_p: KeyStoreProcess<KeyEntryStub> = Process::new(Box::new(move || {
-            KeyStore::new_for_testing(backend)
+        let ks_p: StoreProcess<EntryStub> = Process::new(Box::new(move || {
+            Store::new_for_testing(backend)
         }));
 
         let bytes = vec![0u8; 128*1024];
@@ -610,9 +604,9 @@ mod tests {
             my_bytes[1] = (i / 256) as u8;
             my_bytes[2] = (i / 65536) as u8;
 
-            let entry = KeyEntryStub {
+            let entry = EntryStub {
                 data: Some(vec![my_bytes]),
-                key_entry: KeyEntry {
+                key_entry: Entry {
                     parent_id: None,
                     id: None,
                     name: format!("{}", i).as_bytes().to_vec(),
@@ -639,16 +633,16 @@ mod tests {
     #[bench]
     fn insert_1_key_x_16_x_128000_zeros(bench: &mut Bencher) {
         let backend = DevNullBackend;
-        let ks_p: KeyStoreProcess<KeyEntryStub> = Process::new(Box::new(move || {
-            KeyStore::new_for_testing(backend)
+        let ks_p: StoreProcess<EntryStub> = Process::new(Box::new(move || {
+            Store::new_for_testing(backend)
         }));
 
         bench.iter(|| {
             let bytes = vec![0u8; 128*1024];
 
-            let entry = KeyEntryStub {
+            let entry = EntryStub {
                 data: Some(vec![bytes; 16]),
-                key_entry: KeyEntry {
+                key_entry: Entry {
                     parent_id: None,
                     id: None,
                     name: vec![1u8, 2, 3].to_vec(),
@@ -677,8 +671,8 @@ mod tests {
     #[bench]
     fn insert_1_key_x_16_x_128000_unique(bench: &mut Bencher) {
         let backend = DevNullBackend;
-        let ks_p: KeyStoreProcess<KeyEntryStub> = Process::new(Box::new(move || {
-            KeyStore::new_for_testing(backend)
+        let ks_p: StoreProcess<EntryStub> = Process::new(Box::new(move || {
+            Store::new_for_testing(backend)
         }));
 
         let bytes = vec![0u8; 128*1024];
@@ -699,9 +693,9 @@ mod tests {
                 chunks.push(local_bytes);
             }
 
-            let entry = KeyEntryStub {
+            let entry = EntryStub {
                 data: Some(chunks),
-                key_entry: KeyEntry {
+                key_entry: Entry {
                     parent_id: None,
                     id: None,
                     name: vec![1u8, 2, 3],
@@ -731,14 +725,14 @@ mod tests {
     #[bench]
     fn insert_1_key_unchanged_empty(bench: &mut Bencher) {
         let backend = DevNullBackend;
-        let ks_p: KeyStoreProcess<KeyEntryStub> = Process::new(Box::new(move || {
-            KeyStore::new_for_testing(backend)
+        let ks_p: StoreProcess<EntryStub> = Process::new(Box::new(move || {
+            Store::new_for_testing(backend)
         }));
 
         bench.iter(|| {
-            let entry = KeyEntryStub {
+            let entry = EntryStub {
                 data: None,
-                key_entry: KeyEntry {
+                key_entry: Entry {
                     parent_id: None,
                     id: None,
                     name: vec![1u8, 2, 3].to_vec(),
@@ -759,16 +753,16 @@ mod tests {
     #[bench]
     fn insert_1_key_updated_empty(bench: &mut Bencher) {
         let backend = DevNullBackend;
-        let ks_p: KeyStoreProcess<KeyEntryStub> = Process::new(Box::new(move || {
-            KeyStore::new_for_testing(backend)
+        let ks_p: StoreProcess<EntryStub> = Process::new(Box::new(move || {
+            Store::new_for_testing(backend)
         }));
 
         let mut i = 0;
         bench.iter(|| {
             i += 1;
-            let entry = KeyEntryStub {
+            let entry = EntryStub {
                 data: None,
-                key_entry: KeyEntry {
+                key_entry: Entry {
                     parent_id: None,
                     id: None,
                     name: vec![1u8, 2, 3].to_vec(),
@@ -789,16 +783,16 @@ mod tests {
     #[bench]
     fn insert_1_key_unique_empty(bench: &mut Bencher) {
         let backend = DevNullBackend;
-        let ks_p: KeyStoreProcess<KeyEntryStub> = Process::new(Box::new(move || {
-            KeyStore::new_for_testing(backend)
+        let ks_p: StoreProcess<EntryStub> = Process::new(Box::new(move || {
+            Store::new_for_testing(backend)
         }));
 
         let mut i = 0;
         bench.iter(|| {
             i += 1;
-            let entry = KeyEntryStub {
+            let entry = EntryStub {
                 data: None,
-                key_entry: KeyEntry {
+                key_entry: Entry {
                     parent_id: None,
                     id: None,
                     name: format!("{}", i).as_bytes().to_vec(),

@@ -32,7 +32,7 @@ use rustc_serialize::hex::ToHex;
 
 
 #[derive(Clone, Debug)]
-pub struct KeyEntry {
+pub struct Entry {
     pub id: Option<u64>,
     pub parent_id: Option<u64>,
 
@@ -50,20 +50,20 @@ pub struct KeyEntry {
     pub data_length: Option<u64>,
 }
 
-pub type KeyIndexProcess = Process<Msg, Reply>;
+pub type IndexProcess = Process<Msg, Reply>;
 
 pub enum Msg {
     /// Insert an entry in the key index.
     /// Returns `Id` with the new entry ID.
-    Insert(KeyEntry),
+    Insert(Entry),
 
     /// Lookup an entry in the key index, to see if it exists.
     /// Returns either `Id` with the found entry ID or `Notfound`.
-    LookupExact(KeyEntry),
+    LookupExact(Entry),
 
     /// Update the `payload` and `persistent_ref` of an entry.
     /// Returns `UpdateOk`.
-    UpdateDataHash(KeyEntry, Option<hash_index::Hash>, Option<blob_store::ChunkRef>),
+    UpdateDataHash(Entry, Option<hash_index::Hash>, Option<blob_store::ChunkRef>),
 
     /// List a directory (aka. `level`) in the index.
     /// Returns `ListResult` with all the entries under the given parent.
@@ -74,15 +74,15 @@ pub enum Msg {
 }
 
 pub enum Reply {
-    Entry(KeyEntry),
-    NotFound(KeyEntry),
+    Entry(Entry),
+    NotFound(Entry),
     UpdateOk,
-    ListResult(Vec<(KeyEntry, Option<blob_store::ChunkRef>)>),
+    ListResult(Vec<(Entry, Option<blob_store::ChunkRef>)>),
     FlushOk,
 }
 
 
-pub struct KeyIndex {
+pub struct Index {
     path: String,
     dbh: Database,
     flush_timer: PeriodicTimer,
@@ -97,11 +97,11 @@ fn i64_to_u64_or_panic(x: i64) -> u64 {
 }
 
 
-impl KeyIndex {
-    pub fn new(path: String) -> KeyIndex {
+impl Index {
+    pub fn new(path: String) -> Index {
         let mut ki = match open(&path) {
             Ok(dbh) => {
-                KeyIndex {
+                Index {
                     path: path,
                     dbh: dbh,
                     flush_timer: PeriodicTimer::new(Duration::seconds(5)),
@@ -136,8 +136,8 @@ impl KeyIndex {
     }
 
     #[cfg(test)]
-    pub fn new_for_testing() -> KeyIndex {
-        KeyIndex::new(":memory:".to_string())
+    pub fn new_for_testing() -> Index {
+        Index::new(":memory:".to_string())
     }
 
     fn exec_or_die(&mut self, sql: &str) {
@@ -166,19 +166,19 @@ impl KeyIndex {
     }
 }
 
-impl Clone for KeyIndex {
-    fn clone(&self) -> KeyIndex {
-        KeyIndex::new(self.path.clone())
+impl Clone for Index {
+    fn clone(&self) -> Index {
+        Index::new(self.path.clone())
     }
 }
 
-impl Drop for KeyIndex {
+impl Drop for Index {
     fn drop(&mut self) {
         self.exec_or_die("COMMIT");
     }
 }
 
-impl MsgHandler<Msg, Reply> for KeyIndex {
+impl MsgHandler<Msg, Reply> for Index {
     fn handle(&mut self, msg: Msg, reply: Box<Fn(Reply)>) {
         let unwrap_i64_or_null = |x: Option<i64>| x.map_or("NULL".to_string(), |v| v.to_string());
 
@@ -344,7 +344,7 @@ impl MsgHandler<Msg, Reply> for KeyIndex {
                                   }
                               });
 
-                    listing.push((KeyEntry {
+                    listing.push((Entry {
                         id: Some(id),
                         name: name,
                         created: created,

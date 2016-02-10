@@ -27,9 +27,9 @@ use blob_store::{BlobStore, BlobStoreProcess, BlobStoreBackend};
 
 use hash_index;
 use hash_index::{GcData, Hash, HashIndex, HashIndexProcess};
-use key_index::{KeyIndex, KeyEntry};
-use key_store::{KeyStore, KeyStoreProcess};
-use key_store;
+
+use keys;
+
 use snapshot_index::{SnapshotInfo, SnapshotIndex, SnapshotIndexProcess};
 use snapshot_index;
 
@@ -147,7 +147,7 @@ pub struct Hat<B> {
     blob_store: BlobStoreProcess,
     hash_index: HashIndexProcess,
     blob_backend: B,
-    hash_backend: key_store::HashStoreBackend,
+    hash_backend: keys::HashStoreBackend,
     gc: Box<gc::Gc>,
     max_blob_size: usize,
 }
@@ -170,7 +170,7 @@ fn hash_index_name(root: &PathBuf) -> String {
     concat_filename(root, "hash_index.sqlite3".to_owned())
 }
 
-fn list_snapshot(backend: &key_store::HashStoreBackend,
+fn list_snapshot(backend: &keys::HashStoreBackend,
                  out: &mpsc::Sender<Hash>,
                  family: &Family,
                  dir_hash: Hash,
@@ -218,7 +218,7 @@ impl<B: 'static + BlobStoreBackend + Clone + Send> Hat<B> {
             hash_index: hi_p.clone(),
             blob_store: bs_p.clone(),
             blob_backend: backend.clone(),
-            hash_backend: key_store::HashStoreBackend::new(hi_p, bs_p),
+            hash_backend: keys::HashStoreBackend::new(hi_p, bs_p),
             gc: Box::new(gc),
             max_blob_size: max_blob_size,
         };
@@ -229,10 +229,8 @@ impl<B: 'static + BlobStoreBackend + Clone + Send> Hat<B> {
         hat
     }
 
-    pub fn hash_tree_writer(&mut self)
-                            -> hash_tree::SimpleHashTreeWriter<key_store::HashStoreBackend> {
-        let backend = key_store::HashStoreBackend::new(self.hash_index.clone(),
-                                                       self.blob_store.clone());
+    pub fn hash_tree_writer(&mut self) -> hash_tree::SimpleHashTreeWriter<keys::HashStoreBackend> {
+        let backend = keys::HashStoreBackend::new(self.hash_index.clone(), self.blob_store.clone());
         return hash_tree::SimpleHashTreeWriter::new(8, backend);
     }
 
@@ -243,14 +241,14 @@ impl<B: 'static + BlobStoreBackend + Clone + Send> Hat<B> {
         //          -> BlobStore -> BlobIndex
 
         let key_index_path = concat_filename(&self.repository_root, name.clone());
-        let ki_p = Process::new(Box::new(move || KeyIndex::new(key_index_path)));
+        let ki_p = Process::new(Box::new(move || keys::Index::new(key_index_path)));
 
-        let local_ks = KeyStore::new(ki_p.clone(),
-                                     self.hash_index.clone(),
-                                     self.blob_store.clone());
+        let local_ks = keys::Store::new(ki_p.clone(),
+                                        self.hash_index.clone(),
+                                        self.blob_store.clone());
         let ks_p = Process::new(Box::new(move || local_ks));
 
-        let ks = KeyStore::new(ki_p, self.hash_index.clone(), self.blob_store.clone());
+        let ks = keys::Store::new(ki_p, self.hash_index.clone(), self.blob_store.clone());
 
         Some(Family {
             name: name,
@@ -709,7 +707,7 @@ impl<B: 'static + BlobStoreBackend + Clone + Send> Hat<B> {
 }
 
 struct FileEntry {
-    key_entry: KeyEntry,
+    key_entry: keys::Entry,
     metadata: fs::Metadata,
     full_path: PathBuf,
     link_path: Option<PathBuf>,
@@ -723,7 +721,7 @@ impl FileEntry {
         if filename_opt.is_some() {
             let md = fs::metadata(&full_path).unwrap();
             Ok(FileEntry {
-                key_entry: KeyEntry {
+                key_entry: keys::Entry {
                     name: filename_opt.unwrap().bytes().collect(),
                     created: Some(md.ctime_nsec()),
                     modified: Some(md.mtime_nsec()),
@@ -802,11 +800,11 @@ impl Iterator for FileIterator {
 struct InsertPathHandler {
     count: sync::Arc<sync::atomic::AtomicIsize>,
     last_print: sync::Arc<sync::Mutex<time::Timespec>>,
-    key_store: KeyStoreProcess<FileIterator>,
+    key_store: keys::StoreProcess<FileIterator>,
 }
 
 impl InsertPathHandler {
-    pub fn new(key_store: KeyStoreProcess<FileIterator>) -> InsertPathHandler {
+    pub fn new(key_store: keys::StoreProcess<FileIterator>) -> InsertPathHandler {
         InsertPathHandler {
             count: sync::Arc::new(sync::atomic::AtomicIsize::new(0)),
             last_print: sync::Arc::new(sync::Mutex::new(time::now().to_timespec())),
@@ -842,7 +840,7 @@ impl listdir::PathHandler<Option<u64>> for InsertPathHandler {
                 let local_file_entry = file_entry.clone();
 
                 match self.key_store.send_reply(
-                    key_store::Msg::Insert(
+                    keys::Msg::Insert(
                       file_entry.key_entry,
                       if is_directory { None }
                       else { Some(Box::new(move|| {
@@ -857,7 +855,7 @@ impl listdir::PathHandler<Option<u64>> for InsertPathHandler {
                             }))
                             }))
         {
-          key_store::Reply::Id(id) => {
+          keys::Reply::Id(id) => {
             if is_directory { return Some(Some(id)) }
           },
           _ => panic!("Unexpected reply from key store."),
@@ -886,8 +884,8 @@ fn try_a_few_times_then_panic<F>(f: F, msg: &str)
 #[derive(Clone)]
 pub struct Family {
     name: String,
-    key_store: KeyStore,
-    key_store_process: KeyStoreProcess<FileIterator>,
+    key_store: keys::Store,
+    key_store_process: keys::StoreProcess<FileIterator>,
 }
 
 impl Family {
@@ -897,7 +895,7 @@ impl Family {
     }
 
     pub fn flush(&self) {
-        self.key_store_process.send_reply(key_store::Msg::Flush);
+        self.key_store_process.send_reply(keys::Msg::Flush);
     }
 
   fn write_file_chunks<HTB: hash_tree::HashTreeBackend + Clone>(
@@ -936,9 +934,9 @@ impl Family {
         }
     }
 
-    pub fn list_from_key_store(&self, dir_id: Option<u64>) -> Vec<key_store::DirElem> {
-        match self.key_store_process.send_reply(key_store::Msg::ListDir(dir_id)) {
-            key_store::Reply::ListResult(ls) => ls,
+    pub fn list_from_key_store(&self, dir_id: Option<u64>) -> Vec<keys::DirElem> {
+        match self.key_store_process.send_reply(keys::Msg::ListDir(dir_id)) {
+            keys::Reply::ListResult(ls) => ls,
             _ => panic!("Unexpected result from key store."),
         }
     }
@@ -948,7 +946,7 @@ impl Family {
          dir_hash: Hash,
          dir_ref: blob_store::ChunkRef,
          backend: HTB)
-         -> Vec<(KeyEntry, Hash, blob_store::ChunkRef)> {
+         -> Vec<(keys::Entry, Hash, blob_store::ChunkRef)> {
         let mut out = Vec::new();
         let it = hash_tree::SimpleHashTreeReader::open(backend, dir_hash, Some(dir_ref))
                      .expect("unable to open dir");
@@ -969,7 +967,7 @@ impl Family {
                     // TODO(jos): Can we get rid of these?
                     break;
                 }
-                let entry = KeyEntry {
+                let entry = keys::Entry {
                     id: Some(f.get_id()),
                     name: f.get_name().unwrap().to_owned(),
                     created: match f.get_created().which().unwrap() {
@@ -1029,7 +1027,7 @@ impl Family {
     }
 
     pub fn commit_to_tree(&mut self,
-                          tree: &mut hash_tree::SimpleHashTreeWriter<key_store::HashStoreBackend>,
+                          tree: &mut hash_tree::SimpleHashTreeWriter<keys::HashStoreBackend>,
                           dir_id: Option<u64>,
                           hash_ch: mpsc::Sender<Hash>) {
 

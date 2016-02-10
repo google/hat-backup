@@ -80,8 +80,7 @@ mod hash_tree;
 mod blob_index;
 mod blob_store;
 
-mod key_index;
-mod key_store;
+mod keys;
 
 mod gc;
 mod gc_noop;
