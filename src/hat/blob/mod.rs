@@ -31,18 +31,15 @@ use std::path::PathBuf;
 
 use process::{Process, MsgHandler};
 
-use blob_index;
-use blob_index::BlobIndexProcess;
-
-#[cfg(test)]
-use blob_index::BlobIndex;
-
 use tags;
 
+mod index;
+pub use self::index::{Index, BlobDesc};
 
-pub type BlobStoreProcess = Process<Msg, Reply>;
 
-pub trait BlobStoreBackend {
+pub type StoreProcess = Process<Msg, Reply>;
+
+pub trait StoreBackend {
     fn store(&mut self, name: &[u8], data: &[u8]) -> Result<(), String>;
     fn retrieve(&mut self, name: &[u8]) -> Result<Vec<u8>, String>;
     fn delete(&mut self, name: &[u8]) -> Result<(), String>;
@@ -82,7 +79,7 @@ impl FileBackend {
     }
 }
 
-impl BlobStoreBackend for FileBackend {
+impl StoreBackend for FileBackend {
     fn store(&mut self, name: &[u8], data: &[u8]) -> Result<(), String> {
         let mut path = self.root.clone();
         path.push(&name.to_hex());
@@ -218,11 +215,11 @@ pub enum Reply {
 }
 
 
-pub struct BlobStore<B> {
+pub struct Store<B> {
     backend: B,
 
-    blob_index: BlobIndexProcess,
-    blob_desc: blob_index::BlobDesc,
+    blob_index: index::IndexProcess,
+    blob_desc: BlobDesc,
 
     buffer_data: Vec<(ChunkRef, Vec<u8>, Box<FnBox(ChunkRef) + Send>)>,
     buffer_data_len: usize,
@@ -231,17 +228,17 @@ pub struct BlobStore<B> {
 }
 
 
-fn empty_blob_desc() -> blob_index::BlobDesc {
-    blob_index::BlobDesc {
+fn empty_blob_desc() -> BlobDesc {
+    BlobDesc {
         name: vec![],
         id: 0,
     }
 }
 
 
-impl<B: BlobStoreBackend> BlobStore<B> {
-    pub fn new(index: BlobIndexProcess, backend: B, max_blob_size: usize) -> BlobStore<B> {
-        let mut bs = BlobStore {
+impl<B: StoreBackend> Store<B> {
+    pub fn new(index: index::IndexProcess, backend: B, max_blob_size: usize) -> Store<B> {
+        let mut bs = Store {
             backend: backend,
             blob_index: index,
             blob_desc: empty_blob_desc(),
@@ -254,9 +251,9 @@ impl<B: BlobStoreBackend> BlobStore<B> {
     }
 
     #[cfg(test)]
-    pub fn new_for_testing(backend: B, max_blob_size: usize) -> BlobStore<B> {
-        let bi_p = Process::new(Box::new(move || BlobIndex::new_for_testing()));
-        let mut bs = BlobStore {
+    pub fn new_for_testing(backend: B, max_blob_size: usize) -> Store<B> {
+        let bi_p = Process::new(Box::new(move || index::Index::new_for_testing()));
+        let mut bs = Store {
             backend: backend,
             blob_index: bi_p,
             blob_desc: empty_blob_desc(),
@@ -268,12 +265,12 @@ impl<B: BlobStoreBackend> BlobStore<B> {
         bs
     }
 
-    fn reserve_new_blob(&mut self) -> blob_index::BlobDesc {
+    fn reserve_new_blob(&mut self) -> BlobDesc {
         let old_blob_desc = self.blob_desc.clone();
 
-        let res = self.blob_index.send_reply(blob_index::Msg::Reserve);
+        let res = self.blob_index.send_reply(index::Msg::Reserve);
         match res {
-            blob_index::Reply::Reserved(blob_desc) => {
+            index::Reply::Reserved(blob_desc) => {
                 self.blob_desc = blob_desc;
             }
             _ => panic!("Could not reserve blob."),
@@ -317,9 +314,9 @@ impl<B: BlobStoreBackend> BlobStore<B> {
             }
         }
 
-        self.blob_index.send_reply(blob_index::Msg::InAir(old_blob_desc.clone()));
+        self.blob_index.send_reply(index::Msg::InAir(old_blob_desc.clone()));
         self.backend_store(&old_blob_desc.name[..], &blob[..]);
-        self.blob_index.send_reply(blob_index::Msg::CommitDone(old_blob_desc));
+        self.blob_index.send_reply(index::Msg::CommitDone(old_blob_desc));
 
         // Go through callbacks
         for (blobid, callback) in ready_callback.into_iter() {
@@ -334,7 +331,7 @@ impl<B: BlobStoreBackend> BlobStore<B> {
     }
 }
 
-impl<B: BlobStoreBackend> MsgHandler<Msg, Reply> for BlobStore<B> {
+impl<B: StoreBackend> MsgHandler<Msg, Reply> for Store<B> {
     fn handle(&mut self, msg: Msg, reply: Box<Fn(Reply)>) {
         match msg {
             Msg::Store(chunk, callback) => {
@@ -381,25 +378,25 @@ impl<B: BlobStoreBackend> MsgHandler<Msg, Reply> for BlobStore<B> {
                 reply(Reply::RetrieveOk(self.backend_read(name.as_bytes())));
             }
             Msg::Tag(chunk, tag) => {
-                match self.blob_index.send_reply(blob_index::Msg::Tag(blob_index::BlobDesc {
-                                                                          id: 0,
-                                                                          name: chunk.blob_id,
-                                                                      },
-                                                                      tag)) {
-                    blob_index::Reply::Ok => reply(Reply::Ok),
+                match self.blob_index.send_reply(index::Msg::Tag(BlobDesc {
+                                                                     id: 0,
+                                                                     name: chunk.blob_id,
+                                                                 },
+                                                                 tag)) {
+                    index::Reply::Ok => reply(Reply::Ok),
                     _ => panic!("Unexpected reply from blob index."),
                 }
             }
             Msg::TagAll(tag) => {
-                match self.blob_index.send_reply(blob_index::Msg::TagAll(tag)) {
-                    blob_index::Reply::Ok => reply(Reply::Ok),
+                match self.blob_index.send_reply(index::Msg::TagAll(tag)) {
+                    index::Reply::Ok => reply(Reply::Ok),
                     _ => panic!("Unexpected reply from blob index."),
                 }
             }
             Msg::DeleteByTag(tag) => {
                 let blobs = match self.blob_index
-                                      .send_reply(blob_index::Msg::ListByTag(tag.clone())) {
-                    blob_index::Reply::Listing(ch) => ch,
+                                      .send_reply(index::Msg::ListByTag(tag.clone())) {
+                    index::Reply::Listing(ch) => ch,
                     _ => panic!("Unexpected reply from blob index."),
                 };
                 for b in blobs.iter() {
@@ -408,16 +405,16 @@ impl<B: BlobStoreBackend> MsgHandler<Msg, Reply> for BlobStore<B> {
                         Err(e) => println!("Could not delete {}: {}", b.name.to_hex(), e),
                     }
                 }
-                match self.blob_index.send_reply(blob_index::Msg::DeleteByTag(tag)) {
-                    blob_index::Reply::Ok => (),
+                match self.blob_index.send_reply(index::Msg::DeleteByTag(tag)) {
+                    index::Reply::Ok => (),
                     _ => panic!("Unexpected reply from blob index."),
                 }
                 return reply(Reply::Ok);
             }
             Msg::Flush => {
                 self.flush();
-                match self.blob_index.send_reply(blob_index::Msg::Flush) {
-                    blob_index::Reply::CommitOk => (),
+                match self.blob_index.send_reply(index::Msg::Flush) {
+                    index::Reply::CommitOk => (),
                     _ => panic!("Unexpected reply from blob index."),
                 }
                 return reply(Reply::FlushOk);
@@ -468,7 +465,7 @@ pub mod tests {
         }
     }
 
-    impl BlobStoreBackend for MemoryBackend {
+    impl StoreBackend for MemoryBackend {
         fn store(&mut self, name: &[u8], data: &[u8]) -> Result<(), String> {
             self.guarded_insert(name.to_vec(), data.to_vec())
         }
@@ -485,7 +482,7 @@ pub mod tests {
     #[derive(Clone)]
     pub struct DevNullBackend;
 
-    impl BlobStoreBackend for DevNullBackend {
+    impl StoreBackend for DevNullBackend {
         fn store(&mut self, _name: &[u8], _data: &[u8]) -> Result<(), String> {
             Ok(())
         }
@@ -504,8 +501,8 @@ pub mod tests {
             let mut backend = MemoryBackend::new();
 
             let local_backend = backend.clone();
-            let bs_p: BlobStoreProcess = Process::new(Box::new(move || {
-                BlobStore::new_for_testing(local_backend, 1024)
+            let bs_p: StoreProcess = Process::new(Box::new(move || {
+                Store::new_for_testing(local_backend, 1024)
             }));
 
             let mut ids = Vec::new();
@@ -549,8 +546,8 @@ pub mod tests {
             let mut backend = MemoryBackend::new();
 
             let local_backend = backend.clone();
-            let bs_p: BlobStoreProcess = Process::new(Box::new(move || {
-                BlobStore::new_for_testing(local_backend, 1024)
+            let bs_p: StoreProcess = Process::new(Box::new(move || {
+                Store::new_for_testing(local_backend, 1024)
             }));
 
             let mut ids = Vec::new();

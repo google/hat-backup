@@ -74,11 +74,8 @@ mod hat;
 mod listdir;
 mod process;
 
-mod hash_index;
-mod hash_tree;
-
-mod blob_index;
-mod blob_store;
+mod hash;
+mod blob;
 
 mod key;
 
@@ -161,14 +158,14 @@ fn main() {
     match matches.subcommand() {
         ("resume", Some(_matches)) => {
             // Setting up the repository triggers automatic resume.
-            let backend = blob_store::FileBackend::new(blob_dir());
+            let backend = blob::FileBackend::new(blob_dir());
             hat::Hat::open_repository(&PathBuf::from("repo"), backend, MAX_BLOB_SIZE);
         }
         ("snapshot", Some(matches)) => {
             let name = matches.value_of("NAME").unwrap().to_owned();
             let path = matches.value_of("PATH").unwrap();
 
-            let backend = blob_store::FileBackend::new(blob_dir());
+            let backend = blob::FileBackend::new(blob_dir());
             let hat = hat::Hat::open_repository(&PathBuf::from("repo"), backend, MAX_BLOB_SIZE);
 
             let family_opt = hat.open_family(name.clone());
@@ -183,19 +180,19 @@ fn main() {
             let name = matches.value_of("NAME").unwrap().to_owned();
             let path = matches.value_of("PATH").unwrap();
 
-            let backend = blob_store::FileBackend::new(blob_dir());
+            let backend = blob::FileBackend::new(blob_dir());
             let hat = hat::Hat::open_repository(&PathBuf::from("repo"), backend, MAX_BLOB_SIZE);
 
             hat.checkout_in_dir(name.clone(), PathBuf::from(path));
         }
         ("meta-commit", Some(_)) => {
-            let backend = blob_store::FileBackend::new(blob_dir());
+            let backend = blob::FileBackend::new(blob_dir());
             let mut hat = hat::Hat::open_repository(&PathBuf::from("repo"), backend, MAX_BLOB_SIZE);
 
             hat.meta_commit();
         }
         ("recover", Some(_)) => {
-            let backend = blob_store::FileBackend::new(blob_dir());
+            let backend = blob::FileBackend::new(blob_dir());
             let mut hat = hat::Hat::open_repository(&PathBuf::from("repo"), backend, MAX_BLOB_SIZE);
 
             hat.recover();
@@ -203,7 +200,7 @@ fn main() {
         ("commit", Some(matches)) => {
             let name = matches.value_of("NAME").unwrap().to_owned();
 
-            let backend = blob_store::FileBackend::new(blob_dir());
+            let backend = blob::FileBackend::new(blob_dir());
             let mut hat = hat::Hat::open_repository(&PathBuf::from("repo"), backend, MAX_BLOB_SIZE);
 
             hat.commit(name, None);
@@ -212,13 +209,13 @@ fn main() {
             let name = matches.value_of("NAME").unwrap().to_owned();
             let id = matches.value_of("ID").unwrap().to_owned();
 
-            let backend = blob_store::FileBackend::new(blob_dir());
+            let backend = blob::FileBackend::new(blob_dir());
             let mut hat = hat::Hat::open_repository(&PathBuf::from("repo"), backend, MAX_BLOB_SIZE);
 
             hat.deregister(name, id.parse::<i64>().unwrap());
         }
         ("gc", Some(_matches)) => {
-            let backend = blob_store::FileBackend::new(blob_dir());
+            let backend = blob::FileBackend::new(blob_dir());
             let mut hat = hat::Hat::open_repository(&PathBuf::from("repo"), backend, MAX_BLOB_SIZE);
             hat.gc();
         }

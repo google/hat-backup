@@ -18,7 +18,7 @@ use std::collections::HashMap;
 use std::mem;
 use std::sync::{mpsc, Arc, Mutex};
 
-use hash_index::GcData;
+use hash::GcData;
 use snapshot::SnapshotInfo;
 use tags;
 

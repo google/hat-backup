@@ -16,9 +16,9 @@
 
 use std::boxed::FnBox;
 
-use blob_store;
-use hash_tree::{SimpleHashTreeWriter, HashTreeBackend, SimpleHashTreeReader, ReaderResult};
-use hash_index;
+use blob;
+use hash;
+use hash::tree::{HashTreeBackend, SimpleHashTreeWriter, SimpleHashTreeReader, ReaderResult};
 
 use process::{Process, MsgHandler};
 
@@ -29,7 +29,7 @@ pub use self::index::{Index, IndexProcess, Entry};
 pub type StoreProcess<IT> = Process<Msg<IT>, Reply>;
 
 pub type DirElem = (Entry,
-                    Option<blob_store::ChunkRef>,
+                    Option<blob::ChunkRef>,
                     Option<Box<FnBox() -> Option<ReaderResult<HashStoreBackend>> + Send>>);
 
 // Public structs
@@ -57,15 +57,15 @@ pub enum Reply {
 #[derive(Clone)]
 pub struct Store {
     index: index::IndexProcess,
-    hash_index: hash_index::HashIndexProcess,
-    blob_store: blob_store::BlobStoreProcess,
+    hash_index: hash::IndexProcess,
+    blob_store: blob::StoreProcess,
 }
 
 // Implementations
 impl Store {
     pub fn new(index: index::IndexProcess,
-               hash_index: hash_index::HashIndexProcess,
-               blob_store: blob_store::BlobStoreProcess)
+               hash_index: hash::IndexProcess,
+               blob_store: blob::StoreProcess)
                -> Store {
         Store {
             index: index,
@@ -75,13 +75,10 @@ impl Store {
     }
 
     #[cfg(test)]
-    pub fn new_for_testing<B: 'static + blob_store::BlobStoreBackend + Send + Clone>(backend: B)
-                                                                                     -> Store {
+    pub fn new_for_testing<B: 'static + blob::StoreBackend + Send + Clone>(backend: B) -> Store {
         let ki_p = Process::new(Box::new(move || index::Index::new_for_testing()));
-        let hi_p = Process::new(Box::new(move || hash_index::HashIndex::new_for_testing()));
-        let bs_p = Process::new(Box::new(move || {
-            blob_store::BlobStore::new_for_testing(backend, 1024)
-        }));
+        let hi_p = Process::new(Box::new(move || hash::Index::new_for_testing()));
+        let bs_p = Process::new(Box::new(move || blob::Store::new_for_testing(backend, 1024)));
         Store {
             index: ki_p,
             hash_index: hi_p,
@@ -90,8 +87,8 @@ impl Store {
     }
 
     pub fn flush(&mut self) {
-        self.blob_store.send_reply(blob_store::Msg::Flush);
-        self.hash_index.send_reply(hash_index::Msg::Flush);
+        self.blob_store.send_reply(blob::Msg::Flush);
+        self.hash_index.send_reply(hash::Msg::Flush);
         self.index.send_reply(index::Msg::Flush);
     }
 
@@ -103,35 +100,31 @@ impl Store {
 
 #[derive(Clone)]
 pub struct HashStoreBackend {
-    hash_index: hash_index::HashIndexProcess,
-    blob_store: blob_store::BlobStoreProcess,
+    hash_index: hash::IndexProcess,
+    blob_store: blob::StoreProcess,
 }
 
 impl HashStoreBackend {
-    pub fn new(hash_index: hash_index::HashIndexProcess,
-               blob_store: blob_store::BlobStoreProcess)
-               -> HashStoreBackend {
+    pub fn new(hash_index: hash::IndexProcess, blob_store: blob::StoreProcess) -> HashStoreBackend {
         HashStoreBackend {
             hash_index: hash_index,
             blob_store: blob_store,
         }
     }
 
-    fn fetch_chunk_from_hash(&mut self, hash: hash_index::Hash) -> Option<Vec<u8>> {
+    fn fetch_chunk_from_hash(&mut self, hash: hash::Hash) -> Option<Vec<u8>> {
         assert!(!hash.bytes.is_empty());
-        match self.hash_index.send_reply(hash_index::Msg::FetchPersistentRef(hash)) {
-            hash_index::Reply::PersistentRef(chunk_ref) => {
+        match self.hash_index.send_reply(hash::Msg::FetchPersistentRef(hash)) {
+            hash::Reply::PersistentRef(chunk_ref) => {
                 self.fetch_chunk_from_persistent_ref(chunk_ref)
             }
             _ => None,  // TODO: Do we need to distinguish `missing` from `unknown ref`?
         }
     }
 
-    fn fetch_chunk_from_persistent_ref(&mut self,
-                                       chunk_ref: blob_store::ChunkRef)
-                                       -> Option<Vec<u8>> {
-        match self.blob_store.send_reply(blob_store::Msg::Retrieve(chunk_ref)) {
-            blob_store::Reply::RetrieveOk(chunk) => Some(chunk),
+    fn fetch_chunk_from_persistent_ref(&mut self, chunk_ref: blob::ChunkRef) -> Option<Vec<u8>> {
+        match self.blob_store.send_reply(blob::Msg::Retrieve(chunk_ref)) {
+            blob::Reply::RetrieveOk(chunk) => Some(chunk),
             _ => None,
         }
     }
@@ -139,8 +132,8 @@ impl HashStoreBackend {
 
 impl HashTreeBackend for HashStoreBackend {
     fn fetch_chunk(&mut self,
-                   hash: hash_index::Hash,
-                   persistent_ref: Option<blob_store::ChunkRef>)
+                   hash: hash::Hash,
+                   persistent_ref: Option<blob::ChunkRef>)
                    -> Option<Vec<u8>> {
         assert!(!hash.bytes.is_empty());
         if let Some(r) = persistent_ref {
@@ -149,58 +142,58 @@ impl HashTreeBackend for HashStoreBackend {
         return self.fetch_chunk_from_hash(hash);
     }
 
-    fn fetch_persistent_ref(&mut self, hash: hash_index::Hash) -> Option<blob_store::ChunkRef> {
+    fn fetch_persistent_ref(&mut self, hash: hash::Hash) -> Option<blob::ChunkRef> {
         assert!(!hash.bytes.is_empty());
         loop {
-            match self.hash_index.send_reply(hash_index::Msg::FetchPersistentRef(hash.clone())) {
-                hash_index::Reply::PersistentRef(r) => return Some(r), // done
-                hash_index::Reply::HashNotKnown => return None, // done
-                hash_index::Reply::Retry => (),  // continue loop
+            match self.hash_index.send_reply(hash::Msg::FetchPersistentRef(hash.clone())) {
+                hash::Reply::PersistentRef(r) => return Some(r), // done
+                hash::Reply::HashNotKnown => return None, // done
+                hash::Reply::Retry => (),  // continue loop
                 _ => panic!("Unexpected reply from hash index."),
             }
         }
     }
 
-    fn fetch_payload(&mut self, hash: hash_index::Hash) -> Option<Vec<u8>> {
-        match self.hash_index.send_reply(hash_index::Msg::FetchPayload(hash)) {
-            hash_index::Reply::Payload(p) => return p, // done
-            hash_index::Reply::HashNotKnown => return None, // done
+    fn fetch_payload(&mut self, hash: hash::Hash) -> Option<Vec<u8>> {
+        match self.hash_index.send_reply(hash::Msg::FetchPayload(hash)) {
+            hash::Reply::Payload(p) => return p, // done
+            hash::Reply::HashNotKnown => return None, // done
             _ => panic!("Unexpected reply from hash index."),
         }
     }
 
     fn insert_chunk(&mut self,
-                    hash: hash_index::Hash,
+                    hash: hash::Hash,
                     level: i64,
                     payload: Option<Vec<u8>>,
                     chunk: Vec<u8>)
-                    -> blob_store::ChunkRef {
+                    -> blob::ChunkRef {
         assert!(!hash.bytes.is_empty());
 
-        let mut hash_entry = hash_index::HashEntry {
+        let mut hash_entry = hash::Entry {
             hash: hash.clone(),
             level: level,
             payload: payload,
             persistent_ref: None,
         };
 
-        match self.hash_index.send_reply(hash_index::Msg::Reserve(hash_entry.clone())) {
-            hash_index::Reply::HashKnown => {
+        match self.hash_index.send_reply(hash::Msg::Reserve(hash_entry.clone())) {
+            hash::Reply::HashKnown => {
                 // Someone came before us: piggyback on their result.
                 return self.fetch_persistent_ref(hash)
                            .expect("Could not find persistent_ref for known chunk.");
             }
-            hash_index::Reply::ReserveOk => {
+            hash::Reply::ReserveOk => {
                 // We came first: this data-chunk is ours to process.
                 let local_hash_index = self.hash_index.clone();
 
-                let callback = Box::new(move |chunk_ref: blob_store::ChunkRef| {
-                    local_hash_index.send_reply(hash_index::Msg::Commit(hash, chunk_ref));
+                let callback = Box::new(move |chunk_ref: blob::ChunkRef| {
+                    local_hash_index.send_reply(hash::Msg::Commit(hash, chunk_ref));
                 });
-                match self.blob_store.send_reply(blob_store::Msg::Store(chunk, callback)) {
-                    blob_store::Reply::StoreOk(chunk_ref) => {
+                match self.blob_store.send_reply(blob::Msg::Store(chunk, callback)) {
+                    blob::Reply::StoreOk(chunk_ref) => {
                         hash_entry.persistent_ref = Some(chunk_ref.clone());
-                        self.hash_index.send_reply(hash_index::Msg::UpdateReserved(hash_entry));
+                        self.hash_index.send_reply(hash::Msg::UpdateReserved(hash_entry));
                         return chunk_ref;
                     }
                     _ => panic!("Unexpected reply from BlobStore."),
@@ -239,7 +232,7 @@ impl<IT: Iterator<Item = Vec<u8>>> MsgHandler<Msg<IT>, Reply> for Store {
                         let mut my_entries: Vec<DirElem> = Vec::with_capacity(entries.len());
                         for (entry, persistent_ref) in entries.into_iter() {
                             let open_fn = entry.data_hash.as_ref().map(|bytes| {
-                                let local_hash = hash_index::Hash { bytes: bytes.clone() };
+                                let local_hash = hash::Hash { bytes: bytes.clone() };
                                 let local_ref = persistent_ref.clone();
                                 let local_hash_index = self.hash_index.clone();
                                 let local_blob_store = self.blob_store.clone();
@@ -264,10 +257,10 @@ impl<IT: Iterator<Item = Vec<u8>>> MsgHandler<Msg<IT>, Reply> for Store {
                     index::Reply::Entry(entry) => {
                         if entry.data_hash.is_some() {
                             match self.hash_index
-                                      .send_reply(hash_index::Msg::HashExists(hash_index::Hash {
+                                      .send_reply(hash::Msg::HashExists(hash::Hash {
                                           bytes: entry.data_hash.clone().unwrap(),
                                       })) {
-                                hash_index::Reply::HashKnown => {
+                                hash::Reply::HashKnown => {
                                     return reply(Reply::Id(entry.id.unwrap()));
                                 }
                                 _ => entry,
@@ -337,7 +330,7 @@ impl<IT: Iterator<Item = Vec<u8>>> MsgHandler<Msg<IT>, Reply> for Store {
 mod tests {
     use super::*;
 
-    use blob_store::tests::{MemoryBackend, DevNullBackend};
+    use blob::tests::{MemoryBackend, DevNullBackend};
     use process::Process;
 
     use rand::Rng;

@@ -14,8 +14,8 @@
 
 //! Local state for keys in the snapshot in progress (the "index").
 
-use blob_store;
-use hash_index;
+use blob;
+use hash;
 
 use time::Duration;
 
@@ -63,7 +63,7 @@ pub enum Msg {
 
     /// Update the `payload` and `persistent_ref` of an entry.
     /// Returns `UpdateOk`.
-    UpdateDataHash(Entry, Option<hash_index::Hash>, Option<blob_store::ChunkRef>),
+    UpdateDataHash(Entry, Option<hash::Hash>, Option<blob::ChunkRef>),
 
     /// List a directory (aka. `level`) in the index.
     /// Returns `ListResult` with all the entries under the given parent.
@@ -77,7 +77,7 @@ pub enum Reply {
     Entry(Entry),
     NotFound(Entry),
     UpdateOk,
-    ListResult(Vec<(Entry, Option<blob_store::ChunkRef>)>),
+    ListResult(Vec<(Entry, Option<blob::ChunkRef>)>),
     FlushOk,
 }
 
@@ -339,7 +339,7 @@ impl MsgHandler<Msg, Reply> for Index {
                                   if b.is_empty() {
                                       None
                                   } else {
-                                      Some(blob_store::ChunkRef::from_bytes(&mut &b.to_owned()[..])
+                                      Some(blob::ChunkRef::from_bytes(&mut &b.to_owned()[..])
                                                .unwrap())
                                   }
                               });

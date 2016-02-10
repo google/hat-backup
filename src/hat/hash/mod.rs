@@ -14,7 +14,7 @@
 
 //! Local state for known hashes and their external location (blob reference).
 
-use blob_store;
+use blob;
 use std::boxed::FnBox;
 use std::sync::mpsc;
 use time::Duration;
@@ -36,9 +36,12 @@ use periodic_timer::PeriodicTimer;
 use sodiumoxide::crypto::hash::sha512;
 
 
+pub mod tree;
+
+
 pub static HASHBYTES: usize = sha512::DIGESTBYTES;
 
-pub type HashIndexProcess = Process<Msg, Reply>;
+pub type IndexProcess = Process<Msg, Reply>;
 
 
 /// A wrapper around Hash digests.
@@ -64,7 +67,7 @@ impl Hash {
 
 /// An entry that can be inserted into the hash index.
 #[derive(Clone)]
-pub struct HashEntry {
+pub struct Entry {
     /// The hash of this entry (unique among all entries in the index).
     pub hash: Hash,
 
@@ -78,7 +81,7 @@ pub struct HashEntry {
 
     /// A reference to a location in the external persistent storage (a chunk reference) that
     /// contains the data for this entry (e.g. an object-name and a byte range).
-    pub persistent_ref: Option<blob_store::ChunkRef>,
+    pub persistent_ref: Option<blob::ChunkRef>,
 }
 
 pub enum Msg {
@@ -103,18 +106,18 @@ pub enum Msg {
     /// Reserve a `Hash` in the index, while sending its content to external storage.
     /// This is used to ensure that each `Hash` is stored only once.
     /// Returns `ReserveOk` or `HashKnown`.
-    Reserve(HashEntry),
+    Reserve(Entry),
 
     /// Update the info for a reserved `Hash`. The `Hash` remains reserved. This is used to update
     /// the persistent reference (external blob reference) as soon as it is available (to allow new
     /// references to the `Hash` to be created before it is committed).
     /// Returns ReserveOk.
-    UpdateReserved(HashEntry),
+    UpdateReserved(Entry),
 
     /// A `Hash` is committed when it has been `finalized` in the external storage. `Commit`
     /// includes the persistent reference that the content is available at.
     /// Returns CommitOk.
-    Commit(Hash, blob_store::ChunkRef),
+    Commit(Hash, blob::ChunkRef),
 
     /// List all hash entries.
     List,
@@ -145,16 +148,16 @@ pub enum Reply {
     HashID(i64),
     HashKnown,
     HashNotKnown,
-    Entry(HashEntry),
+    Entry(Entry),
 
     Payload(Option<Vec<u8>>),
-    PersistentRef(blob_store::ChunkRef),
+    PersistentRef(blob::ChunkRef),
 
     ReserveOk,
     CommitOk,
     CallbackRegistered,
 
-    Listing(mpsc::Receiver<HashEntry>),
+    Listing(mpsc::Receiver<Entry>),
 
     HashTag(Option<tags::Tag>),
     HashIDs(Vec<i64>),
@@ -171,10 +174,10 @@ struct QueueEntry {
     id: i64,
     level: i64,
     payload: Option<Vec<u8>>,
-    persistent_ref: Option<blob_store::ChunkRef>,
+    persistent_ref: Option<blob::ChunkRef>,
 }
 
-pub struct HashIndex {
+pub struct Index {
     dbh: Database,
 
     id_counter: CumulativeCounter,
@@ -185,11 +188,11 @@ pub struct HashIndex {
     flush_periodically: bool,
 }
 
-impl HashIndex {
-    pub fn new(path: String) -> HashIndex {
+impl Index {
+    pub fn new(path: String) -> Index {
         let mut hi = match open(&path) {
             Ok(dbh) => {
-                HashIndex {
+                Index {
                     dbh: dbh,
                     id_counter: CumulativeCounter::new(0),
                     queue: UniquePriorityQueue::new(),
@@ -236,8 +239,8 @@ impl HashIndex {
     }
 
     #[cfg(test)]
-    pub fn new_for_testing() -> HashIndex {
-        HashIndex::new(":memory:".to_string())
+    pub fn new_for_testing() -> Index {
+        Index::new(":memory:".to_string())
     }
 
     fn exec_or_die(&mut self, sql: &str) {
@@ -289,7 +292,7 @@ impl HashIndex {
                 if b.is_empty() {
                     None
                 } else {
-                    Some(blob_store::ChunkRef::from_bytes(&mut &b.to_owned()[..]).unwrap())
+                    Some(blob::ChunkRef::from_bytes(&mut &b.to_owned()[..]).unwrap())
                 }
             });
             QueueEntry {
@@ -306,12 +309,12 @@ impl HashIndex {
         result_opt.map(|x| x).or_else(|| self.index_locate(hash))
     }
 
-    fn locate_by_id(&mut self, id: i64) -> Option<HashEntry> {
+    fn locate_by_id(&mut self, id: i64) -> Option<Entry> {
         let result_opt = self.select1(&format!("SELECT hash, height, payload, blob_ref FROM \
                                                 hash_index WHERE id='{:?}'",
                                                id));
         return result_opt.map(|mut result| {
-            HashEntry {
+            Entry {
                 hash: Hash { bytes: result.get_blob(0).unwrap_or(&[]).to_vec() },
                 level: result.get_int(1) as i64,
                 payload: result.get_blob(2).and_then(|p| {
@@ -325,7 +328,7 @@ impl HashIndex {
                     if b.is_empty() {
                         None
                     } else {
-                        Some(blob_store::ChunkRef::from_bytes(&mut &b.to_owned()[..]).unwrap())
+                        Some(blob::ChunkRef::from_bytes(&mut &b.to_owned()[..]).unwrap())
                     }
                 }),
             }
@@ -341,10 +344,10 @@ impl HashIndex {
         self.id_counter.increment()
     }
 
-    fn reserve(&mut self, hash_entry: HashEntry) -> i64 {
+    fn reserve(&mut self, hash_entry: Entry) -> i64 {
         self.maybe_flush();
 
-        let HashEntry{hash, level, payload, persistent_ref} = hash_entry;
+        let Entry{hash, level, payload, persistent_ref} = hash_entry;
         assert!(!hash.bytes.is_empty());
 
         let my_id = self.next_id();
@@ -360,8 +363,8 @@ impl HashIndex {
         my_id
     }
 
-    fn update_reserved(&mut self, hash_entry: HashEntry) {
-        let HashEntry{hash, level, payload, persistent_ref} = hash_entry;
+    fn update_reserved(&mut self, hash_entry: Entry) {
+        let Entry{hash, level, payload, persistent_ref} = hash_entry;
         assert!(!hash.bytes.is_empty());
         let old_entry = self.locate(&hash).expect("hash was reserved");
 
@@ -525,7 +528,7 @@ impl HashIndex {
                                   family_id)[..]);
     }
 
-    fn commit(&mut self, hash: &Hash, chunk_ref: blob_store::ChunkRef) {
+    fn commit(&mut self, hash: &Hash, chunk_ref: blob::ChunkRef) {
         // Update persistent reference for ready hash
         let queue_entry = self.locate(hash).expect("hash was committed");
         self.queue.update_value(&hash.bytes, |old_qe| {
@@ -538,7 +541,7 @@ impl HashIndex {
         self.maybe_flush();
     }
 
-    fn list(&mut self) -> mpsc::Receiver<HashEntry> {
+    fn list(&mut self) -> mpsc::Receiver<Entry> {
         let (sender, receiver) = mpsc::channel();
         let mut cursor = self.prepare_or_die("SELECT hash, height, payload, blob_ref FROM \
                                               hash_index");
@@ -549,7 +552,7 @@ impl HashIndex {
             }
             assert_eq!(status, SQLITE_ROW);
             if let Err(_) =
-                   sender.send(HashEntry {
+                   sender.send(Entry {
                 hash: Hash { bytes: cursor.get_blob(0).unwrap_or(&[]).to_vec() },
                 level: cursor.get_int(1) as i64,
                 payload: cursor.get_blob(2).and_then(|p| {
@@ -563,7 +566,7 @@ impl HashIndex {
                     if b.is_empty() {
                         None
                     } else {
-                        Some(blob_store::ChunkRef::from_bytes(&mut &b.to_owned()[..]).unwrap())
+                        Some(blob::ChunkRef::from_bytes(&mut &b.to_owned()[..]).unwrap())
                     }
                 }),
             }) {
@@ -597,7 +600,7 @@ impl HashIndex {
 }
 
 // #[unsafe_desctructor]
-// impl  Drop for HashIndex {
+// impl  Drop for Index {
 //   fn drop(&mut self) {
 //     self.flush();
 //     assert_eq!(self.queue.len(), 0);
@@ -606,7 +609,7 @@ impl HashIndex {
 // }
 
 
-impl MsgHandler<Msg, Reply> for HashIndex {
+impl MsgHandler<Msg, Reply> for Index {
     fn handle(&mut self, msg: Msg, reply: Box<Fn(Reply)>) {
         match msg {
 

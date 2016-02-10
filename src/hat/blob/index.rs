@@ -29,7 +29,7 @@ use sqlite3::types::ResultCode::{SQLITE_DONE, SQLITE_ROW};
 use sqlite3::open;
 
 
-pub type BlobIndexProcess = Process<Msg, Reply>;
+pub type IndexProcess = Process<Msg, Reply>;
 
 #[derive(Clone, Debug)]
 pub struct BlobDesc {
@@ -65,18 +65,18 @@ pub enum Reply {
     Ok,
 }
 
-pub struct BlobIndex {
+pub struct Index {
     dbh: Database,
     next_id: i64,
     reserved: HashMap<Vec<u8>, BlobDesc>,
 }
 
 
-impl BlobIndex {
-    pub fn new(path: String) -> BlobIndex {
+impl Index {
+    pub fn new(path: String) -> Index {
         let mut hi = match open(&path) {
             Ok(dbh) => {
-                BlobIndex {
+                Index {
                     dbh: dbh,
                     next_id: -1,
                     reserved: HashMap::new(),
@@ -89,8 +89,8 @@ impl BlobIndex {
     }
 
     #[cfg(test)]
-    pub fn new_for_testing() -> BlobIndex {
-        BlobIndex::new(":memory:".to_string())
+    pub fn new_for_testing() -> Index {
+        Index::new(":memory:".to_string())
     }
 
     fn initialize(&mut self) {
@@ -221,13 +221,13 @@ impl BlobIndex {
     }
 }
 
-impl Drop for BlobIndex {
+impl Drop for Index {
     fn drop(&mut self) {
         self.exec_or_die("COMMIT");
     }
 }
 
-impl MsgHandler<Msg, Reply> for BlobIndex {
+impl MsgHandler<Msg, Reply> for Index {
     fn handle(&mut self, msg: Msg, reply: Box<Fn(Reply)>) {
         match msg {
             Msg::Reserve => {

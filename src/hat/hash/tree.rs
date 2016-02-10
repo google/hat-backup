@@ -21,8 +21,8 @@
 use capnp;
 use root_capnp;
 
-use blob_store::ChunkRef;
-use hash_index::{Hash, HASHBYTES};
+use blob::ChunkRef;
+use hash::{Hash, HASHBYTES};
 
 #[cfg(test)]
 use quickcheck;
@@ -405,8 +405,8 @@ mod tests {
 
     use std::sync::{Arc, Mutex};
 
-    use blob_store::ChunkRef;
-    use hash_index::Hash;
+    use blob::ChunkRef;
+    use hash::Hash;
     use std::collections::{BTreeMap, BTreeSet};
     use quickcheck;
 

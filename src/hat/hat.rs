@@ -21,19 +21,13 @@ use std::str;
 use process::Process;
 use tags;
 
-use blob_index::BlobIndex;
-use blob_store;
-use blob_store::{BlobStore, BlobStoreProcess, BlobStoreBackend};
-
-use hash_index;
-use hash_index::{GcData, Hash, HashIndex, HashIndexProcess};
-
+use blob;
+use hash;
 use key;
 
 use snapshot::{SnapshotInfo, SnapshotIndex, SnapshotIndexProcess};
 use snapshot;
 
-use hash_tree;
 use listdir;
 use gc;
 use gc_rc;
@@ -54,66 +48,66 @@ use root_capnp;
 
 
 struct GcBackend {
-    hash_index: HashIndexProcess,
+    hash_index: hash::IndexProcess,
 }
 
 impl gc::GcBackend for GcBackend {
-    fn get_data(&self, hash_id: i64, family_id: i64) -> GcData {
-        match self.hash_index.send_reply(hash_index::Msg::ReadGcData(hash_id, family_id)) {
-            hash_index::Reply::CurrentGcData(data) => data,
+    fn get_data(&self, hash_id: i64, family_id: i64) -> hash::GcData {
+        match self.hash_index.send_reply(hash::Msg::ReadGcData(hash_id, family_id)) {
+            hash::Reply::CurrentGcData(data) => data,
             _ => panic!("Unexpected reply from hash index."),
         }
     }
-    fn update_data(&mut self, hash_id: i64, family_id: i64, f: gc::UpdateFn) -> GcData {
-        match self.hash_index.send_reply(hash_index::Msg::UpdateGcData(hash_id, family_id, f)) {
-            hash_index::Reply::CurrentGcData(data) => data,
+    fn update_data(&mut self, hash_id: i64, family_id: i64, f: gc::UpdateFn) -> hash::GcData {
+        match self.hash_index.send_reply(hash::Msg::UpdateGcData(hash_id, family_id, f)) {
+            hash::Reply::CurrentGcData(data) => data,
             _ => panic!("Unexpected reply from hash index."),
         }
     }
     fn update_all_data_by_family(&mut self, family_id: i64, fs: mpsc::Receiver<gc::UpdateFn>) {
-        match self.hash_index.send_reply(hash_index::Msg::UpdateFamilyGcData(family_id, fs)) {
-            hash_index::Reply::Ok => (),
+        match self.hash_index.send_reply(hash::Msg::UpdateFamilyGcData(family_id, fs)) {
+            hash::Reply::Ok => (),
             _ => panic!("Unexpected reply from hash index."),
         }
     }
 
     fn get_tag(&self, hash_id: i64) -> Option<tags::Tag> {
-        match self.hash_index.send_reply(hash_index::Msg::GetTag(hash_id)) {
-            hash_index::Reply::HashTag(tag) => tag,
+        match self.hash_index.send_reply(hash::Msg::GetTag(hash_id)) {
+            hash::Reply::HashTag(tag) => tag,
             _ => panic!("Unexpected reply from hash index."),
         }
     }
 
     fn set_tag(&mut self, hash_id: i64, tag: tags::Tag) {
-        match self.hash_index.send_reply(hash_index::Msg::SetTag(hash_id, tag)) {
-            hash_index::Reply::Ok => (),
+        match self.hash_index.send_reply(hash::Msg::SetTag(hash_id, tag)) {
+            hash::Reply::Ok => (),
             _ => panic!("Unexpected reply from hash index."),
         }
     }
 
     fn set_all_tags(&mut self, tag: tags::Tag) {
-        match self.hash_index.send_reply(hash_index::Msg::SetAllTags(tag)) {
-            hash_index::Reply::Ok => (),
+        match self.hash_index.send_reply(hash::Msg::SetAllTags(tag)) {
+            hash::Reply::Ok => (),
             _ => panic!("Unexpected reply from hash index."),
         }
     }
 
     fn reverse_refs(&self, hash_id: i64) -> Vec<i64> {
-        let entry = match self.hash_index.send_reply(hash_index::Msg::GetHash(hash_id)) {
-            hash_index::Reply::Entry(entry) => entry,
-            hash_index::Reply::HashNotKnown => panic!("HashNotKnown in hash index."),
+        let entry = match self.hash_index.send_reply(hash::Msg::GetHash(hash_id)) {
+            hash::Reply::Entry(entry) => entry,
+            hash::Reply::HashNotKnown => panic!("HashNotKnown in hash index."),
             _ => panic!("Unexpected reply from hash index."),
         };
         if entry.payload.is_none() {
             return Vec::new();
         }
 
-        hash_tree::decode_metadata_refs(&entry.payload.unwrap())
+        hash::tree::decode_metadata_refs(&entry.payload.unwrap())
             .into_iter()
             .map(|bytes| {
-                match self.hash_index.send_reply(hash_index::Msg::GetID(Hash { bytes: bytes })) {
-                    hash_index::Reply::HashID(id) => id,
-                    hash_index::Reply::HashNotKnown => panic!("HashNotKnown in hash index."),
+                match self.hash_index.send_reply(hash::Msg::GetID(hash::Hash { bytes: bytes })) {
+                    hash::Reply::HashID(id) => id,
+                    hash::Reply::HashNotKnown => panic!("HashNotKnown in hash index."),
                     _ => panic!("Unexpected result from hash index."),
                 }
             })
@@ -122,8 +116,8 @@ impl gc::GcBackend for GcBackend {
 
     fn list_ids_by_tag(&self, tag: tags::Tag) -> mpsc::Receiver<i64> {
         let (sender, receiver) = mpsc::channel();
-        match self.hash_index.send_reply(hash_index::Msg::GetIDsByTag(tag as i64)) {
-            hash_index::Reply::HashIDs(ids) => {
+        match self.hash_index.send_reply(hash::Msg::GetIDsByTag(tag as i64)) {
+            hash::Reply::HashIDs(ids) => {
                 ids.iter().map(|i| sender.send(*i)).last();
             }
             _ => panic!("Unexpected reply from hash index."),
@@ -133,8 +127,8 @@ impl gc::GcBackend for GcBackend {
     }
 
     fn manual_commit(&mut self) {
-        match self.hash_index.send_reply(hash_index::Msg::ManualCommit) {
-            hash_index::Reply::CommitOk => return,
+        match self.hash_index.send_reply(hash::Msg::ManualCommit) {
+            hash::Reply::CommitOk => return,
             _ => panic!("Unexpected reply from hash index."),
         }
     }
@@ -144,8 +138,8 @@ impl gc::GcBackend for GcBackend {
 pub struct Hat<B> {
     repository_root: PathBuf,
     snapshot_index: SnapshotIndexProcess,
-    blob_store: BlobStoreProcess,
-    hash_index: HashIndexProcess,
+    blob_store: blob::StoreProcess,
+    hash_index: hash::IndexProcess,
     blob_backend: B,
     hash_backend: key::HashStoreBackend,
     gc: Box<gc::Gc>,
@@ -171,10 +165,10 @@ fn hash_index_name(root: &PathBuf) -> String {
 }
 
 fn list_snapshot(backend: &key::HashStoreBackend,
-                 out: &mpsc::Sender<Hash>,
+                 out: &mpsc::Sender<hash::Hash>,
                  family: &Family,
-                 dir_hash: Hash,
-                 dir_ref: blob_store::ChunkRef) {
+                 dir_hash: hash::Hash,
+                 dir_ref: blob::ChunkRef) {
     for (entry, hash, pref) in family.fetch_dir_data(dir_hash, dir_ref, backend.clone()) {
         if entry.data_hash.is_some() {
             // File.
@@ -187,26 +181,26 @@ fn list_snapshot(backend: &key::HashStoreBackend,
     }
 }
 
-fn get_hash_id(index: &HashIndexProcess, hash: Hash) -> Result<i64, String> {
-    match index.send_reply(hash_index::Msg::GetID(hash)) {
-        hash_index::Reply::HashID(id) => Ok(id),
+fn get_hash_id(index: &hash::IndexProcess, hash: hash::Hash) -> Result<i64, String> {
+    match index.send_reply(hash::Msg::GetID(hash)) {
+        hash::Reply::HashID(id) => Ok(id),
         _ => Err("Tried to register an unknown hash".to_owned()),
     }
 }
 
-impl<B: 'static + BlobStoreBackend + Clone + Send> Hat<B> {
+impl<B: 'static + blob::StoreBackend + Clone + Send> Hat<B> {
     pub fn open_repository(repository_root: &PathBuf, backend: B, max_blob_size: usize) -> Hat<B> {
         let snapshot_index_path = snapshot_index_name(repository_root);
         let blob_index_path = blob_index_name(repository_root);
         let hash_index_path = hash_index_name(repository_root);
         let si_p = Process::new(Box::new(move || SnapshotIndex::new(snapshot_index_path)));
-        let bi_p = Process::new(Box::new(move || BlobIndex::new(blob_index_path)));
-        let hi_p = Process::new(Box::new(move || HashIndex::new(hash_index_path)));
+        let bi_p = Process::new(Box::new(move || blob::Index::new(blob_index_path)));
+        let hi_p = Process::new(Box::new(move || hash::Index::new(hash_index_path)));
 
         let local_blob_index = bi_p.clone();
         let local_backend = backend.clone();
         let bs_p = Process::new(Box::new(move || {
-            BlobStore::new(local_blob_index, local_backend, max_blob_size)
+            blob::Store::new(local_blob_index, local_backend, max_blob_size)
         }));
 
         let gc_backend = GcBackend { hash_index: hi_p.clone() };
@@ -229,16 +223,16 @@ impl<B: 'static + BlobStoreBackend + Clone + Send> Hat<B> {
         hat
     }
 
-    pub fn hash_tree_writer(&mut self) -> hash_tree::SimpleHashTreeWriter<key::HashStoreBackend> {
+    pub fn hash_tree_writer(&mut self) -> hash::tree::SimpleHashTreeWriter<key::HashStoreBackend> {
         let backend = key::HashStoreBackend::new(self.hash_index.clone(), self.blob_store.clone());
-        return hash_tree::SimpleHashTreeWriter::new(8, backend);
+        return hash::tree::SimpleHashTreeWriter::new(8, backend);
     }
 
     pub fn open_family(&self, name: String) -> Option<Family> {
         // We setup a standard pipeline of processes:
-        // KeyStore -> KeyIndex
-        //          -> HashIndex
-        //          -> BlobStore -> BlobIndex
+        // key::Store -> key::Index
+        //            -> hash::Index
+        //            -> blob::Store -> blob::Index
 
         let key_index_path = concat_filename(&self.repository_root, name.clone());
         let ki_p = Process::new(Box::new(move || key::Index::new(key_index_path)));
@@ -283,16 +277,16 @@ impl<B: 'static + BlobStoreBackend + Clone + Send> Hat<B> {
         capnp::serialize_packed::write_message(&mut listing, &message).unwrap();
 
         // TODO(jos): make sure this operation is atomic or resumable.
-        match self.blob_store.send_reply(blob_store::Msg::StoreNamed("root".to_owned(), listing)) {
-            blob_store::Reply::StoreNamedOk(_) => (),
+        match self.blob_store.send_reply(blob::Msg::StoreNamed("root".to_owned(), listing)) {
+            blob::Reply::StoreNamedOk(_) => (),
             _ => panic!("Invalid reply from blob store"),
         };
     }
 
     pub fn recover(&mut self) {
         let root = match self.blob_store
-                             .send_reply(blob_store::Msg::RetrieveNamed("root".to_owned())) {
-            blob_store::Reply::RetrieveOk(r) => r,
+                             .send_reply(blob::Msg::RetrieveNamed("root".to_owned())) {
+            blob::Reply::RetrieveOk(r) => r,
             _ => panic!("Could not read root file"),
         };
         let message_reader =
@@ -302,7 +296,7 @@ impl<B: 'static + BlobStoreBackend + Clone + Send> Hat<B> {
         let snapshot_list = message_reader.get_root::<root_capnp::snapshot_list::Reader>().unwrap();
 
         for s in snapshot_list.get_snapshots().unwrap().iter() {
-            let tree_ref = blob_store::ChunkRef::from_bytes(&mut s.get_tree_reference().unwrap())
+            let tree_ref = blob::ChunkRef::from_bytes(&mut s.get_tree_reference().unwrap())
                                .unwrap();
             match self.snapshot_index
                       .send_reply(snapshot::Msg::Recover(s.get_id(),
@@ -471,12 +465,12 @@ impl<B: 'static + BlobStoreBackend + Clone + Send> Hat<B> {
     fn commit_finalize_by_name(&mut self,
                                family_name: String,
                                snapshot_info: SnapshotInfo,
-                               hash: Hash) {
+                               hash: hash::Hash) {
         let family = self.open_family(family_name).expect("Unknown family name");
         self.commit_finalize(family, snapshot_info, hash);
     }
 
-    fn commit_finalize(&mut self, family: Family, snapshot_info: SnapshotInfo, hash: Hash) {
+    fn commit_finalize(&mut self, family: Family, snapshot_info: SnapshotInfo, hash: hash::Hash) {
         // Commit locally. Let the GC perform any needed cleanup.
         match self.snapshot_index
                   .send_reply(snapshot::Msg::ReadyCommit(snapshot_info.clone())) {
@@ -505,8 +499,8 @@ impl<B: 'static + BlobStoreBackend + Clone + Send> Hat<B> {
     }
 
     pub fn flush_blob_store(&self) {
-        match self.blob_store.send_reply(blob_store::Msg::Flush) {
-            blob_store::Reply::FlushOk => (),
+        match self.blob_store.send_reply(blob::Msg::Flush) {
+            blob::Reply::FlushOk => (),
             _ => panic!("Invalid reply from blob store"),
         }
     }
@@ -534,8 +528,8 @@ impl<B: 'static + BlobStoreBackend + Clone + Send> Hat<B> {
     fn checkout_dir_ref(&self,
                         family: &Family,
                         output: &mut PathBuf,
-                        dir_hash: Hash,
-                        dir_ref: blob_store::ChunkRef) {
+                        dir_hash: hash::Hash,
+                        dir_ref: blob::ChunkRef) {
         fs::create_dir_all(&output).unwrap();
         for (entry, hash, pref) in family.fetch_dir_data(dir_hash,
                                                          dir_ref,
@@ -547,9 +541,9 @@ impl<B: 'static + BlobStoreBackend + Clone + Send> Hat<B> {
 
             if entry.data_hash.is_some() {
                 let mut fd = fs::File::create(&output).unwrap();
-                let tree_opt = hash_tree::SimpleHashTreeReader::open(self.hash_backend.clone(),
-                                                                     hash,
-                                                                     Some(pref));
+                let tree_opt = hash::tree::SimpleHashTreeReader::open(self.hash_backend.clone(),
+                                                                      hash,
+                                                                      Some(pref));
                 if let Some(tree) = tree_opt {
                     family.write_file_chunks(&mut fd, tree);
                 }
@@ -602,13 +596,13 @@ impl<B: 'static + BlobStoreBackend + Clone + Send> Hat<B> {
 
             let (id_sender, id_receiver) = mpsc::channel();
             for hash in receiver.iter() {
-                match local_hash_index.send_reply(hash_index::Msg::GetID(hash)) {
-                    hash_index::Reply::HashID(id) => id_sender.send(id).unwrap(),
+                match local_hash_index.send_reply(hash::Msg::GetID(hash)) {
+                    hash::Reply::HashID(id) => id_sender.send(id).unwrap(),
                     _ => panic!("Unexpected reply from hash index."),
                 }
             }
-            match local_hash_index.send_reply(hash_index::Msg::GetID(local_dir_hash)) {
-                hash_index::Reply::HashID(id) => id_sender.send(id).unwrap(),
+            match local_hash_index.send_reply(hash::Msg::GetID(local_dir_hash)) {
+                hash::Reply::HashID(id) => id_sender.send(id).unwrap(),
                 _ => panic!("Unexpected reply from hash index."),
             }
             id_receiver
@@ -660,45 +654,45 @@ impl<B: 'static + BlobStoreBackend + Clone + Send> Hat<B> {
         self.gc.list_unused_ids(sender);
         for id in receiver.iter() {
             deleted_hashes += 1;
-            match self.hash_index.send_reply(hash_index::Msg::Delete(id)) {
-                hash_index::Reply::Ok => (),
+            match self.hash_index.send_reply(hash::Msg::Delete(id)) {
+                hash::Reply::Ok => (),
                 _ => panic!("Unexpected reply from hash index."),
             }
         }
-        match self.hash_index.send_reply(hash_index::Msg::Flush) {
-            hash_index::Reply::CommitOk => (),
+        match self.hash_index.send_reply(hash::Msg::Flush) {
+            hash::Reply::CommitOk => (),
             _ => panic!("Unexpected reply from hash index."),
         }
         // Mark used blobs.
-        let entries = match self.hash_index.send_reply(hash_index::Msg::List) {
-            hash_index::Reply::Listing(ch) => ch,
+        let entries = match self.hash_index.send_reply(hash::Msg::List) {
+            hash::Reply::Listing(ch) => ch,
             _ => panic!("Unexpected reply from hash index."),
         };
-        match self.blob_store.send_reply(blob_store::Msg::TagAll(tags::Tag::InProgress)) {
-            blob_store::Reply::Ok => (),
+        match self.blob_store.send_reply(blob::Msg::TagAll(tags::Tag::InProgress)) {
+            blob::Reply::Ok => (),
             _ => panic!("Unexpected reply from blob store."),
         }
         let mut live_blobs = 0;
         for entry in entries.iter() {
             if let Some(pref) = entry.persistent_ref {
                 live_blobs += 1;
-                match self.blob_store.send_reply(blob_store::Msg::Tag(pref, tags::Tag::Reserved)) {
-                    blob_store::Reply::Ok => (),
+                match self.blob_store.send_reply(blob::Msg::Tag(pref, tags::Tag::Reserved)) {
+                    blob::Reply::Ok => (),
                     _ => panic!("Unexpected reply from blob store."),
                 }
             }
         }
         // Anything still marked "in progress" is not referenced by any hash.
-        match self.blob_store.send_reply(blob_store::Msg::DeleteByTag(tags::Tag::InProgress)) {
-            blob_store::Reply::Ok => (),
+        match self.blob_store.send_reply(blob::Msg::DeleteByTag(tags::Tag::InProgress)) {
+            blob::Reply::Ok => (),
             _ => panic!("Unexpected reply from blob store."),
         }
-        match self.blob_store.send_reply(blob_store::Msg::TagAll(tags::Tag::Done)) {
-            blob_store::Reply::Ok => (),
+        match self.blob_store.send_reply(blob::Msg::TagAll(tags::Tag::Done)) {
+            blob::Reply::Ok => (),
             _ => panic!("Unexpected reply from blob store."),
         }
-        match self.blob_store.send_reply(blob_store::Msg::Flush) {
-            blob_store::Reply::FlushOk => (),
+        match self.blob_store.send_reply(blob::Msg::Flush) {
+            blob::Reply::FlushOk => (),
             _ => panic!("Unexpected reply from blob store."),
         }
         println!("Deleted hashes: {:?}", deleted_hashes);
@@ -898,8 +892,8 @@ impl Family {
         self.key_store_process.send_reply(key::Msg::Flush);
     }
 
-  fn write_file_chunks<HTB: hash_tree::HashTreeBackend + Clone>(
-    &self, fd: &mut fs::File, tree: hash_tree::ReaderResult<HTB>)
+  fn write_file_chunks<HTB: hash::tree::HashTreeBackend + Clone>(
+    &self, fd: &mut fs::File, tree: hash::tree::ReaderResult<HTB>)
   {
         for chunk in tree {
             try_a_few_times_then_panic(|| fd.write_all(&chunk[..]).is_ok(),
@@ -941,14 +935,14 @@ impl Family {
         }
     }
 
-    pub fn fetch_dir_data<HTB: hash_tree::HashTreeBackend + Clone>
+    pub fn fetch_dir_data<HTB: hash::tree::HashTreeBackend + Clone>
         (&self,
-         dir_hash: Hash,
-         dir_ref: blob_store::ChunkRef,
+         dir_hash: hash::Hash,
+         dir_ref: blob::ChunkRef,
          backend: HTB)
-         -> Vec<(key::Entry, Hash, blob_store::ChunkRef)> {
+         -> Vec<(key::Entry, hash::Hash, blob::ChunkRef)> {
         let mut out = Vec::new();
-        let it = hash_tree::SimpleHashTreeReader::open(backend, dir_hash, Some(dir_ref))
+        let it = hash::tree::SimpleHashTreeReader::open(backend, dir_hash, Some(dir_ref))
                      .expect("unable to open dir");
 
         for chunk in it {
@@ -1003,23 +997,21 @@ impl Family {
                 };
                 let pref = match f.get_content().which().unwrap() {
                     root_capnp::file::content::Data(r) => {
-                        blob_store::ChunkRef::read_msg(&r.unwrap().get_chunk_ref().unwrap())
-                            .unwrap()
+                        blob::ChunkRef::read_msg(&r.unwrap().get_chunk_ref().unwrap()).unwrap()
                     }
                     root_capnp::file::content::Directory(d) => {
-                        blob_store::ChunkRef::read_msg(&d.unwrap().get_chunk_ref().unwrap())
-                            .unwrap()
+                        blob::ChunkRef::read_msg(&d.unwrap().get_chunk_ref().unwrap()).unwrap()
                     }
                 };
 
-                out.push((entry, Hash { bytes: hash }, pref));
+                out.push((entry, hash::Hash { bytes: hash }, pref));
             }
         }
 
         out
     }
 
-    pub fn commit(&mut self, hash_ch: mpsc::Sender<Hash>) -> (Hash, blob_store::ChunkRef) {
+    pub fn commit(&mut self, hash_ch: mpsc::Sender<hash::Hash>) -> (hash::Hash, blob::ChunkRef) {
         let mut top_tree = self.key_store.hash_tree_writer();
         self.commit_to_tree(&mut top_tree, None, hash_ch);
 
@@ -1027,9 +1019,9 @@ impl Family {
     }
 
     pub fn commit_to_tree(&mut self,
-                          tree: &mut hash_tree::SimpleHashTreeWriter<key::HashStoreBackend>,
+                          tree: &mut hash::tree::SimpleHashTreeWriter<key::HashStoreBackend>,
                           dir_id: Option<u64>,
-                          hash_ch: mpsc::Sender<Hash>) {
+                          hash_ch: mpsc::Sender<hash::Hash>) {
 
         let files_at_a_time = 1024;
         let mut it = self.list_from_key_store(dir_id).into_iter().enumerate();
@@ -1079,7 +1071,7 @@ impl Family {
                                 .init_content()
                                 .set_data(hash_ref_root.as_reader())
                                 .unwrap();
-                        hash_ch.send(Hash { bytes: hash_bytes }).unwrap();
+                        hash_ch.send(hash::Hash { bytes: hash_bytes }).unwrap();
                     } else {
                         drop(data_ref);  // May not use data reference without hash.
 

@@ -16,7 +16,7 @@
 use std::boxed::FnBox;
 use std::sync::mpsc;
 
-use hash_index::GcData;
+use hash::GcData;
 use snapshot::SnapshotInfo;
 use gc;
 use tags;

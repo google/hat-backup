@@ -21,8 +21,8 @@ use diesel;
 use diesel::prelude::*;
 use diesel::sqlite::SqliteConnection;
 
-use blob_store;
-use hash_index;
+use blob;
+use hash;
 
 mod schema;
 
@@ -40,7 +40,7 @@ pub enum Msg {
     Reserve(String),
 
     /// Update existing snapshot.
-    Update(SnapshotInfo, hash_index::Hash, blob_store::ChunkRef),
+    Update(SnapshotInfo, hash::Hash, blob::ChunkRef),
 
     /// ReadyCommit.
     ReadyCommit(SnapshotInfo),
@@ -73,14 +73,14 @@ pub enum Msg {
     Flush,
 
     /// Recover snapshot information.
-    Recover(i64, String, String, Vec<u8>, blob_store::ChunkRef),
+    Recover(i64, String, String, Vec<u8>, blob::ChunkRef),
 }
 
 pub enum Reply {
     Reserved(SnapshotInfo),
     UpdateOk,
     CommitOk,
-    Snapshot(Option<(SnapshotInfo, hash_index::Hash, Option<blob_store::ChunkRef>)>),
+    Snapshot(Option<(SnapshotInfo, hash::Hash, Option<blob::ChunkRef>)>),
     NotDone(Vec<SnapshotStatus>),
     All(Vec<SnapshotStatus>),
     FlushOk,
@@ -99,7 +99,7 @@ pub enum WorkStatus {
 pub struct SnapshotStatus {
     pub family_name: String,
     pub info: SnapshotInfo,
-    pub hash: Option<hash_index::Hash>,
+    pub hash: Option<hash::Hash>,
     pub msg: Option<String>,
     pub tree_ref: Option<Vec<u8>>,
     pub status: WorkStatus,
@@ -183,11 +183,10 @@ impl SnapshotIndex {
                  .and_then(|x| x)
     }
 
-    fn get_snapshot_info
-        (&mut self,
-         family_name_: String,
-         snapshot_id_: i64)
-         -> Option<(SnapshotInfo, hash_index::Hash, Option<blob_store::ChunkRef>)> {
+    fn get_snapshot_info(&mut self,
+                         family_name_: String,
+                         snapshot_id_: i64)
+                         -> Option<(SnapshotInfo, hash::Hash, Option<blob::ChunkRef>)> {
         use self::schema::snapshots::dsl::*;
         use self::schema::family::dsl::{family, name};
 
@@ -205,8 +204,8 @@ impl SnapshotIndex {
                 family_id: snap.family_id,
                 snapshot_id: snap.snapshot_id,
             },
-             hash_index::Hash { bytes: snap.hash.unwrap().to_vec() },
-             blob_store::ChunkRef::from_bytes(&mut &snap.tree_ref.unwrap()[..]).ok())
+             ::hash::Hash { bytes: snap.hash.unwrap().to_vec() },
+             ::blob::ChunkRef::from_bytes(&mut &snap.tree_ref.unwrap()[..]).ok())
         })
     }
 
@@ -241,8 +240,8 @@ impl SnapshotIndex {
     fn update(&mut self,
               snapshot_: SnapshotInfo,
               msg_: String,
-              hash_: hash_index::Hash,
-              tree_ref_: blob_store::ChunkRef) {
+              hash_: hash::Hash,
+              tree_ref_: blob::ChunkRef) {
         use self::schema::snapshots::dsl::*;
 
         diesel::update(snapshots.find(snapshot_.unique_id))
@@ -262,10 +261,9 @@ impl SnapshotIndex {
             .expect("Error updating snapshot");
     }
 
-    fn latest_snapshot
-        (&mut self,
-         family: String)
-         -> Option<(SnapshotInfo, hash_index::Hash, Option<blob_store::ChunkRef>)> {
+    fn latest_snapshot(&mut self,
+                       family: String)
+                       -> Option<(SnapshotInfo, hash::Hash, Option<blob::ChunkRef>)> {
         let family_id_opt = self.get_family_id(&family);
         family_id_opt.and_then(|family_id_| {
             use self::schema::snapshots::dsl::*;
@@ -282,8 +280,8 @@ impl SnapshotIndex {
                     family_id: snap.family_id,
                     snapshot_id: snap.snapshot_id,
                 },
-                 hash_index::Hash { bytes: snap.hash.unwrap().to_vec() },
-                 blob_store::ChunkRef::from_bytes(&mut &snap.tree_ref.unwrap()[..]).ok())
+                 ::hash::Hash { bytes: snap.hash.unwrap().to_vec() },
+                 ::blob::ChunkRef::from_bytes(&mut &snap.tree_ref.unwrap()[..]).ok())
             })
         })
     }
@@ -321,7 +319,7 @@ impl SnapshotIndex {
                     if bytes.is_empty() {
                         None
                     } else {
-                        Some(hash_index::Hash { bytes: bytes })
+                        Some(::hash::Hash { bytes: bytes })
                     }
                 });
                 SnapshotStatus {
@@ -345,7 +343,7 @@ impl SnapshotIndex {
                family: String,
                msg_: String,
                hash_: Vec<u8>,
-               tree_ref_: blob_store::ChunkRef) {
+               tree_ref_: blob::ChunkRef) {
         let family_id_ = self.get_or_create_family_id(&family);
         let insert = match self.get_snapshot_info(family, snapshot_id_) {
             Some((_info, h, r)) => {
