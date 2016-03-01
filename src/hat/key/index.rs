@@ -100,13 +100,16 @@ impl Index {
         let conn = SqliteConnection::establish(&path).expect("Could not open SQLite database");
 
         let ki = Index {
-                    path: path,
-                    conn: conn,
-                    flush_timer: PeriodicTimer::new(Duration::seconds(5)),
-                };
+            path: path,
+            conn: conn,
+            flush_timer: PeriodicTimer::new(Duration::seconds(5)),
+        };
 
         let dir = diesel::migrations::find_migrations_directory().unwrap();
-        diesel::migrations::run_pending_migrations_in_directory(&ki.conn, &dir, &mut util::InfoWriter).unwrap();
+        diesel::migrations::run_pending_migrations_in_directory(&ki.conn,
+                                                                &dir,
+                                                                &mut util::InfoWriter)
+            .unwrap();
         ki.conn.begin_transaction().unwrap();
 
         ki
@@ -160,11 +163,11 @@ impl MsgHandler<Msg, Reply> for Index {
                             .execute(&self.conn)
                             .expect("Error updating key");
                         entry
-                    },
+                    }
                     None => {
                         // Insert new entry.
                         {
-                            let new = schema::NewKey{
+                            let new = schema::NewKey {
                                 parent: entry.parent_id.map(|x| x as i64),
                                 name: &entry.name[..],
                                 created: entry.created,
@@ -174,7 +177,8 @@ impl MsgHandler<Msg, Reply> for Index {
                                 group_id: entry.group_id.map(|x| x as i64),
                                 user_id: entry.user_id.map(|x| x as i64),
                                 hash: None,
-                                persistent_ref: None};
+                                persistent_ref: None,
+                            };
 
                             diesel::insert(&new)
                                 .into(keys)
@@ -200,7 +204,7 @@ impl MsgHandler<Msg, Reply> for Index {
                                   .expect("Error searching keys");
 
                 if let Some(row) = row_opt {
-                    return reply(Reply::Entry(Entry{
+                    return reply(Reply::Entry(Entry {
                         id: Some(row.id as u64),
                         parent_id: parent_,
                         name: name_,
@@ -231,14 +235,12 @@ impl MsgHandler<Msg, Reply> for Index {
                     diesel::update(keys.find(id_)
                                        .filter(modified.eq::<Option<i64>>(None)
                                                        .or(modified.le(entry.modified))))
-                        .set((hash.eq(hash_bytes),
-                              persistent_ref.eq(persistent_ref_bytes)))
+                        .set((hash.eq(hash_bytes), persistent_ref.eq(persistent_ref_bytes)))
                         .execute(&self.conn)
                         .expect("Error updating key");
                 } else {
                     diesel::update(keys.find(id_))
-                        .set((hash.eq(hash_bytes),
-                              persistent_ref.eq(persistent_ref_bytes)))
+                        .set((hash.eq(hash_bytes), persistent_ref.eq(persistent_ref_bytes)))
                         .execute(&self.conn)
                         .expect("Error updating key");
                 }
@@ -256,25 +258,32 @@ impl MsgHandler<Msg, Reply> for Index {
                 use super::schema::keys::dsl::*;
 
                 let rows = keys.filter(parent.eq(parent_opt.map(|x| x as i64)))
-                    .load::<schema::Key>(&self.conn)
-                    .expect("Error listing keys");
+                               .load::<schema::Key>(&self.conn)
+                               .expect("Error listing keys");
 
 
-                return reply(Reply::ListResult(rows.into_iter().map(
-                    |mut r| (Entry{
-                        id: Some(r.id as u64),
-                        parent_id: r.parent.map(|x| x as u64),
-                        name: r.name,
-                        created: r.created,
-                        modified: r.modified,
-                        accessed: r.accessed,
-                        permissions: r.permissions.map(|x| x as u64),
-                        user_id: r.user_id.map(|x| x as u64),
-                        group_id: r.group_id.map(|x| x as u64),
-                        data_hash: r.hash,
-                        data_length: None,
-                    }, r.persistent_ref.as_mut().map(|p| blob::ChunkRef::from_bytes(&mut &p[..]).unwrap()))
-                    ).collect()));
+                return reply(Reply::ListResult(rows.into_iter()
+                                                   .map(|mut r| {
+                                                       (Entry {
+                                                           id: Some(r.id as u64),
+                                                           parent_id: r.parent.map(|x| x as u64),
+                                                           name: r.name,
+                                                           created: r.created,
+                                                           modified: r.modified,
+                                                           accessed: r.accessed,
+                                                           permissions: r.permissions
+                                                                         .map(|x| x as u64),
+                                                           user_id: r.user_id.map(|x| x as u64),
+                                                           group_id: r.group_id.map(|x| x as u64),
+                                                           data_hash: r.hash,
+                                                           data_length: None,
+                                                       },
+                                                        r.persistent_ref.as_mut().map(|p| {
+                                                           blob::ChunkRef::from_bytes(&mut &p[..])
+                                                               .unwrap()
+                                                       }))
+                                                   })
+                                                   .collect()));
             }
         }
     }

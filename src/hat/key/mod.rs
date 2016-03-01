@@ -257,29 +257,30 @@ impl<IT: Iterator<Item = Vec<u8>>> MsgHandler<Msg<IT>, Reply> for Store {
             }
 
             Msg::Insert(org_entry, chunk_it_opt) => {
-                let entry = 
-                    match self.index.send_reply(index::Msg::Lookup(org_entry.parent_id, org_entry.name.clone())) {
-                        index::Reply::Entry(ref entry) if
-                            org_entry.accessed == entry.accessed &&
-                            org_entry.modified == entry.modified &&
-                            org_entry.created == entry.created => {
-                            if org_entry.data_hash.is_some() && entry.data_hash.is_some() {
-                                let hash = hash::Hash{bytes: entry.data_hash.clone().unwrap()};
-                                if let hash::Reply::HashKnown = self.hash_index.send_reply(hash::Msg::HashExists(hash)) {
-                                    // Short-circuit: We have the data.
-                                    return reply(Reply::Id(entry.id.unwrap()));
-                                }
-                            } else if org_entry.data_hash.is_none() && org_entry.data_hash.is_none() {
-                                // Short-circuit: No data needed.
+                let entry = match self.index.send_reply(index::Msg::Lookup(org_entry.parent_id,
+                                                                           org_entry.name
+                                                                                    .clone())) {
+                    index::Reply::Entry(ref entry) if org_entry.accessed == entry.accessed &&
+                                                      org_entry.modified == entry.modified &&
+                                                      org_entry.created == entry.created => {
+                        if org_entry.data_hash.is_some() && entry.data_hash.is_some() {
+                            let hash = hash::Hash { bytes: entry.data_hash.clone().unwrap() };
+                            if let hash::Reply::HashKnown =
+                                   self.hash_index.send_reply(hash::Msg::HashExists(hash)) {
+                                // Short-circuit: We have the data.
                                 return reply(Reply::Id(entry.id.unwrap()));
                             }
-                            // Our stored entry is incomplete.
-                            Entry{id: entry.id, .. org_entry}
-                        },
-                        index::Reply::Entry(entry) => Entry{id: entry.id, .. org_entry},
-                        index::Reply::NotFound => org_entry,
-                        _ => panic!("Unexpected reply from key index"),
-                    };
+                        } else if org_entry.data_hash.is_none() && org_entry.data_hash.is_none() {
+                            // Short-circuit: No data needed.
+                            return reply(Reply::Id(entry.id.unwrap()));
+                        }
+                        // Our stored entry is incomplete.
+                        Entry { id: entry.id, ..org_entry }
+                    }
+                    index::Reply::Entry(entry) => Entry { id: entry.id, ..org_entry },
+                    index::Reply::NotFound => org_entry,
+                    _ => panic!("Unexpected reply from key index"),
+                };
 
                 let entry = match self.index.send_reply(index::Msg::Insert(entry)) {
                     index::Reply::Entry(entry) => entry,

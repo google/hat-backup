@@ -118,7 +118,10 @@ impl Index {
         let si = Index { conn: conn };
 
         let dir = diesel::migrations::find_migrations_directory().unwrap();
-        diesel::migrations::run_pending_migrations_in_directory(&si.conn, &dir, &mut util::InfoWriter).unwrap();
+        diesel::migrations::run_pending_migrations_in_directory(&si.conn,
+                                                                &dir,
+                                                                &mut util::InfoWriter)
+            .unwrap();
 
         si.conn.begin_transaction().unwrap();
         si

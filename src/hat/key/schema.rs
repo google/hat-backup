@@ -8,7 +8,7 @@ table! {
         id -> BigInt,
         parent -> Nullable<BigInt>,
         name -> Binary,
-        
+
         created -> Nullable<BigInt>,
         modified -> Nullable<BigInt>,
         accessed -> Nullable<BigInt>,
