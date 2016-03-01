@@ -197,11 +197,23 @@ impl MsgHandler<Msg, Reply> for Index {
             Msg::Lookup(parent_, name_) => {
                 use super::schema::keys::dsl::*;
 
-                let row_opt = keys.filter(parent.eq(parent_.map(|x| x as i64)))
-                                  .filter(name.eq(&name_[..]))
-                                  .first::<schema::Key>(&self.conn)
-                                  .optional()
-                                  .expect("Error searching keys");
+                let row_opt = match parent_ {
+                    Some(p) => {
+                        keys.filter(parent.eq(p as i64))
+                            .filter(name.eq(&name_[..]))
+                            .first::<schema::Key>(&self.conn)
+                            .optional()
+                            .expect("Error searching keys")
+                    }
+                    None => {
+                        keys.filter(parent.is_null())
+                            .filter(name.eq(&name_[..]))
+                            .first::<schema::Key>(&self.conn)
+                            .optional()
+                            .expect("Error searching keys")
+                    }
+                };
+
 
                 if let Some(row) = row_opt {
                     return reply(Reply::Entry(Entry {
@@ -257,10 +269,18 @@ impl MsgHandler<Msg, Reply> for Index {
             Msg::ListDir(parent_opt) => {
                 use super::schema::keys::dsl::*;
 
-                let rows = keys.filter(parent.eq(parent_opt.map(|x| x as i64)))
-                               .load::<schema::Key>(&self.conn)
-                               .expect("Error listing keys");
-
+                let rows = match parent_opt {
+                    Some(p) => {
+                        keys.filter(parent.eq(p as i64))
+                            .load::<schema::Key>(&self.conn)
+                            .expect("Error listing keys")
+                    }
+                    None => {
+                        keys.filter(parent.is_null())
+                            .load::<schema::Key>(&self.conn)
+                            .expect("Error listing keys")
+                    }
+                };
 
                 return reply(Reply::ListResult(rows.into_iter()
                                                    .map(|mut r| {
