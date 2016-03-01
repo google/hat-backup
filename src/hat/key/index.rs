@@ -16,19 +16,16 @@
 
 use blob;
 use hash;
+use super::schema;
+
+use diesel;
+use diesel::prelude::*;
+use diesel::sqlite::SqliteConnection;
 
 use time::Duration;
 
 use periodic_timer::PeriodicTimer;
 use process::{Process, MsgHandler};
-use sqlite3::database::Database;
-
-use sqlite3::cursor::Cursor;
-use sqlite3::types::ColumnType;
-use sqlite3::types::ResultCode;
-use sqlite3::open;
-
-use rustc_serialize::hex::ToHex;
 
 
 #[derive(Clone, Debug)]
@@ -57,9 +54,9 @@ pub enum Msg {
     /// Returns `Id` with the new entry ID.
     Insert(Entry),
 
-    /// Lookup an entry in the key index, to see if it exists.
-    /// Returns either `Id` with the found entry ID or `Notfound`.
-    LookupExact(Entry),
+    /// Lookup an entry in the key index by its parent id and name.
+    /// Returns either `Entry` with the found entry or `NotFound`.
+    Lookup(Option<u64>, Vec<u8>),
 
     /// Update the `payload` and `persistent_ref` of an entry.
     /// Returns `UpdateOk`.
@@ -75,7 +72,7 @@ pub enum Msg {
 
 pub enum Reply {
     Entry(Entry),
-    NotFound(Entry),
+    NotFound,
     UpdateOk,
     ListResult(Vec<(Entry, Option<blob::ChunkRef>)>),
     FlushOk,
@@ -84,7 +81,7 @@ pub enum Reply {
 
 pub struct Index {
     path: String,
-    dbh: Database,
+    conn: SqliteConnection,
     flush_timer: PeriodicTimer,
 }
 
@@ -99,39 +96,17 @@ fn i64_to_u64_or_panic(x: i64) -> u64 {
 
 impl Index {
     pub fn new(path: String) -> Index {
-        let mut ki = match open(&path) {
-            Ok(dbh) => {
-                Index {
+        let conn = SqliteConnection::establish(&path).expect("Could not open SQLite database");
+
+        let ki = Index {
                     path: path,
-                    dbh: dbh,
+                    conn: conn,
                     flush_timer: PeriodicTimer::new(Duration::seconds(5)),
-                }
-            }
-            Err(err) => panic!("{:?}", err),
-        };
-        ki.exec_or_die("CREATE TABLE IF NOT EXISTS
-                    key_index (rowid          \
-                        INTEGER PRIMARY KEY,
-                               parent         \
-                        INTEGER,
-                               name           BLOB,
-                               \
-                        created        UINT8,
-                               modified       \
-                        UINT8,
-                               accessed       UINT8,
-                               \
-                        hash           BLOB,
-                               persistent_ref BLOB
-                            \
-                        );");
+                };
+        
+        diesel::migrations::run_pending_migrations(&ki.conn).unwrap();
+        ki.conn.begin_transaction().unwrap();
 
-        ki.exec_or_die("CREATE UNIQUE INDEX IF NOT EXISTS
-                    \
-                        KeyIndex_UniqueParentName
-                    ON key_index(parent, name)");
-
-        ki.exec_or_die("BEGIN");
         ki
     }
 
@@ -140,19 +115,10 @@ impl Index {
         Index::new(":memory:".to_string())
     }
 
-    fn exec_or_die(&mut self, sql: &str) {
-        match self.dbh.exec(sql) {
-            Ok(true) => (),
-            Ok(false) => panic!("exec: {:?}, {}", self.dbh.get_errmsg(), sql),
-            Err(msg) => panic!("exec: {:?}, {:?}, {}", msg, self.dbh.get_errmsg(), sql),
-        }
-    }
-
-    fn prepare_or_die<'a>(&'a mut self, sql: &str) -> Cursor<'a> {
-        match self.dbh.prepare(sql, &None) {
-            Ok(s) => s,
-            Err(x) => panic!("sqlite error: {} ({:?})", self.dbh.get_errmsg(), x),
-        }
+    fn last_insert_rowid(&self) -> i64 {
+        diesel::select(diesel::expression::sql("last_insert_rowid()"))
+            .first::<i64>(&self.conn)
+            .unwrap()
     }
 
     pub fn maybe_flush(&mut self) {
@@ -162,7 +128,8 @@ impl Index {
     }
 
     pub fn flush(&mut self) {
-        self.exec_or_die("COMMIT; BEGIN");
+        self.conn.commit_transaction().unwrap();
+        self.conn.begin_transaction().unwrap();
     }
 }
 
@@ -172,129 +139,106 @@ impl Clone for Index {
     }
 }
 
-impl Drop for Index {
-    fn drop(&mut self) {
-        self.exec_or_die("COMMIT");
-    }
-}
-
 impl MsgHandler<Msg, Reply> for Index {
     fn handle(&mut self, msg: Msg, reply: Box<Fn(Reply)>) {
-        let unwrap_i64_or_null = |x: Option<i64>| x.map_or("NULL".to_string(), |v| v.to_string());
-
         match msg {
 
             Msg::Insert(entry) => {
-                let parent = entry.parent_id.unwrap_or(0);
+                use super::schema::keys::dsl::*;
 
-                self.exec_or_die(&format!("INSERT OR REPLACE INTO key_index (parent, name,
-                                           \
-                                           created, modified, accessed)
-                                           \
-                                           VALUES
-                                           \
-                                           ({:?}, x'{}', {}, {}, {})",
-                                          parent,
-                                          entry.name.to_hex(),
-                                          unwrap_i64_or_null(entry.created),
-                                          unwrap_i64_or_null(entry.modified),
-                                          unwrap_i64_or_null(entry.accessed)));
+                let entry = match entry.id {
+                    Some(id_) => {
+                        // Replace existing entry.
+                        diesel::update(keys.find(id_ as i64))
+                            .set((parent.eq(entry.parent_id.map(|x| x as i64)),
+                                  name.eq(&entry.name[..]),
+                                  created.eq(entry.created),
+                                  modified.eq(entry.modified),
+                                  accessed.eq(entry.accessed)))
+                            .execute(&self.conn)
+                            .expect("Error updating key");
+                        entry
+                    },
+                    None => {
+                        // Insert new entry.
+                        {
+                            let new = schema::NewKey{
+                                parent: entry.parent_id.map(|x| x as i64),
+                                name: &entry.name[..],
+                                created: entry.created,
+                                modified: entry.modified,
+                                accessed: entry.accessed,
+                                permissions: entry.permissions.map(|x| x as i64),
+                                group_id: entry.group_id.map(|x| x as i64),
+                                user_id: entry.user_id.map(|x| x as i64),
+                                hash: None,
+                                persistent_ref: None};
 
-                let mut entry = entry;
-                entry.id = Some(i64_to_u64_or_panic(self.dbh.get_last_insert_rowid()));
+                            diesel::insert(&new)
+                                .into(keys)
+                                .execute(&self.conn)
+                                .expect("Error inserting key");
+                        }
+                        let mut entry = entry;
+                        entry.id = Some(self.last_insert_rowid() as u64);
+                        entry
+                    }
+                };
+
                 return reply(Reply::Entry(entry));
             }
 
-            Msg::LookupExact(entry) => {
-                let parent = entry.parent_id.unwrap_or(0);
-                let mut cursor = self.prepare_or_die(&format!("SELECT rowid, hash FROM \
-                                                               key_index
-           WHERE \
-                                                               parent={:?} AND name=x'{}'
-           \
-                                                               AND created={} AND modified={} \
-                                                               AND accessed={}
-           LIMIT \
-                                                               1",
-                                                              parent,
-                                                              entry.name.to_hex(),
-                                                              unwrap_i64_or_null(entry.created),
-                                                              unwrap_i64_or_null(entry.modified),
-                                                              unwrap_i64_or_null(entry.accessed)));
-                if cursor.step() == ResultCode::SQLITE_ROW {
-                    let id = i64_to_u64_or_panic(cursor.get_i64(0));
-                    let hash_opt = cursor.get_blob(1).map(|s| s.to_vec());
-                    assert!(cursor.step() == ResultCode::SQLITE_DONE);
-                    let mut entry = entry;
-                    entry.id = Some(id);
-                    entry.data_hash = hash_opt;
-                    return reply(Reply::Entry(entry));
+            Msg::Lookup(parent_, name_) => {
+                use super::schema::keys::dsl::*;
+
+                let row_opt = keys.filter(parent.eq(parent_.map(|x| x as i64)))
+                                  .filter(name.eq(&name_[..]))
+                                  .first::<schema::Key>(&self.conn)
+                                  .optional()
+                                  .expect("Error searching keys");
+
+                if let Some(row) = row_opt {
+                    return reply(Reply::Entry(Entry{
+                        id: Some(row.id as u64),
+                        parent_id: parent_,
+                        name: name_,
+                        created: row.created,
+                        modified: row.modified,
+                        accessed: row.accessed,
+                        permissions: row.permissions.map(|x| x as u64),
+                        user_id: row.user_id.map(|x| x as u64),
+                        group_id: row.group_id.map(|x| x as u64),
+                        data_hash: row.hash,
+                        data_length: None,
+                    }));
                 } else {
-                    return reply(Reply::NotFound(entry));
+                    return reply(Reply::NotFound);
                 }
             }
 
             Msg::UpdateDataHash(entry, hash_opt, persistent_ref_opt) => {
-                let parent = entry.parent_id.unwrap_or(0);
+                use super::schema::keys::dsl::*;
 
+                let id_ = entry.id.expect("Tried to update without an id") as i64;
                 assert!(hash_opt.is_some() == persistent_ref_opt.is_some());
 
-                if hash_opt.is_some() && persistent_ref_opt.is_some() {
-                    match entry.modified {
-                        Some(modified) => {
-                            self.exec_or_die(&format!("UPDATE key_index SET hash=x'{}', \
-                                                       persistent_ref=x'{}'
-                                                  \
-                                                       , modified={}
-                  WHERE \
-                                                       parent={:?} AND rowid={:?} AND \
-                                                       IFNULL(modified,0)<={}",
-                                                      hash_opt.unwrap().bytes.to_hex(),
-                                                      persistent_ref_opt.unwrap()
-                                                                        .as_bytes()
-                                                                        .to_hex(),
-                                                      modified,
-                                                      parent,
-                                                      entry.id.expect("UpdateDataHash"),
-                                                      modified));
-                        }
-                        None => {
-                            self.exec_or_die(&format!("UPDATE key_index SET hash=x'{}', \
-                                                       persistent_ref=x'{}'
-                 \
-                                                       WHERE parent={:?} AND rowid={:?}",
-                                                      hash_opt.unwrap().bytes.to_hex(),
-                                                      persistent_ref_opt.unwrap()
-                                                                        .as_bytes()
-                                                                        .to_hex(),
-                                                      parent,
-                                                      entry.id.expect("UpdateDataHash, None")));
-                        }
-                    }
+                let hash_bytes = hash_opt.map(|h| h.bytes);
+                let persistent_ref_bytes = persistent_ref_opt.map(|p| p.as_bytes());
+
+                if entry.modified.is_some() {
+                    diesel::update(keys.find(id_)
+                                       .filter(modified.eq::<Option<i64>>(None)
+                                                       .or(modified.le(entry.modified))))
+                        .set((hash.eq(hash_bytes),
+                              persistent_ref.eq(persistent_ref_bytes)))
+                        .execute(&self.conn)
+                        .expect("Error updating key");
                 } else {
-                    match entry.modified {
-                        Some(modified) => {
-                            self.exec_or_die(&format!("UPDATE key_index SET hash=NULL, \
-                                                       persistent_ref=NULL
-                                               \
-                                                       , modified={}
-                 WHERE \
-                                                       parent={:?} AND rowid={:?} AND \
-                                                       IFNULL(modified, 0)<={}",
-                                                      modified,
-                                                      parent,
-                                                      entry.id.expect("UpdateDataHash2"),
-                                                      modified));
-                        }
-                        None => {
-                            self.exec_or_die(&format!("UPDATE key_index SET hash=NULL, \
-                                                       persistent_ref=NULL
-                 \
-                                                       WHERE parent={:?} AND rowid={}",
-                                                      parent,
-                                                      entry.id.expect("UpdateDataHash2, None")));
-                        }
-                    }
+                    diesel::update(keys.find(id_))
+                        .set((hash.eq(hash_bytes),
+                              persistent_ref.eq(persistent_ref_bytes)))
+                        .execute(&self.conn)
+                        .expect("Error updating key");
                 }
 
                 self.maybe_flush();
@@ -307,61 +251,28 @@ impl MsgHandler<Msg, Reply> for Index {
             }
 
             Msg::ListDir(parent_opt) => {
-                let mut listing = Vec::new();
-                let parent = parent_opt.unwrap_or(0);
+                use super::schema::keys::dsl::*;
 
-                let mut cursor = self.prepare_or_die(&format!("SELECT rowid, name, created, \
-                                                               modified, accessed, hash, \
-                                                               persistent_ref
-            FROM \
-                                                               key_index
-            WHERE \
-                                                               parent={:?}",
-                                                              parent));
+                let rows = keys.filter(parent.eq(parent_opt.map(|x| x as i64)))
+                    .load::<schema::Key>(&self.conn)
+                    .expect("Error listing keys");
 
-                let get_i64_opt = |c: &mut Cursor, i: isize| {
-                    match c.get_column_type(i) {
-                        ColumnType::SQLITE_NULL => None,
-                        ColumnType::SQLITE_INTEGER => Some(c.get_i64(i)),
-                        _ => unreachable!(),
-                    }
-                };
-                while cursor.step() == ResultCode::SQLITE_ROW {
-                    let id = i64_to_u64_or_panic(cursor.get_i64(0));
-                    let name = cursor.get_blob(1).expect("name").to_owned();
-                    let created = get_i64_opt(&mut cursor, 2);
-                    let modified = get_i64_opt(&mut cursor, 3);
-                    let accessed = get_i64_opt(&mut cursor, 4);
-                    let hash = cursor.get_blob(5).map(|s| s.to_vec());
-                    let persistent_ref =
-                        cursor.get_blob(6)
-                              .and_then(|b| {
-                                  if b.is_empty() {
-                                      None
-                                  } else {
-                                      Some(blob::ChunkRef::from_bytes(&mut &b.to_owned()[..])
-                                               .unwrap())
-                                  }
-                              });
 
-                    listing.push((Entry {
-                        id: Some(id),
-                        name: name,
-                        created: created,
-                        modified: modified,
-                        accessed: accessed,
-                        data_hash: hash,
+                return reply(Reply::ListResult(rows.into_iter().map(
+                    |mut r| (Entry{
+                        id: Some(r.id as u64),
+                        parent_id: r.parent.map(|x| x as u64),
+                        name: r.name,
+                        created: r.created,
+                        modified: r.modified,
+                        accessed: r.accessed,
+                        permissions: r.permissions.map(|x| x as u64),
+                        user_id: r.user_id.map(|x| x as u64),
+                        group_id: r.group_id.map(|x| x as u64),
+                        data_hash: r.hash,
                         data_length: None,
-                        // TODO(jos): Implement support for remaining fields.
-                        parent_id: None,
-                        permissions: None,
-                        group_id: None,
-                        user_id: None,
-                    },
-                                  persistent_ref));
-                }
-
-                return reply(Reply::ListResult(listing));
+                    }, r.persistent_ref.as_mut().map(|p| blob::ChunkRef::from_bytes(&mut &p[..]).unwrap()))
+                    ).collect()));
             }
         }
     }

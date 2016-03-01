@@ -22,7 +22,11 @@ use hash::tree::{HashTreeBackend, SimpleHashTreeWriter, SimpleHashTreeReader, Re
 
 use process::{Process, MsgHandler};
 
+
+mod schema;
 mod index;
+
+
 pub use self::index::{Index, IndexProcess, Entry};
 
 
@@ -253,29 +257,33 @@ impl<IT: Iterator<Item = Vec<u8>>> MsgHandler<Msg<IT>, Reply> for Store {
             }
 
             Msg::Insert(org_entry, chunk_it_opt) => {
-                let entry = match self.index.send_reply(index::Msg::LookupExact(org_entry)) {
-                    index::Reply::Entry(entry) => {
-                        if entry.data_hash.is_some() {
-                            match self.hash_index
-                                      .send_reply(hash::Msg::HashExists(hash::Hash {
-                                          bytes: entry.data_hash.clone().unwrap(),
-                                      })) {
-                                hash::Reply::HashKnown => {
+                let entry = 
+                    match self.index.send_reply(index::Msg::Lookup(org_entry.parent_id, org_entry.name.clone())) {
+                        index::Reply::Entry(ref entry) if
+                            org_entry.accessed == entry.accessed &&
+                            org_entry.modified == entry.modified &&
+                            org_entry.created == entry.created => {
+                            if org_entry.data_hash.is_some() && entry.data_hash.is_some() {
+                                let hash = hash::Hash{bytes: entry.data_hash.clone().unwrap()};
+                                if let hash::Reply::HashKnown = self.hash_index.send_reply(hash::Msg::HashExists(hash)) {
+                                    // Short-circuit: We have the data.
                                     return reply(Reply::Id(entry.id.unwrap()));
                                 }
-                                _ => entry,
+                            } else if org_entry.data_hash.is_none() && org_entry.data_hash.is_none() {
+                                // Short-circuit: No data needed.
+                                return reply(Reply::Id(entry.id.unwrap()));
                             }
-                        } else {
-                            entry
-                        }
-                    }
-                    index::Reply::NotFound(entry) => {
-                        match self.index.send_reply(index::Msg::Insert(entry)) {
-                            index::Reply::Entry(entry) => entry,
-                            _ => panic!("Could not insert entry into key index."),
-                        }
-                    }
-                    _ => panic!("Unexpected reply from key index."),
+                            // Our stored entry is incomplete.
+                            Entry{id: entry.id, .. org_entry}
+                        },
+                        index::Reply::Entry(entry) => Entry{id: entry.id, .. org_entry},
+                        index::Reply::NotFound => org_entry,
+                        _ => panic!("Unexpected reply from key index"),
+                    };
+
+                let entry = match self.index.send_reply(index::Msg::Insert(entry)) {
+                    index::Reply::Entry(entry) => entry,
+                    _ => panic!("Could not insert entry into key index."),
                 };
 
                 // Send out the ID early to allow the client to continue its key discovery routine.
@@ -619,7 +627,6 @@ mod tests {
         });
 
         bench.bytes = 128 * 1024;
-
     }
 
 
