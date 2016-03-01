@@ -33,6 +33,8 @@
 
 
 // Standard Rust imports
+#[macro_use]
+extern crate log;
 extern crate rand;
 extern crate test;
 extern crate time;
@@ -85,6 +87,7 @@ mod gc_rc;
 mod tags;
 
 mod snapshot;
+mod util;
 
 
 pub mod root_capnp {

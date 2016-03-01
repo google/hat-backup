@@ -23,6 +23,7 @@ use diesel::sqlite::SqliteConnection;
 
 use blob;
 use hash;
+use util;
 
 mod schema;
 
@@ -116,7 +117,9 @@ impl Index {
 
         let si = Index { conn: conn };
 
-        diesel::migrations::run_pending_migrations(&si.conn).unwrap();
+        let dir = diesel::migrations::find_migrations_directory().unwrap();
+        diesel::migrations::run_pending_migrations_in_directory(&si.conn, &dir, &mut util::InfoWriter).unwrap();
+
         si.conn.begin_transaction().unwrap();
         si
     }

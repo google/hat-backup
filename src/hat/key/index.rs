@@ -16,6 +16,7 @@
 
 use blob;
 use hash;
+use util;
 use super::schema;
 
 use diesel;
@@ -103,8 +104,9 @@ impl Index {
                     conn: conn,
                     flush_timer: PeriodicTimer::new(Duration::seconds(5)),
                 };
-        
-        diesel::migrations::run_pending_migrations(&ki.conn).unwrap();
+
+        let dir = diesel::migrations::find_migrations_directory().unwrap();
+        diesel::migrations::run_pending_migrations_in_directory(&ki.conn, &dir, &mut util::InfoWriter).unwrap();
         ki.conn.begin_transaction().unwrap();
 
         ki
