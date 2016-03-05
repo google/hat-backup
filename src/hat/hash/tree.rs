@@ -356,8 +356,16 @@ impl<B: HashTreeBackend + Clone> SimpleHashTreeReader<B> {
     }
 
     fn extract(&mut self) -> Option<Vec<u8>> {
+        // Basic cycle detection to spot some programming mistakes.
+        let mut cycle_start = None;
+
         while !self.stack.is_empty() {
             let child = self.stack.pop().expect("len() > 0");
+
+            match cycle_start {
+                None => cycle_start = Some(child.hash.clone()),
+                Some(ref hash) => assert!(hash != &child.hash),
+            }
 
             let hash = Hash { bytes: child.hash };
             let mut data = self.backend
@@ -546,6 +554,35 @@ mod tests {
         let mut it = SimpleHashTreeReader::open(backend, hash, Some(hash_ref))
                          .expect("tree not found");
         assert_eq!(Some(block), it.next());
+        assert_eq!(0, it.count());
+    }
+
+    #[test]
+    fn identity_append5() {
+        let blocks: Vec<Vec<u8>> = vec![
+            b"foo".to_vec(),
+            b"bar".to_vec(),
+            b"baz".to_vec(),
+            b"qux".to_vec(),
+            b"norf".to_vec()];
+
+        let backend = MemoryBackend::new();
+        let mut ht = SimpleHashTreeWriter::new(4, backend.clone());
+
+        for block in blocks.iter() {
+            ht.append(block.clone());
+        }
+
+        let (hash, hash_ref) = ht.hash();
+
+        let mut it = SimpleHashTreeReader::open(backend.clone(), hash, Some(hash_ref))
+                         .expect("tree not found");
+
+        for mut block in blocks {
+            assert_eq!(Some(&block), it.next().as_ref());
+            block.push(0);
+            assert!(backend.saw_chunk(&block));
+        }
         assert_eq!(0, it.count());
     }
 
