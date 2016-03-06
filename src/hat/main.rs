@@ -42,6 +42,7 @@ extern crate time;
 // Rust bindings
 extern crate capnp;
 extern crate sodiumoxide;
+extern crate libsodium_sys;
 
 // SQLite
 extern crate sqlite3;

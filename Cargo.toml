@@ -21,6 +21,7 @@ num = "*"
 rustc-serialize = "*"
 time = "*"
 
+libsodium-sys = "*"
 sodiumoxide = "*"
 threadpool = "*"
 

@@ -33,6 +33,7 @@ use sqlite3::open;
 
 use periodic_timer::PeriodicTimer;
 
+use libsodium_sys;
 use sodiumoxide::crypto::hash::sha512;
 
 
@@ -59,8 +60,13 @@ pub struct GcData {
 impl Hash {
     /// Computes `hash(text)` and stores this digest as the `bytes` field in a new `Hash` structure.
     pub fn new(text: &[u8]) -> Hash {
-        let sha512::Digest(digest_bytes) = sha512::hash(text);
-        Hash { bytes: digest_bytes[0..HASHBYTES].to_vec() }
+        let digest_len = libsodium_sys::crypto_generichash_blake2b_BYTES_MAX;
+        let mut digest = vec![0; digest_len];
+        unsafe {
+            libsodium_sys::crypto_generichash_blake2b(digest.as_mut_ptr(), digest_len,
+                                                      text.as_ptr(), text.len() as u64, vec![].as_ptr(), 0);
+        }
+        Hash { bytes: digest.to_vec() }
     }
 }
 
