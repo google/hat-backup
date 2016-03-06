@@ -63,8 +63,12 @@ impl Hash {
         let digest_len = libsodium_sys::crypto_generichash_blake2b_BYTES_MAX;
         let mut digest = vec![0; digest_len];
         unsafe {
-            libsodium_sys::crypto_generichash_blake2b(digest.as_mut_ptr(), digest_len,
-                                                      text.as_ptr(), text.len() as u64, vec![].as_ptr(), 0);
+            libsodium_sys::crypto_generichash_blake2b(digest.as_mut_ptr(),
+                                                      digest_len,
+                                                      text.as_ptr(),
+                                                      text.len() as u64,
+                                                      vec![].as_ptr(),
+                                                      0);
         }
         Hash { bytes: digest.to_vec() }
     }
