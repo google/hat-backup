@@ -33,6 +33,7 @@ use process::{Process, MsgHandler};
 
 use tags;
 
+mod schema;
 mod index;
 pub use self::index::{Index, BlobDesc};
 

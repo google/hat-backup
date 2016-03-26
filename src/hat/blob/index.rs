@@ -18,15 +18,16 @@ use std::sync::mpsc;
 use sodiumoxide::randombytes::randombytes;
 
 use std::collections::HashMap;
-use rustc_serialize::hex::ToHex;
+
+use diesel;
+use diesel::prelude::*;
+use diesel::sqlite::SqliteConnection;
 
 use process::{Process, MsgHandler};
 use tags;
+use util;
 
-use sqlite3::database::Database;
-use sqlite3::cursor::Cursor;
-use sqlite3::types::ResultCode::{SQLITE_DONE, SQLITE_ROW};
-use sqlite3::open;
+use super::schema;
 
 
 pub type IndexProcess = Process<Msg, Reply>;
@@ -66,7 +67,7 @@ pub enum Reply {
 }
 
 pub struct Index {
-    dbh: Database,
+    conn: SqliteConnection,
     next_id: i64,
     reserved: HashMap<Vec<u8>, BlobDesc>,
 }
@@ -74,38 +75,27 @@ pub struct Index {
 
 impl Index {
     pub fn new(path: String) -> Index {
-        let mut hi = match open(&path) {
-            Ok(dbh) => {
-                Index {
-                    dbh: dbh,
+        let conn = SqliteConnection::establish(&path).expect("Could not open SQLite database");
+
+        let mut bi = Index {
+                    conn: conn,
                     next_id: -1,
                     reserved: HashMap::new(),
-                }
-            }
-            Err(err) => panic!("{:?}", err),
-        };
-        hi.initialize();
-        hi
+                };
+
+        let dir = diesel::migrations::find_migrations_directory().unwrap();
+        diesel::migrations::run_pending_migrations_in_directory(&bi.conn,
+                                                                &dir,
+                                                                &mut util::InfoWriter)
+            .unwrap();
+        bi.conn.begin_transaction().unwrap();
+        bi.refresh_next_id();
+        bi
     }
 
     #[cfg(test)]
     pub fn new_for_testing() -> Index {
         Index::new(":memory:".to_string())
-    }
-
-    fn initialize(&mut self) {
-        self.exec_or_die("CREATE TABLE IF NOT EXISTS
-                      blob_index (id        \
-                          INTEGER PRIMARY KEY,
-                                  name      BLOB,
-                                  \
-                          tag       INT)");
-        self.exec_or_die("CREATE UNIQUE INDEX IF NOT EXISTS
-                      \
-                          BlobIndex_UniqueName ON blob_index(name)");
-        self.exec_or_die("BEGIN");
-
-        self.refresh_next_id();
     }
 
     fn new_blob_desc(&mut self) -> BlobDesc {
@@ -115,38 +105,17 @@ impl Index {
         }
     }
 
-    fn exec_or_die(&mut self, sql: &str) {
-        match self.dbh.exec(sql) {
-            Ok(true) => (),
-            Ok(false) => panic!("exec: {}", self.dbh.get_errmsg()),
-            Err(msg) => {
-                panic!("exec: {:?}, {:?}\nIn sql: '{}'\n",
-                       msg,
-                       self.dbh.get_errmsg(),
-                       sql)
-            }
-        }
-    }
-
-    fn prepare_or_die<'a>(&'a self, sql: &str) -> Cursor<'a> {
-        match self.dbh.prepare(sql, &None) {
-            Ok(s) => s,
-            Err(x) => panic!("sqlite error: {:?} ({:?})", self.dbh.get_errmsg(), x),
-        }
-    }
-
-    fn select1<'a>(&'a mut self, sql: &str) -> Option<Cursor<'a>> {
-        let mut cursor = self.prepare_or_die(sql);
-        if cursor.step() == SQLITE_ROW {
-            Some(cursor)
-        } else {
-            None
-        }
-    }
-
     fn refresh_next_id(&mut self) {
-        let id = self.select1("SELECT MAX(id) FROM blob_index").unwrap().get_int(0);
-        self.next_id = (id as i64) + 1;
+        use diesel::expression::max;
+        use super::schema::blobs::dsl::*;
+
+        let id_opt = blobs.select(max(id).nullable())
+                          .first::<Option<i64>>(&self.conn)
+                          .optional()
+                          .expect("Error querying blobs")
+                          .and_then(|x| x);
+
+        self.next_id = 1 + id_opt.unwrap_or(0);
     }
 
     fn next_id(&mut self) -> i64 {
@@ -164,55 +133,74 @@ impl Index {
     fn in_air(&mut self, blob: &BlobDesc) {
         assert!(self.reserved.get(&blob.name).is_some(),
                 "blob was not reserved!");
-        self.exec_or_die(&format!("INSERT INTO blob_index (id, name, tag) VALUES ({}, x'{}', {})",
-                                  blob.id,
-                                  blob.name.to_hex(),
-                                  tags::Tag::InProgress as i64));
+        use super::schema::blobs::dsl::*;
+
+        let new = schema::NewBlob {
+            id: blob.id,
+            name: &blob.name,
+            tag: tags::Tag::InProgress as i32,
+        };
+        diesel::insert(&new)
+            .into(blobs)
+            .execute(&self.conn)
+            .expect("Error inserting blob");
+        
         self.new_transaction();
     }
 
     fn new_transaction(&mut self) {
-        self.exec_or_die("COMMIT; BEGIN");
+        self.conn.commit_transaction().unwrap();
+        self.conn.begin_transaction().unwrap();
     }
 
     fn commit_blob(&mut self, blob: &BlobDesc) {
         assert!(self.reserved.get(&blob.name).is_some(),
                 "blob was not reserved!");
-        self.exec_or_die(&format!("UPDATE blob_index SET tag={} WHERE id={}",
-                                  tags::Tag::Done as i64,
-                                  blob.id));
+        use super::schema::blobs::dsl::*;
+
+        diesel::update(blobs.find(blob.id)).set(tag.eq(tags::Tag::Done as i32))
+                                           .execute(&self.conn)
+                                           .expect("Error updating blob");
         self.new_transaction();
     }
 
-    fn tag(&mut self, tag: tags::Tag, target: Option<BlobDesc>) {
-        let filter = target.map_or("".to_owned(), |d| {
-            if d.id != 0 {
-                format!(" WHERE id={:?} LIMIT 1", d.id)
-            } else {
-                format!(" WHERE name=x'{}' LIMIT 1", d.name.to_hex())
-            }
-        });
-        self.exec_or_die(&format!("UPDATE blob_index SET tag={:?} {}", tag as i64, filter));
+    fn tag(&mut self, tag_: tags::Tag, target: Option<BlobDesc>) {
+        use super::schema::blobs::dsl::*;
+        match target {
+            None => 
+                diesel::update(blobs).set(tag.eq(tag_ as i32))
+                                     .execute(&self.conn)
+                                     .expect("Error updating blob tags"),
+            Some(ref t) if t.id > 0 =>
+                diesel::update(blobs.find(t.id)).set(tag.eq(tag_ as i32))
+                                                .execute(&self.conn)
+                                                .expect("Error updating blob tags"),
+            Some(ref t) if !t.name.is_empty() =>
+                diesel::update(blobs.filter(name.eq(&t.name))).set(tag.eq(tag_ as i32))
+                                                              .execute(&self.conn)
+                                                              .expect("Error updating blob tags"),
+            _ => unreachable!(),
+        };
     }
 
-    fn delete_by_tag(&mut self, tag: tags::Tag) {
-        self.exec_or_die(&format!("DELETE FROM blob_index WHERE tag={:?}", tag as i64));
+    fn delete_by_tag(&mut self, tag_: tags::Tag) {
+        use super::schema::blobs::dsl::*;
+        diesel::delete(blobs.filter(tag.eq(tag_ as i32)))
+                .execute(&self.conn)
+                .expect("Error deleting blobs");
     }
 
-    fn list_by_tag(&mut self, tag: tags::Tag) -> mpsc::Receiver<BlobDesc> {
+    fn list_by_tag(&mut self, tag_: tags::Tag) -> mpsc::Receiver<BlobDesc> {
+        use super::schema::blobs::dsl::*;
         let (sender, receiver) = mpsc::channel();
-        let mut cursor = self.prepare_or_die(&format!("SELECT id, name FROM blob_index WHERE \
-                                                       tag={:?}",
-                                                      tag as i64));
-        loop {
-            let status = cursor.step();
-            if status == SQLITE_DONE {
-                break;
-            }
-            assert_eq!(status, SQLITE_ROW);
+
+        let blobs_ = blobs.filter(tag.eq(tag_ as i32))
+                          .load::<schema::Blob>(&self.conn)
+                          .expect("Error listing blobs");
+        for blob_ in blobs_ {
             if let Err(_) = sender.send(BlobDesc {
-                id: cursor.get_i64(0),
-                name: cursor.get_blob(1).unwrap().to_vec(),
+                id: blob_.id,
+                name: blob_.name,
             }) {
                 break; // channel closed.
             }
@@ -223,7 +211,7 @@ impl Index {
 
 impl Drop for Index {
     fn drop(&mut self) {
-        self.exec_or_die("COMMIT");
+        self.conn.commit_transaction().unwrap();
     }
 }
 
