@@ -57,12 +57,12 @@ pub fn mark_tree<B>(backend: &mut Box<B>, root: Id, tag: tags::Tag)
 {
     backend.set_tag(root, tag.clone());
     for r in backend.reverse_refs(root) {
-        if let Some(current) = backend.get_tag(r.clone()) {
+        if let Some(current) = backend.get_tag(r) {
             if current == tag {
                 continue;
             }
         }
-        backend.set_tag(r.clone(), tag.clone());
+        backend.set_tag(r, tag.clone());
         mark_tree(backend, r, tag.clone());
     }
 }
@@ -210,7 +210,7 @@ impl GcBackend for SafeMemoryBackend {
         let mut backend = self.backend.lock().unwrap();
         for (_snapshot, refs) in backend.snapshot_refs.clone() {
             for r in refs {
-                backend.tags.insert(r.clone(), tag.clone());
+                backend.tags.insert(r, tag.clone());
             }
         }
     }

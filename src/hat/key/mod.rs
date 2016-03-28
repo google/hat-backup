@@ -290,7 +290,7 @@ impl<IT: Iterator<Item = Vec<u8>>> MsgHandler<Msg<IT>, Reply> for Store {
                 // Send out the ID early to allow the client to continue its key discovery routine.
                 // The bounded input-channel will prevent the client from overflowing us.
                 assert!(entry.id.is_some());
-                reply(Reply::Id(entry.id.unwrap().clone()));
+                reply(Reply::Id(entry.id.unwrap()));
 
 
                 // Setup hash tree structure
