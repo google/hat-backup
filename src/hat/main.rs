@@ -158,14 +158,14 @@ fn main() {
     sodiumoxide::init();
 
     match matches.subcommand() {
-        ("resume", Some(_matches)) => {
+        ("resume", Some(_cmd)) => {
             // Setting up the repository triggers automatic resume.
             let backend = blob::FileBackend::new(blob_dir());
             hat::Hat::open_repository(&PathBuf::from("repo"), backend, MAX_BLOB_SIZE);
         }
-        ("snapshot", Some(matches)) => {
-            let name = matches.value_of("NAME").unwrap().to_owned();
-            let path = matches.value_of("PATH").unwrap();
+        ("snapshot", Some(cmd)) => {
+            let name = cmd.value_of("NAME").unwrap().to_owned();
+            let path = cmd.value_of("PATH").unwrap();
 
             let backend = blob::FileBackend::new(blob_dir());
             let hat = hat::Hat::open_repository(&PathBuf::from("repo"), backend, MAX_BLOB_SIZE);
@@ -178,45 +178,45 @@ fn main() {
 
             println!("Waiting for final flush...");
         }
-        ("checkout", Some(matches)) => {
-            let name = matches.value_of("NAME").unwrap().to_owned();
-            let path = matches.value_of("PATH").unwrap();
+        ("checkout", Some(cmd)) => {
+            let name = cmd.value_of("NAME").unwrap().to_owned();
+            let path = cmd.value_of("PATH").unwrap();
 
             let backend = blob::FileBackend::new(blob_dir());
             let hat = hat::Hat::open_repository(&PathBuf::from("repo"), backend, MAX_BLOB_SIZE);
 
             hat.checkout_in_dir(name.clone(), PathBuf::from(path));
         }
-        ("meta-commit", Some(_)) => {
+        ("meta-commit", Some(_cmd)) => {
             let backend = blob::FileBackend::new(blob_dir());
             let mut hat = hat::Hat::open_repository(&PathBuf::from("repo"), backend, MAX_BLOB_SIZE);
 
             hat.meta_commit();
         }
-        ("recover", Some(_)) => {
+        ("recover", Some(_cmd)) => {
             let backend = blob::FileBackend::new(blob_dir());
             let mut hat = hat::Hat::open_repository(&PathBuf::from("repo"), backend, MAX_BLOB_SIZE);
 
             hat.recover();
         }
-        ("commit", Some(matches)) => {
-            let name = matches.value_of("NAME").unwrap().to_owned();
+        ("commit", Some(cmd)) => {
+            let name = cmd.value_of("NAME").unwrap().to_owned();
 
             let backend = blob::FileBackend::new(blob_dir());
             let mut hat = hat::Hat::open_repository(&PathBuf::from("repo"), backend, MAX_BLOB_SIZE);
 
             hat.commit(name, None);
         }
-        ("delete", Some(matches)) => {
-            let name = matches.value_of("NAME").unwrap().to_owned();
-            let id = matches.value_of("ID").unwrap().to_owned();
+        ("delete", Some(cmd)) => {
+            let name = cmd.value_of("NAME").unwrap().to_owned();
+            let id = cmd.value_of("ID").unwrap().to_owned();
 
             let backend = blob::FileBackend::new(blob_dir());
             let mut hat = hat::Hat::open_repository(&PathBuf::from("repo"), backend, MAX_BLOB_SIZE);
 
             hat.deregister(name, id.parse::<i64>().unwrap());
         }
-        ("gc", Some(_matches)) => {
+        ("gc", Some(_cmd)) => {
             let backend = blob::FileBackend::new(blob_dir());
             let mut hat = hat::Hat::open_repository(&PathBuf::from("repo"), backend, MAX_BLOB_SIZE);
             hat.gc();
