@@ -720,7 +720,7 @@ impl FileEntry {
                     created: Some(md.ctime_nsec()),
                     modified: Some(md.mtime_nsec()),
                     accessed: Some(md.atime_nsec()),
-                    parent_id: parent.clone(),
+                    parent_id: parent,
                     data_length: Some(md.len()),
                     data_hash: None,
                     id: None,
