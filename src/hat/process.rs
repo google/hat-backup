@@ -116,6 +116,6 @@ impl<Msg: 'static + Send, Reply: 'static + Send> Process<Msg, Reply> {
     pub fn send_reply(&self, msg: Msg) -> Reply {
         let (sender, receiver) = mpsc::channel();
         self.sender.send((msg, Some(sender))).ok();
-        return receiver.recv().unwrap();
+        return receiver.recv().expect("Failed to get reply for msg");
     }
 }
