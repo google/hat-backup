@@ -16,22 +16,20 @@
 
 use capnp;
 use root_capnp;
+use tags;
+use process::{Process, MsgHandler};
+
+use std::collections::BTreeMap;
 
 use std::boxed::FnBox;
 use std::sync::{Arc, Mutex};
 use std::thread;
 
-use rustc_serialize::hex::ToHex;
-
-use std::collections::BTreeMap;
-
 use std::fs;
 use std::io::{Read, Write};
 use std::path::PathBuf;
+use rustc_serialize::hex::ToHex;
 
-use process::{Process, MsgHandler};
-
-use tags;
 
 mod schema;
 mod index;

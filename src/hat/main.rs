@@ -32,31 +32,29 @@
 #![plugin(diesel_codegen)]
 
 
-// Standard Rust imports
+// Standard Rust imports.
 #[macro_use]
 extern crate log;
 extern crate rand;
 extern crate test;
 extern crate time;
 
-// Rust bindings
+// Rust crates.
 extern crate capnp;
 extern crate sodiumoxide;
 extern crate libsodium_sys;
-
-// SQLite
-extern crate sqlite3;
-#[macro_use]
-extern crate diesel;
-
 extern crate rustc_serialize;
 extern crate threadpool;
 
-// Argument parsing
+// Diesel supplies our SQLite wrapper.
+#[macro_use]
+extern crate diesel;
+
+// We use Clap for argument parsing.
 #[macro_use]
 extern crate clap;
 
-// Testing
+// Testing utilities.
 #[cfg(test)]
 extern crate quickcheck;
 
