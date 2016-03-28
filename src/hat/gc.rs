@@ -208,7 +208,8 @@ impl GcBackend for SafeMemoryBackend {
 
     fn set_all_tags(&mut self, tag: tags::Tag) {
         let mut backend = self.backend.lock().unwrap();
-        for (_snapshot, refs) in backend.snapshot_refs.clone() {
+        let vals: Vec<Vec<Id>> = backend.snapshot_refs.values().cloned().collect();
+        for refs in vals {
             for r in refs {
                 backend.tags.insert(r, tag.clone());
             }
