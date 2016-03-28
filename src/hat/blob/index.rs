@@ -78,10 +78,10 @@ impl Index {
         let conn = SqliteConnection::establish(&path).expect("Could not open SQLite database");
 
         let mut bi = Index {
-                    conn: conn,
-                    next_id: -1,
-                    reserved: HashMap::new(),
-                };
+            conn: conn,
+            next_id: -1,
+            reserved: HashMap::new(),
+        };
 
         let dir = diesel::migrations::find_migrations_directory().unwrap();
         diesel::migrations::run_pending_migrations_in_directory(&bi.conn,
@@ -158,27 +158,34 @@ impl Index {
                 "blob was not reserved!");
         use super::schema::blobs::dsl::*;
 
-        diesel::update(blobs.find(blob.id)).set(tag.eq(tags::Tag::Done as i32))
-                                           .execute(&self.conn)
-                                           .expect("Error updating blob");
+        diesel::update(blobs.find(blob.id))
+            .set(tag.eq(tags::Tag::Done as i32))
+            .execute(&self.conn)
+            .expect("Error updating blob");
         self.new_transaction();
     }
 
     fn tag(&mut self, tag_: tags::Tag, target: Option<BlobDesc>) {
         use super::schema::blobs::dsl::*;
         match target {
-            None => 
-                diesel::update(blobs).set(tag.eq(tag_ as i32))
-                                     .execute(&self.conn)
-                                     .expect("Error updating blob tags"),
-            Some(ref t) if t.id > 0 =>
-                diesel::update(blobs.find(t.id)).set(tag.eq(tag_ as i32))
-                                                .execute(&self.conn)
-                                                .expect("Error updating blob tags"),
-            Some(ref t) if !t.name.is_empty() =>
-                diesel::update(blobs.filter(name.eq(&t.name))).set(tag.eq(tag_ as i32))
-                                                              .execute(&self.conn)
-                                                              .expect("Error updating blob tags"),
+            None => {
+                diesel::update(blobs)
+                    .set(tag.eq(tag_ as i32))
+                    .execute(&self.conn)
+                    .expect("Error updating blob tags")
+            }
+            Some(ref t) if t.id > 0 => {
+                diesel::update(blobs.find(t.id))
+                    .set(tag.eq(tag_ as i32))
+                    .execute(&self.conn)
+                    .expect("Error updating blob tags")
+            }
+            Some(ref t) if !t.name.is_empty() => {
+                diesel::update(blobs.filter(name.eq(&t.name)))
+                    .set(tag.eq(tag_ as i32))
+                    .execute(&self.conn)
+                    .expect("Error updating blob tags")
+            }
             _ => unreachable!(),
         };
     }
@@ -186,8 +193,8 @@ impl Index {
     fn delete_by_tag(&mut self, tag_: tags::Tag) {
         use super::schema::blobs::dsl::*;
         diesel::delete(blobs.filter(tag.eq(tag_ as i32)))
-                .execute(&self.conn)
-                .expect("Error deleting blobs");
+            .execute(&self.conn)
+            .expect("Error deleting blobs");
     }
 
     fn list_by_tag(&mut self, tag_: tags::Tag) -> mpsc::Receiver<BlobDesc> {

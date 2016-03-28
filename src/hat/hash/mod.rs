@@ -297,8 +297,8 @@ impl Index {
         use diesel::expression::max;
 
         let id_opt = hashes.select(max(id).nullable())
-            .first::<Option<i64>>(&self.conn)
-            .expect("Error selecting max hash id");
+                           .first::<Option<i64>>(&self.conn)
+                           .expect("Error selecting max hash id");
 
         self.id_counter = CumulativeCounter::new(id_opt.unwrap_or(0));
     }
@@ -357,12 +357,12 @@ impl Index {
 
                     let persistent_ref_bytes = queue_entry.persistent_ref.map(|c| c.as_bytes());
                     let new = schema::NewHash {
-                       id: id_,
-                       hash: &hash_bytes,
-                       tag: tags::Tag::Done as i64,
-                       height: queue_entry.level,
-                       payload: queue_entry.payload.as_ref().map(|v| &v[..]),
-                       blob_ref: persistent_ref_bytes.as_ref().map(|v| &v[..]),
+                        id: id_,
+                        hash: &hash_bytes,
+                        tag: tags::Tag::Done as i64,
+                        height: queue_entry.level,
+                        payload: queue_entry.payload.as_ref().map(|v| &v[..]),
+                        blob_ref: persistent_ref_bytes.as_ref().map(|v| &v[..]),
                     };
 
                     diesel::insert(&new)
@@ -378,16 +378,18 @@ impl Index {
         use self::schema::hashes::dsl::*;
 
         match id_opt {
-            None => 
+            None => {
                 diesel::update(hashes)
                     .set(tag.eq(tag_ as i64))
                     .execute(&self.conn)
-                    .expect("Error updating hash tags"),
-            Some(id_) => 
+                    .expect("Error updating hash tags")
+            }
+            Some(id_) => {
                 diesel::update(hashes.find(id_))
-                     .set(tag.eq(tag_ as i64))
+                    .set(tag.eq(tag_ as i64))
                     .execute(&self.conn)
-                    .expect("Error updating specific hash tag"),
+                    .expect("Error updating specific hash tag")
+            }
         };
     }
 
@@ -399,7 +401,7 @@ impl Index {
                             .first::<i64>(&self.conn)
                             .optional()
                             .expect("Error querying hash tag");
-        
+
         return tag_opt.and_then(tags::tag_from_num);
     }
 
@@ -446,9 +448,9 @@ impl Index {
 
         let count = diesel::update(gc_metadata.filter(hash_id.eq(hash_id_))
                                               .filter(family_id.eq(family_id_)))
-            .set((gc_int.eq(data.num), gc_vec.eq(&data.bytes)))
-            .execute(&self.conn)
-            .expect("Error updating GC metadata");
+                        .set((gc_int.eq(data.num), gc_vec.eq(&data.bytes)))
+                        .execute(&self.conn)
+                        .expect("Error updating GC metadata");
         assert!(count <= 1);
 
         if count == 0 {
@@ -529,8 +531,7 @@ impl Index {
         let hashes_ = hashes.load::<schema::Hash>(&self.conn)
                             .expect("Error listing hashes");
         for hash_ in hashes_ {
-            if let Err(_) =
-                   sender.send(Entry {
+            if let Err(_) = sender.send(Entry {
                 hash: Hash { bytes: hash_.hash },
                 level: hash_.height,
                 payload: hash_.payload.and_then(|p| {
@@ -558,8 +559,8 @@ impl Index {
         {
             use self::schema::hashes::dsl::*;
             let hash_count = diesel::delete(hashes.find(id_))
-                .execute(&self.conn)
-                .expect("Error deleting hash");
+                                 .execute(&self.conn)
+                                 .expect("Error deleting hash");
             assert!(hash_count <= 1);
         }
 
