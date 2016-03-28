@@ -12,6 +12,7 @@ path = "src/hat/main.rs"
 capnpc = "*"
 
 [dependencies]
+env_logger = "*"
 log = "*"
 capnp = "*"
 rand = "*"

@@ -41,6 +41,7 @@ extern crate time;
 
 // Rust crates.
 extern crate capnp;
+extern crate env_logger;
 extern crate sodiumoxide;
 extern crate libsodium_sys;
 extern crate rustc_serialize;
@@ -110,6 +111,8 @@ fn license() {
 
 #[cfg(not(test))]
 fn main() {
+    env_logger::init().unwrap();
+
     // Because "snapshot" and "checkout" use the exact same type of arguments, we can make a
     // template. This template defines two positional arguments, both are required
     let arg_template = "<NAME> 'Name of the snapshot'
