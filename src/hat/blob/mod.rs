@@ -97,9 +97,8 @@ impl StoreBackend for FileBackend {
     fn retrieve(&mut self, name: &[u8]) -> Result<Vec<u8>, String> {
         // Check for key in cache:
         let value_opt = self.guarded_cache_get(name);
-        match value_opt {
-            Some(result) => return result,
-            None => (),
+        if let Some(r) = value_opt {
+            return r;
         }
 
         // Read key:
