@@ -329,8 +329,7 @@ impl<B: 'static + blob::StoreBackend + Clone + Send> Hat<B> {
                                              .and_then(|id| self.gc.status(id));
                             match status {
                                 None => None,  // We did not fully commit.
-                                Some(gc::Status::InProgress) => Some(h),
-                                Some(gc::Status::Complete) => Some(h),
+                                Some(gc::Status::InProgress) | Some(gc::Status::Complete) => Some(h),
                             }
                         }
                     };
