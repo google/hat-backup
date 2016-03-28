@@ -17,6 +17,7 @@
 
 use capnp;
 use std::str;
+use std::error::Error;
 
 use process::Process;
 use tags;
@@ -710,12 +711,14 @@ struct FileEntry {
 }
 
 impl FileEntry {
-    fn new(full_path: PathBuf, parent: Option<u64>) -> Result<FileEntry, String> {
+    fn new(full_path: PathBuf, parent: Option<u64>) -> Result<FileEntry, Box<Error>> {
+        debug!("FileEntry::new({:?})", full_path);
+
         let filename_opt = full_path.file_name().and_then(|n| n.to_str());
-        let link_path = fs::read_link(&full_path).ok();
 
         if filename_opt.is_some() {
-            let md = fs::metadata(&full_path).unwrap();
+            let md = try!(fs::symlink_metadata(&full_path));
+            let link_path = fs::read_link(&full_path).ok();
             Ok(FileEntry {
                 key_entry: key::Entry {
                     name: filename_opt.unwrap().bytes().collect(),
@@ -735,7 +738,7 @@ impl FileEntry {
                 link_path: link_path,
             })
         } else {
-            Err("Could not parse filename."[..].to_owned())
+            Err(From::from("Could not parse filename."[..].to_owned()))
         }
     }
 
@@ -825,7 +828,7 @@ impl listdir::PathHandler<Option<u64>> for InsertPathHandler {
 
         match FileEntry::new(path.clone(), parent) {
             Err(e) => {
-                println!("Skipping '{}': {}", path.display(), e.to_owned());
+                println!("Skipping '{}': {}", path.display(), e);
             }
             Ok(file_entry) => {
                 if file_entry.is_symlink() {
