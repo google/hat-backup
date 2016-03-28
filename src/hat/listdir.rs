@@ -52,8 +52,8 @@ pub fn iterate_recursively<P: 'static + Send + Clone, W: 'static + PathHandler<P
             Ok(Some((root, payload))) => {
                 // Execute the task in a pool thread:
                 running_workers += 1;
-                let _worker = worker.clone();
-                let _push_ch = push_ch.clone();
+                let worker_ = worker.clone();
+                let push_ch_ = push_ch.clone();
                 pool.execute(move || {
                     let res = fs::read_dir(&root);
                     if res.is_ok() {
@@ -62,15 +62,15 @@ pub fn iterate_recursively<P: 'static + Send + Clone, W: 'static + PathHandler<P
                                 let entry = entry.unwrap();
                                 let file = entry.path();
                                 let path = PathBuf::from(file.to_str().unwrap());
-                                let dir_opt = _worker.handle_path(payload.clone(), path);
+                                let dir_opt = worker_.handle_path(payload.clone(), path);
                                 if dir_opt.is_some() {
-                                    _push_ch.send(Some((file.clone(), dir_opt.unwrap()))).unwrap();
+                                    push_ch_.send(Some((file.clone(), dir_opt.unwrap()))).unwrap();
                                 }
                             }
                         }
                     }
                     // Count this pool thread as idle:
-                    _push_ch.send(None).unwrap();
+                    push_ch_.send(None).unwrap();
                 });
             }
         }
