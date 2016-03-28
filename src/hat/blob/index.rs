@@ -144,7 +144,7 @@ impl Index {
             .into(blobs)
             .execute(&self.conn)
             .expect("Error inserting blob");
-        
+
         self.new_transaction();
     }
 
@@ -206,12 +206,6 @@ impl Index {
             }
         }
         return receiver;
-    }
-}
-
-impl Drop for Index {
-    fn drop(&mut self) {
-        self.conn.commit_transaction().unwrap();
     }
 }
 
