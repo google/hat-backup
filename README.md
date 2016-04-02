@@ -36,11 +36,12 @@ Roadmap to a first stable release
 I am currently focusing on reaching a feature complete and useful state and as a result, I am skipping quickly over some implementation details. The following items will have to be revisited and cleaned up before a stable release:
 
 - Properly support non-utf8 paths.
-- Store and restore all relevant file metadata; same for symlinks.
-- Use prepared statements when communicating with SQLite.
-- Run rustfmt on the code when it is ready.
+- Store and restore all relevant file metadata
+  - same for symlinks.
+- ~~Use prepared statements when communicating with SQLite.~~
+- ~~Run rustfmt on the code when it is ready.~~
 - ~~Reimplement argument handling in main; possibly using docopt.~~ [thanks kbknapp]
-- Replace all uses of JSON with either Protocol Buffers or Cap'n Proto.
+- ~~Replace all uses of JSON with either Protocol Buffers or Cap'n Proto.~~
 - Go through uses of 'unwrap', 'expect' etc and remove them where possible; preferably, the caller/initiater should handle errors.
 - Think about parallelism and change the pipeline of threads to make better use of it.
 - Figure out how to battle test the code on supported platforms.
