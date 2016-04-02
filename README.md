@@ -49,8 +49,10 @@ I am currently focusing on reaching a feature complete and useful state and as a
 
 There are a bunch of lacking functionality needed before a feature complete release is in sight:
 
-- Commit hash-tree tops of known snapshots to external storage.
+- ~~Commit hash-tree tops of known snapshots to external storage.~~
 - Add recovery function to restore local metadata from external hash-tree tops (for when all local state is gone).
+  - ~~Basic read-only recovery.~~
+  - Full read-write recovery with GC metadata rebuilding.
 - ~~Add book-keeping for metadata needed to identify live hashes (e.g. reference sets in each family's keyindex).~~
 - ~~Add deletion and garbage-collection.~~
   - ~~Make 'commit' crash-safe by retrying failed 'register' and 'deregister' runs~~. Add tests as this is fragile logic.
