@@ -17,6 +17,7 @@
 use std::fs;
 use std::path::PathBuf;
 use std::sync::mpsc;
+use std::sync::{Arc, Mutex};
 
 use threadpool;
 
@@ -27,50 +28,75 @@ pub trait PathHandler<D> {
 
 
 pub fn iterate_recursively<P: 'static + Send + Clone, W: 'static + PathHandler<P> + Send + Clone>
-    (root: (PathBuf, P),
+    (first: (PathBuf, P),
      worker: &mut W) {
     let threads = 10;
     let (push_ch, work_ch) = mpsc::sync_channel(threads);
     let pool = threadpool::ThreadPool::new(threads);
 
+    enum Work<P> {
+        Done,
+        More(PathBuf, P),
+    }
+
     // Insert the first task into the queue:
-    push_ch.send(Some(root)).unwrap();
-    let mut running_workers = 0 as i32;
+    let (root, payload) = first;
+    push_ch.send(Work::More(root, payload)).unwrap();
+    let idle_workers = Arc::new(Mutex::new(vec![worker.clone(); threads]));
+    let mut active_workers = 0;
 
     // Master thread:
     loop {
         match work_ch.recv() {
             Err(_) => unreachable!(),
-            Ok(None) => {
+            Ok(Work::Done) => {
                 // A worker has completed a task.
                 // We are done when no more workers are active (i.e. all tasks are done):
-                running_workers -= 1;
-                if running_workers == 0 {
+                active_workers -= 1;
+                if active_workers == 0 {
                     break;
                 }
             }
-            Ok(Some((root, payload))) => {
+            Ok(Work::More(root, payload)) => {
                 // Execute the task in a pool thread:
-                running_workers += 1;
-                let worker_ = worker.clone();
+                active_workers += 1;
+
+                let idle_workers_ = idle_workers.clone();
                 let push_ch_ = push_ch.clone();
                 pool.execute(move || {
-                    let res = fs::read_dir(&root);
-                    if res.is_ok() {
-                        for entry in res.unwrap() {
-                            if entry.is_ok() {
-                                let entry = entry.unwrap();
-                                let file = entry.path();
-                                let path = PathBuf::from(file.to_str().unwrap());
-                                let dir_opt = worker_.handle_path(payload.clone(), path);
-                                if dir_opt.is_some() {
-                                    push_ch_.send(Some((file.clone(), dir_opt.unwrap()))).unwrap();
+                    let worker = {
+                        let mut lock = idle_workers_.lock().unwrap();
+                        lock.pop().expect("not enough workers")
+                    };
+                    match fs::read_dir(&root) {
+                        Ok(dir) => {
+                            for entry_res in dir {
+                                match entry_res {
+                                    Ok(entry) => {
+                                        let file = entry.path();
+                                        let path = PathBuf::from(file.to_str().unwrap());
+                                        let dir_opt = worker.handle_path(payload.clone(), path);
+                                        if let Some(dir) = dir_opt {
+                                            push_ch_.send(Work::More(file, dir)).unwrap();
+                                        }
+                                    }
+                                    Err(err) => {
+                                        // For some reason, we failed to read this entry.
+                                        // Just skip it and continue with the next.
+                                        warn!("Could not read directory entry: {}", err);
+                                    }
                                 }
                             }
                         }
+                        Err(err) => {
+                            // Cannot read this directory.
+                            warn!("Skipping unreadable directory {:?}: {}", root, err);
+                        }
                     }
+                    // Return our worker.
+                    idle_workers_.lock().unwrap().push(worker);
                     // Count this pool thread as idle:
-                    push_ch_.send(None).unwrap();
+                    push_ch_.send(Work::Done).unwrap();
                 });
             }
         }
