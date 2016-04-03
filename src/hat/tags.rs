@@ -24,6 +24,8 @@ pub enum Tag {
     WillDelete = 4,
     ReadyDelete = 5,
     DeleteComplete = 6,
+
+    RecoverInProgress = 7,
 }
 
 pub fn tag_from_num(n: i64) -> Option<Tag> {
@@ -36,6 +38,8 @@ pub fn tag_from_num(n: i64) -> Option<Tag> {
         4 => Some(Tag::WillDelete),
         5 => Some(Tag::ReadyDelete),
         6 => Some(Tag::DeleteComplete),
+
+        7 => Some(Tag::RecoverInProgress),
 
         _ => None,
     }

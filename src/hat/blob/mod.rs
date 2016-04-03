@@ -194,6 +194,8 @@ pub enum Msg {
     StoreNamed(String, Vec<u8>),
     /// Retrieve full named blob.
     RetrieveNamed(String),
+    /// Reinstall a blob recovered from external storage.
+    Recover(ChunkRef),
     /// Tag helpers.
     Tag(ChunkRef, tags::Tag),
     TagAll(tags::Tag),
@@ -208,6 +210,7 @@ pub enum Reply {
     StoreOk(ChunkRef),
     StoreNamedOk(String),
     RetrieveOk(Vec<u8>),
+    RecoverOk,
     FlushOk,
     Ok,
 }
@@ -374,6 +377,16 @@ impl<B: StoreBackend> MsgHandler<Msg, Reply> for Store<B> {
             }
             Msg::RetrieveNamed(name) => {
                 reply(Reply::RetrieveOk(self.backend_read(name.as_bytes())));
+            }
+            Msg::Recover(chunk) => {
+                if chunk.offset == 0 && chunk.length == 0 {
+                    // This chunk is empty, so there is no blob to recover.
+                    return reply(Reply::RecoverOk);
+                }
+                match self.blob_index.send_reply(index::Msg::Recover(chunk.blob_id)) {
+                    index::Reply::RecoverOk(..) => reply(Reply::RecoverOk),
+                    _ => panic!("Unexpected reply from blob index."),
+                }
             }
             Msg::Tag(chunk, tag) => {
                 match self.blob_index.send_reply(index::Msg::Tag(BlobDesc {

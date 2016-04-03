@@ -17,12 +17,13 @@
 //! This module implements two structures for handling hash trees: A streaming hash-tree writer, and
 //! a streaming hash-tree reader.
 
+use std::sync::mpsc;
 
 use capnp;
 use root_capnp;
 
 use blob::ChunkRef;
-use hash::{Hash, HASHBYTES};
+use hash::{Entry, Hash, HASHBYTES};
 
 #[cfg(test)]
 use quickcheck;
@@ -355,12 +356,62 @@ impl<B: HashTreeBackend + Clone> SimpleHashTreeReader<B> {
         }
     }
 
+    pub fn list_entries(&mut self, out: mpsc::Sender<Entry>) -> (Vec<u8>, i64) {
+        let mut level = 1;
+        let mut metadata = vec![];
+        while !self.stack.is_empty() {
+            let child = self.stack.pop().expect("!is_empty()");
+            metadata.extend(child.hash.iter());
+
+            let hash = Hash { bytes: child.hash.clone() };
+            let mut data = self.backend
+                               .fetch_chunk(hash.clone(), Some(child.persistent_ref.clone()))
+                               .expect("Invalid hash ref");
+
+            match data.pop() {
+                None | Some(0) => {
+                    out.send(Entry {
+                           hash: hash,
+                           persistent_ref: Some(child.persistent_ref),
+                           level: 0,
+                           payload: None,
+                       })
+                       .unwrap()
+                }
+                _ => {
+                    let mut new_childs = hash_refs_from_bytes(&data[..]).unwrap();
+                    new_childs.reverse();
+
+                    let mut next = SimpleHashTreeReader {
+                        stack: new_childs,
+                        backend: self.backend.clone(),
+                    };
+                    let (child_payload, child_level) = next.list_entries(out.clone());
+                    out.send(Entry {
+                           hash: hash,
+                           persistent_ref: Some(child.persistent_ref),
+                           level: child_level,
+                           payload: Some(child_payload),
+                       })
+                       .unwrap();
+
+                    let my_level = 1 + child_level;
+                    assert!(level == 1 || level == my_level);
+                    level = my_level;
+                }
+            }
+
+        }
+        assert!(!metadata.is_empty());
+        return (metadata, level);
+    }
+
     fn extract(&mut self) -> Option<Vec<u8>> {
         // Basic cycle detection to spot some programming mistakes.
         let mut cycle_start = None;
 
         while !self.stack.is_empty() {
-            let child = self.stack.pop().expect("len() > 0");
+            let child = self.stack.pop().expect("!is_empty()");
 
             match cycle_start {
                 None => cycle_start = Some(child.hash.clone()),

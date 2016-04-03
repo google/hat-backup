@@ -51,6 +51,10 @@ pub enum Msg {
     /// reference internally. Only committed blobs are considered "safe to use".
     CommitDone(BlobDesc),
 
+    /// Reinstall blob recovered by from external storage.
+    /// Creates a new blob by a known external name.
+    Recover(Vec<u8>),
+
     Tag(BlobDesc, tags::Tag),
     TagAll(tags::Tag),
     ListByTag(tags::Tag),
@@ -61,6 +65,7 @@ pub enum Msg {
 
 pub enum Reply {
     Reserved(BlobDesc),
+    RecoverOk(BlobDesc),
     Listing(mpsc::Receiver<BlobDesc>),
     CommitOk,
     Ok,
@@ -124,6 +129,25 @@ impl Index {
         id
     }
 
+    fn recover(&mut self, name: Vec<u8>) -> BlobDesc {
+        if let Some(id) = self.find_id(&name[..]) {
+            // Blob exists.
+            return BlobDesc {
+                name: name,
+                id: id,
+            };
+        }
+
+        let blob = BlobDesc {
+            name: name,
+            id: self.next_id(),
+        };
+        self.reserved.insert(blob.name.clone(), blob.clone());
+        self.in_air(&blob);
+        self.commit_blob(&blob);
+        return blob;
+    }
+
     fn reserve(&mut self) -> BlobDesc {
         let blob = self.new_blob_desc();
         self.reserved.insert(blob.name.clone(), blob.clone());
@@ -163,6 +187,15 @@ impl Index {
             .execute(&self.conn)
             .expect("Error updating blob");
         self.new_transaction();
+    }
+
+    fn find_id(&mut self, name_: &[u8]) -> Option<i64> {
+        use super::schema::blobs::dsl::*;
+        return blobs.filter(name.eq(name_))
+                    .select(id)
+                    .first::<i64>(&self.conn)
+                    .optional()
+                    .expect("Error reading blob");
     }
 
     fn tag(&mut self, tag_: tags::Tag, target: Option<BlobDesc>) {
@@ -229,6 +262,10 @@ impl MsgHandler<Msg, Reply> for Index {
             Msg::CommitDone(blob) => {
                 self.commit_blob(&blob);
                 return reply(Reply::CommitOk);
+            }
+            Msg::Recover(name) => {
+                let blob = self.recover(name);
+                return reply(Reply::RecoverOk(blob));
             }
             Msg::Flush => {
                 self.new_transaction();

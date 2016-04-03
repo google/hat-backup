@@ -74,7 +74,7 @@ pub enum Msg {
     Flush,
 
     /// Recover snapshot information.
-    Recover(i64, String, String, Vec<u8>, blob::ChunkRef),
+    Recover(i64, String, String, Vec<u8>, blob::ChunkRef, Option<WorkStatus>),
 }
 
 pub enum Reply {
@@ -94,6 +94,7 @@ pub enum WorkStatus {
     CommitComplete,
     DeleteInProgress,
     DeleteComplete,
+    RecoverInProgress,
 }
 
 #[derive(Debug)]
@@ -109,6 +110,26 @@ pub struct Status {
 
 pub struct Index {
     conn: SqliteConnection,
+}
+
+fn tag_to_work_status(tag: tags::Tag) -> WorkStatus {
+    match tag {
+        tags::Tag::Reserved | tags::Tag::InProgress => WorkStatus::CommitInProgress,
+        tags::Tag::Complete | tags::Tag::Done => WorkStatus::CommitComplete,
+        tags::Tag::WillDelete => WorkStatus::DeleteInProgress,
+        tags::Tag::ReadyDelete | tags::Tag::DeleteComplete => WorkStatus::DeleteComplete,
+        tags::Tag::RecoverInProgress => WorkStatus::RecoverInProgress,
+    }
+}
+
+fn work_status_to_tag(status: WorkStatus) -> tags::Tag {
+    match status {
+        WorkStatus::CommitInProgress => tags::Tag::InProgress,
+        WorkStatus::CommitComplete => tags::Tag::Done,
+        WorkStatus::DeleteInProgress => tags::Tag::WillDelete,
+        WorkStatus::DeleteComplete => tags::Tag::DeleteComplete,
+        WorkStatus::RecoverInProgress => tags::Tag::RecoverInProgress,
+    }
 }
 
 impl Index {
@@ -309,18 +330,9 @@ impl Index {
 
         rows.into_iter()
             .map(|(snap, fam)| {
-                let status = match tags::tag_from_num(snap.tag as i64) {
-                    Some(tags::Tag::Reserved) | Some(tags::Tag::InProgress) => {
-                        WorkStatus::CommitInProgress
-                    }
-                    Some(tags::Tag::Complete) | Some(tags::Tag::Done) | None => {
-                        WorkStatus::CommitComplete
-                    }
-                    Some(tags::Tag::WillDelete) => WorkStatus::DeleteInProgress,
-                    Some(tags::Tag::ReadyDelete) | Some(tags::Tag::DeleteComplete) => {
-                        WorkStatus::DeleteComplete
-                    }
-                };
+                let status = tags::tag_from_num(snap.tag as i64)
+                                 .map(tag_to_work_status)
+                                 .unwrap_or(WorkStatus::CommitComplete);
                 let hash_ = snap.hash.and_then(|bytes| {
                     if bytes.is_empty() {
                         None
@@ -349,7 +361,8 @@ impl Index {
                family: String,
                msg_: String,
                hash_: Vec<u8>,
-               tree_ref_: blob::ChunkRef) {
+               tree_ref_: blob::ChunkRef,
+               work_opt_: Option<WorkStatus>) {
         let family_id_ = self.get_or_create_family_id(&family);
         let insert = match self.get_snapshot_info(family, snapshot_id_) {
             Some((_info, h, r)) => {
@@ -370,7 +383,7 @@ impl Index {
                 msg: Some(&msg_[..]),
                 hash: Some(&hash_[..]),
                 tree_ref: Some(&tree_bytes[..]),
-                tag: tags::Tag::Done as i32,
+                tag: work_opt_.map(work_status_to_tag).unwrap_or(tags::Tag::Done) as i32,
             };
 
             diesel::insert(&new)
@@ -443,8 +456,8 @@ impl process::MsgHandler<Msg, Reply> for Index {
                 return reply(Reply::All(self.list_all(None)));
             }
 
-            Msg::Recover(snapshot_id, family_name, msg, hash, tree_ref) => {
-                self.recover(snapshot_id, family_name, msg, hash, tree_ref);
+            Msg::Recover(snapshot_id, family_name, msg, hash, tree_ref, work_opt) => {
+                self.recover(snapshot_id, family_name, msg, hash, tree_ref, work_opt);
                 return reply(Reply::RecoverOk);
             }
 
