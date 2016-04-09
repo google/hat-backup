@@ -136,7 +136,7 @@ impl gc::GcBackend for GcBackend {
 
 
 pub struct Hat<B> {
-    repository_root: PathBuf,
+    repository_root: Option<PathBuf>,
     snapshot_index: snapshot::IndexProcess,
     blob_store: blob::StoreProcess,
     hash_index: hash::IndexProcess,
@@ -207,7 +207,39 @@ impl<B: 'static + blob::StoreBackend + Clone + Send> Hat<B> {
         let gc = gc_rc::GcRc::new(Box::new(gc_backend));
 
         let mut hat = Hat {
-            repository_root: repository_root.clone(),
+            repository_root: Some(repository_root.clone()),
+            snapshot_index: si_p,
+            hash_index: hi_p.clone(),
+            blob_store: bs_p.clone(),
+            blob_backend: backend.clone(),
+            hash_backend: key::HashStoreBackend::new(hi_p, bs_p),
+            gc: Box::new(gc),
+            max_blob_size: max_blob_size,
+        };
+
+        // Resume any unfinished commands.
+        hat.resume();
+
+        hat
+    }
+
+    #[cfg(test)]
+    pub fn new_for_testing(backend: B, max_blob_size: usize) -> Hat<B> {
+        let si_p = Process::new(Box::new(move || snapshot::Index::new_for_testing()));
+        let bi_p = Process::new(Box::new(move || blob::Index::new_for_testing()));
+        let hi_p = Process::new(Box::new(move || hash::Index::new_for_testing()));
+
+        let local_blob_index = bi_p.clone();
+        let local_backend = backend.clone();
+        let bs_p = Process::new(Box::new(move || {
+            blob::Store::new(local_blob_index, local_backend, max_blob_size)
+        }));
+
+        let gc_backend = GcBackend { hash_index: hi_p.clone() };
+        let gc = gc_rc::GcRc::new(Box::new(gc_backend));
+
+        let mut hat = Hat {
+            repository_root: None,
             snapshot_index: si_p,
             hash_index: hi_p.clone(),
             blob_store: bs_p.clone(),
@@ -234,8 +266,16 @@ impl<B: 'static + blob::StoreBackend + Clone + Send> Hat<B> {
         //            -> hash::Index
         //            -> blob::Store -> blob::Index
 
-        let key_index_path = concat_filename(&self.repository_root, name.clone());
-        let ki_p = Process::new(Box::new(move || key::Index::new(key_index_path)));
+        let ki_p = match self.repository_root {
+            Some(ref root) => {
+                let key_index_path = concat_filename(root, name.clone());
+                Process::new(Box::new(move || key::Index::new(key_index_path)))
+            }
+            None => {
+                // Index is clean and in-memory only.
+                Process::new(Box::new(move || key::Index::new(From::from(":memory:".to_string()))))
+            }
+        };
 
         let local_ks = key::Store::new(ki_p.clone(),
                                        self.hash_index.clone(),
@@ -381,7 +421,7 @@ impl<B: 'static + blob::StoreBackend + Clone + Send> Hat<B> {
 
         let final_id = get_hash_id(&self.hash_index, hash.clone()).unwrap();
         self.gc.register_final(info.clone(), final_id);
-        self.commit_finalize(family, info, hash);
+        self.commit_finalize(&family, info, hash);
     }
 
     fn recover_dir_ref(&mut self,
@@ -462,7 +502,7 @@ impl<B: 'static + blob::StoreBackend + Clone + Send> Hat<B> {
                         }
                         (None, snapshot::WorkStatus::CommitInProgress) => {
                             println!("Resuming commit of: {}", snapshot.family_name);
-                            self.commit(snapshot.family_name, Some(snapshot.info));
+                            self.commit_by_name(snapshot.family_name, Some(snapshot.info));
                         }
                         (None, snapshot::WorkStatus::RecoverInProgress) => {
                             println!("Resuming recovery of: {}", snapshot.family_name);
@@ -498,7 +538,8 @@ impl<B: 'static + blob::StoreBackend + Clone + Send> Hat<B> {
                             println!("Resuming delete of: {} #{:?}",
                                      snapshot.family_name,
                                      snapshot.info.snapshot_id);
-                            self.deregister(snapshot.family_name, snapshot.info.snapshot_id);
+                            self.deregister_by_name(snapshot.family_name,
+                                                    snapshot.info.snapshot_id);
                         }
                         Some(gc::Status::Complete) => {
                             self.deregister_finalize_by_name(snapshot.family_name,
@@ -524,10 +565,13 @@ impl<B: 'static + blob::StoreBackend + Clone + Send> Hat<B> {
         assert_eq!(need_work.len(), 0);
     }
 
-    pub fn commit(&mut self, family_name: String, resume_info: Option<snapshot::Info>) {
+    pub fn commit_by_name(&mut self, family_name: String, resume_info: Option<snapshot::Info>) {
         let family = self.open_family(family_name.clone())
                          .expect(&format!("Could not open family '{}'", family_name));
+        self.commit(&family, resume_info);
+    }
 
+    pub fn commit(&mut self, family: &Family, resume_info: Option<snapshot::Info>) {
         //  Tag 1:
         //  Reserve the snapshot and commit the reservation.
         //  Register all but the last hashes.
@@ -537,7 +581,7 @@ impl<B: 'static + blob::StoreBackend + Clone + Send> Hat<B> {
             None => {
                 // Create new commit.
                 match self.snapshot_index
-                          .send_reply(snapshot::Msg::Reserve(family_name.clone())) {
+                          .send_reply(snapshot::Msg::Reserve(family.name.clone())) {
                     snapshot::Reply::Reserved(info) => info,
                     _ => panic!("Invalid reply from snapshot index"),
                 }
@@ -596,10 +640,10 @@ impl<B: 'static + blob::StoreBackend + Clone + Send> Hat<B> {
                                snap_info: snapshot::Info,
                                hash: hash::Hash) {
         let family = self.open_family(family_name).expect("Unknown family name");
-        self.commit_finalize(family, snap_info, hash);
+        self.commit_finalize(&family, snap_info, hash);
     }
 
-    fn commit_finalize(&mut self, family: Family, snap_info: snapshot::Info, hash: hash::Hash) {
+    fn commit_finalize(&mut self, family: &Family, snap_info: snapshot::Info, hash: hash::Hash) {
         // Commit locally. Let the GC perform any needed cleanup.
         match self.snapshot_index
                   .send_reply(snapshot::Msg::ReadyCommit(snap_info.clone())) {
@@ -683,19 +727,22 @@ impl<B: 'static + blob::StoreBackend + Clone + Send> Hat<B> {
         }
     }
 
-    pub fn deregister(&mut self, family_name: String, snapshot_id: i64) {
+    pub fn deregister_by_name(&mut self, family_name: String, snapshot_id: i64) {
         let family = self.open_family(family_name.clone())
                          .expect(&format!("Could not open family '{}'", family_name));
+        self.deregister(&family, snapshot_id);
+    }
 
+    pub fn deregister(&mut self, family: &Family, snapshot_id: i64) {
         let (info, dir_hash, dir_ref) =
             match self.snapshot_index
-                      .send_reply(snapshot::Msg::Lookup(family_name.clone(), snapshot_id)) {
+                      .send_reply(snapshot::Msg::Lookup(family.name.clone(), snapshot_id)) {
                 snapshot::Reply::Snapshot(opt) => {
                     match opt {
                         Some((i, h, Some(r))) => (i, h, r),
                         _ => {
                             panic!("No complete snapshot found for family {} with id {:?}",
-                                   family_name,
+                                   family.name,
                                    snapshot_id)
                         }
                     }
@@ -750,11 +797,11 @@ impl<B: 'static + blob::StoreBackend + Clone + Send> Hat<B> {
                                    snap_info: snapshot::Info,
                                    hash_id: gc::Id) {
         let family = self.open_family(family_name).expect("Unknown family name");
-        self.deregister_finalize(family, snap_info, hash_id);
+        self.deregister_finalize(&family, snap_info, hash_id);
     }
 
     fn deregister_finalize(&mut self,
-                           family: Family,
+                           family: &Family,
                            snap_info: snapshot::Info,
                            final_ref: gc::Id) {
         // Mark the snapshot to enable resuming.
@@ -779,7 +826,7 @@ impl<B: 'static + blob::StoreBackend + Clone + Send> Hat<B> {
         self.flush_snapshot_index();
     }
 
-    pub fn gc(&mut self) {
+    pub fn gc(&mut self) -> (i64, i64) {
         // Remove unused hashes.
         let mut deleted_hashes = 0;
         let (sender, receiver) = mpsc::channel();
@@ -827,8 +874,7 @@ impl<B: 'static + blob::StoreBackend + Clone + Send> Hat<B> {
             blob::Reply::FlushOk => (),
             _ => panic!("Unexpected reply from blob store."),
         }
-        println!("Deleted hashes: {:?}", deleted_hashes);
-        println!("Live data blobs after deletion: {:?}", live_blobs);
+        return (deleted_hashes, live_blobs);
     }
 }
 
@@ -898,14 +944,26 @@ impl Clone for FileEntry {
 }
 
 struct FileIterator {
-    file: fs::File,
+    file: Option<fs::File>,
+    contents: Option<Vec<u8>>,
 }
 
 impl FileIterator {
     fn new(path: &PathBuf) -> io::Result<FileIterator> {
         match fs::File::open(path) {
-            Ok(f) => Ok(FileIterator { file: f }),
+            Ok(f) => {
+                Ok(FileIterator {
+                    file: Some(f),
+                    contents: None,
+                })
+            }
             Err(e) => Err(e),
+        }
+    }
+    fn from_bytes(contents: Vec<u8>) -> FileIterator {
+        FileIterator {
+            file: None,
+            contents: Some(contents),
         }
     }
 }
@@ -914,11 +972,32 @@ impl Iterator for FileIterator {
     type Item = Vec<u8>;
 
     fn next(&mut self) -> Option<Vec<u8>> {
-        let mut buf = vec![0u8; 128*1024];
-        match self.file.read(&mut buf[..]) {
-            Err(_) => None,
-            Ok(size) if size == 0 => None,
-            Ok(size) => Some(buf[..size].to_vec()),
+        let chunk_size = 128 * 1024;
+        let empty = vec![];
+        match self.file {
+            Some(ref mut f) => {
+                let mut buf = vec![0u8; chunk_size];
+                match f.read(&mut buf[..]) {
+                    Err(_) => None,
+                    Ok(size) if size == 0 => None,
+                    Ok(size) => Some(buf[..size].to_vec()),
+                }
+            }
+            None => {
+                match self.contents.to_owned() {
+                    Some(ref c) if c.is_empty() => None,
+                    Some(ref c) => {
+                        let (out, rest) = if c.len() <= chunk_size {
+                            (c.as_slice(), empty.as_slice())
+                        } else {
+                            c.split_at(chunk_size)
+                        };
+                        self.contents = Some(rest.to_owned());
+                        Some(out.to_owned())
+                    }
+                    None => None,
+                }
+            }
         }
     }
 }
@@ -1020,6 +1099,22 @@ impl Family {
     pub fn snapshot_dir(&self, dir: PathBuf) {
         let mut handler = InsertPathHandler::new(self.key_store_process.clone());
         listdir::iterate_recursively((PathBuf::from(&dir), None), &mut handler);
+    }
+
+    pub fn snapshot_direct(&self,
+                           file: key::Entry,
+                           is_directory: bool,
+                           contents: Option<Vec<u8>>) {
+        match self.key_store_process.send_reply(
+                key::Msg::Insert(file,
+                      if is_directory { None }
+                      else { Some(Box::new(move|| {
+                          contents.map(|b| FileIterator::from_bytes(b))
+                      }))}))
+        {
+            key::Reply::Id(..) => return,
+            _ => panic!("Unexpected reply from key store"),
+        }
     }
 
     pub fn flush(&self) {
@@ -1243,5 +1338,124 @@ impl Family {
                 tree.append(buf);
             }
         }
+    }
+}
+
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    use blob::StoreBackend;
+    use blob::tests::MemoryBackend;
+    use key;
+
+    fn setup_hat<B: Clone + Send + StoreBackend + 'static>(backend: B) -> Hat<B> {
+        let max_blob_size = 1024 * 1024;
+        Hat::new_for_testing(backend.clone(), max_blob_size)
+    }
+
+    fn setup_family() -> (MemoryBackend, Hat<MemoryBackend>, Family) {
+        let backend = MemoryBackend::new();
+        let hat = setup_hat(backend.clone());
+
+        let family = "familyname".to_string();
+        let fam = hat.open_family(family.clone()).unwrap();
+
+        (backend, hat, fam)
+    }
+
+    fn entry(name: Vec<u8>) -> key::Entry {
+        key::Entry {
+            name: name,
+            id: None,
+            parent_id: None,
+            created: None,
+            modified: None,
+            accessed: None,
+            permissions: None,
+            user_id: None,
+            group_id: None,
+            data_hash: None,
+            data_length: None,
+        }
+    }
+
+    fn snapshot_files(family: &Family, files: Vec<(&str, Vec<u8>)>) {
+        for (name, contents) in files {
+            family.snapshot_direct(entry(name.bytes().collect()), false, Some(contents));
+        }
+    }
+
+    #[test]
+    fn snapshot_commit() {
+        let (_, mut hat, fam) = setup_family();
+
+        snapshot_files(&fam,
+                       vec![("name1", vec![0; 1000000]),
+                            ("name2", vec![1; 1000000]),
+                            ("name3", vec![2; 1000000])]);
+
+        fam.flush();
+        hat.commit(&fam, None);
+        hat.meta_commit();
+
+        let (deleted, live) = hat.gc();
+        assert_eq!(deleted, 0);
+        assert!(live > 0);
+    }
+
+    #[test]
+    fn snapshot_gc() {
+        let (_, mut hat, fam) = setup_family();
+
+        snapshot_files(&fam,
+                       vec![("name1", vec![0; 1000000]),
+                            ("name2", vec![1; 1000000]),
+                            ("name3", vec![2; 1000000])]);
+
+        fam.flush();
+
+        // No commit so everything is deleted.
+        let (deleted, live) = hat.gc();
+        assert!(deleted > 0);
+        assert_eq!(live, 0);
+    }
+
+    #[test]
+    fn recover() {
+        // Prepare a snapshot.
+        let (backend, mut hat, fam) = setup_family();
+
+        snapshot_files(&fam,
+                       vec![("name1", vec![0; 1000000]),
+                            ("name2", vec![1; 1000000]),
+                            ("name3", vec![2; 1000000])]);
+        fam.flush();
+        hat.commit(&fam, None);
+        hat.meta_commit();
+
+        let (deleted, live1) = hat.gc();
+        assert_eq!(deleted, 0);
+        assert!(live1 > 0);
+
+        // Create a new hat to wipe the index states.
+        let mut hat2 = setup_hat(backend.clone());
+
+        // Recover index states.
+        hat2.recover();
+
+        // Check that we now reference all the blobs.
+        let (deleted, live2) = hat2.gc();
+        assert_eq!(deleted, 0);
+        assert_eq!(live1, live2);
+
+        // Check that we can delete the snapshot.
+        hat2.deregister(&fam, 1);
+
+        let (deleted, live3) = hat2.gc();
+        assert!(deleted > 0);
+        assert_eq!(live3, 0);
     }
 }

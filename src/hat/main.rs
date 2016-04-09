@@ -208,7 +208,7 @@ fn main() {
             let backend = blob::FileBackend::new(blob_dir());
             let mut hat = hat::Hat::open_repository(&PathBuf::from("repo"), backend, MAX_BLOB_SIZE);
 
-            hat.commit(name, None);
+            hat.commit_by_name(name, None);
         }
         ("delete", Some(cmd)) => {
             let name = cmd.value_of("NAME").unwrap().to_owned();
@@ -217,12 +217,15 @@ fn main() {
             let backend = blob::FileBackend::new(blob_dir());
             let mut hat = hat::Hat::open_repository(&PathBuf::from("repo"), backend, MAX_BLOB_SIZE);
 
-            hat.deregister(name, id.parse::<i64>().unwrap());
+            hat.deregister_by_name(name, id.parse::<i64>().unwrap());
         }
         ("gc", Some(_cmd)) => {
             let backend = blob::FileBackend::new(blob_dir());
             let mut hat = hat::Hat::open_repository(&PathBuf::from("repo"), backend, MAX_BLOB_SIZE);
-            hat.gc();
+            let (deleted_hashes, live_blobs) = hat.gc();
+            println!("Deleted hashes: {:?}", deleted_hashes);
+            println!("Live data blobs after deletion: {:?}", live_blobs);
+
         }
         _ => {
             println!("No subcommand specified\n{}\nFor more information re-run with --help",
