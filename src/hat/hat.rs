@@ -1273,7 +1273,9 @@ impl Family {
                 let files_root = files_msg.init_root::<root_capnp::file_list::Builder>();
                 let mut files = files_root.init_files(files_at_a_time as u32);
 
-                for (idx, (entry, data_ref, _data_res_open)) in it.by_ref().take(files_at_a_time).enumerate() {
+                for (idx, (entry, data_ref, _data_res_open)) in it.by_ref()
+                                                                  .take(files_at_a_time)
+                                                                  .enumerate() {
                     assert!(idx < files_at_a_time);
 
                     current_msg_is_empty = false;
