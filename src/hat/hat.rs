@@ -389,18 +389,24 @@ impl<B: 'static + blob::StoreBackend + Clone + Send> Hat<B> {
 
         let family = self.open_family(family_name.clone())
                          .expect(&format!("Could not open family '{}'", family_name));
-        let (entry_sender, entry_receiver) = mpsc::channel();
+        let (register_sender, register_receiver) = mpsc::channel();
+        let (recover_sender, recover_receiver) = mpsc::channel();
         let (final_payload, final_level) = self.recover_dir_ref(&family,
                                                                 hash.clone(),
                                                                 dir_ref.clone(),
-                                                                entry_sender);
+                                                                register_sender,
+                                                                recover_sender);
+        // Recover hashes for tree child chunks.
+        for entry in recover_receiver {
+            recover_entry(&self.hash_index, &self.blob_store, entry);
+        }
 
+        // Recover hashes for tree-tops. These are also registered with the GC.
         let (id_sender, id_receiver) = mpsc::channel();
         let local_hash_index = self.hash_index.clone();
         let local_blob_store = self.blob_store.clone();
-
         thread::spawn(move || {
-            for entry in entry_receiver {
+            for entry in register_receiver {
                 let id = recover_entry(&local_hash_index, &local_blob_store, entry);
                 id_sender.send(id).unwrap();
             }
@@ -428,6 +434,7 @@ impl<B: 'static + blob::StoreBackend + Clone + Send> Hat<B> {
                        family: &Family,
                        dir_hash: hash::Hash,
                        dir_ref: blob::ChunkRef,
+                       register_out: mpsc::Sender<hash::Entry>,
                        recover_out: mpsc::Sender<hash::Entry>)
                        -> (Option<Vec<u8>>, i64) {
         fn recover_tree<B: hash::tree::HashTreeBackend + Clone>(backend: B,
@@ -436,14 +443,13 @@ impl<B: 'static + blob::StoreBackend + Clone + Send> Hat<B> {
                                                                 out: mpsc::Sender<hash::Entry>)
                                                                 -> (Option<Vec<u8>>, i64) {
             match hash::tree::SimpleHashTreeReader::open(backend, hash, Some(pref)).unwrap() {
-                hash::tree::ReaderResult::Empty => return (None, 0),
-                hash::tree::ReaderResult::SingleBlock(..) => return (None, 0),
+                hash::tree::ReaderResult::Empty => (None, 0),
+                hash::tree::ReaderResult::SingleBlock(..) => (None, 0),
                 hash::tree::ReaderResult::Tree(mut reader) => {
                     let (payload, level) = reader.list_entries(out);
                     (Some(payload), level)
                 }
-            };
-            (None, 0)
+            }
         }
         for (file, hash, pref) in family.fetch_dir_data(dir_hash.clone(),
                                                         dir_ref.clone(),
@@ -457,17 +463,21 @@ impl<B: 'static + blob::StoreBackend + Clone + Send> Hat<B> {
                                  recover_out.clone())
                 }
                 None => {
-                    self.recover_dir_ref(&family, hash.clone(), pref.clone(), recover_out.clone());
-                    (None, 0)
+                    self.recover_dir_ref(&family,
+                                         hash.clone(),
+                                         pref.clone(),
+                                         register_out.clone(),
+                                         recover_out.clone())
                 }
             };
+            // We register the top hash with the GC (tree nodes are inferred).
             let r = hash::Entry {
                 hash: hash,
                 persistent_ref: Some(pref),
                 level: level,
                 payload: payload,
             };
-            recover_out.send(r).unwrap();
+            register_out.send(r).unwrap();
         }
         return recover_tree(self.hash_backend.clone(), dir_hash, dir_ref, recover_out);
     }
