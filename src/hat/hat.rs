@@ -1424,7 +1424,7 @@ mod tests {
     fn snapshot_commit_many_empty_files() {
         let (_, mut hat, fam) = setup_family();
 
-        let names: Vec<String> = (0..10000).map(|i| format!("name-{}", i)).collect();
+        let names: Vec<String> = (0..3000).map(|i| format!("name-{}", i)).collect();
         snapshot_files(&fam, names.iter().map(|n| (n.as_str(), vec![])).collect());
 
         fam.flush();
@@ -1434,6 +1434,33 @@ mod tests {
         let (deleted, live) = hat.gc();
         assert_eq!(deleted, 0);
         assert!(live > 0);
+
+        hat.deregister(&fam, 1);
+        let (deleted, live) = hat.gc();
+        assert!(deleted > 0);
+        assert_eq!(live, 0);
+    }
+
+    #[test]
+    fn snapshot_commit_many_empty_directories() {
+        let (_, mut hat, fam) = setup_family();
+
+        for i in 0..3000 {
+            fam.snapshot_direct(entry(format!("name-{}", i).bytes().collect()), true, None);
+        }
+
+        fam.flush();
+        hat.commit(&fam, None);
+        hat.meta_commit();
+
+        let (deleted, live) = hat.gc();
+        assert_eq!(deleted, 0);
+        assert!(live > 0);
+
+        hat.deregister(&fam, 1);
+        let (deleted, live) = hat.gc();
+        assert!(deleted > 0);
+        assert_eq!(live, 0);
     }
 
     #[test]
