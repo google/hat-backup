@@ -1263,7 +1263,7 @@ impl Family {
                           hash_ch: mpsc::Sender<hash::Hash>) {
 
         let files_at_a_time = 1024;
-        let mut it = self.list_from_key_store(dir_id).into_iter().enumerate();
+        let mut it = self.list_from_key_store(dir_id).into_iter();
 
         loop {
             let mut current_msg_is_empty = true;
@@ -1273,7 +1273,9 @@ impl Family {
                 let files_root = files_msg.init_root::<root_capnp::file_list::Builder>();
                 let mut files = files_root.init_files(files_at_a_time as u32);
 
-                for (idx, (entry, data_ref, _data_res_open)) in it.by_ref().take(files_at_a_time) {
+                for (idx, (entry, data_ref, _data_res_open)) in it.by_ref().take(files_at_a_time).enumerate() {
+                    assert!(idx < files_at_a_time);
+
                     current_msg_is_empty = false;
                     let mut file_msg = files.borrow().get(idx as u32);
 
@@ -1406,6 +1408,22 @@ mod tests {
                        vec![("name1", vec![0; 1000000]),
                             ("name2", vec![1; 1000000]),
                             ("name3", vec![2; 1000000])]);
+
+        fam.flush();
+        hat.commit(&fam, None);
+        hat.meta_commit();
+
+        let (deleted, live) = hat.gc();
+        assert_eq!(deleted, 0);
+        assert!(live > 0);
+    }
+
+    #[test]
+    fn snapshot_commit_many_empty_files() {
+        let (_, mut hat, fam) = setup_family();
+
+        let names: Vec<String> = (0..10000).map(|i| format!("name-{}", i)).collect();
+        snapshot_files(&fam, names.iter().map(|n| (n.as_str(), vec![])).collect());
 
         fam.flush();
         hat.commit(&fam, None);
