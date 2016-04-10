@@ -34,6 +34,11 @@ struct ChunkRef {
 
 	offset @1: Int64;
 	length @2: Int64;
+
+	kind :union {
+		treeBranch @3 :Void;
+		treeLeaf @4 :Void;
+	}
 }
 
 struct HashRef {

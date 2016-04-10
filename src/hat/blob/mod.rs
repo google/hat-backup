@@ -138,12 +138,18 @@ impl StoreBackend for FileBackend {
     }
 }
 
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub enum Kind {
+    TreeBranch = 1,
+    TreeLeaf = 2,
+}
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct ChunkRef {
     pub blob_id: Vec<u8>,
     pub offset: usize,
     pub length: usize,
+    pub kind: Kind,
 }
 
 impl ChunkRef {
@@ -171,6 +177,10 @@ impl ChunkRef {
         msg.set_blob_id(&self.blob_id[..]);
         msg.set_offset(self.offset as i64);
         msg.set_length(self.length as i64);
+        match self.kind {
+            Kind::TreeLeaf => msg.init_kind().set_tree_leaf(()),
+            Kind::TreeBranch => msg.init_kind().set_tree_branch(()),
+        }
     }
 
     pub fn read_msg(msg: &root_capnp::chunk_ref::Reader) -> Result<ChunkRef, capnp::Error> {
@@ -178,6 +188,10 @@ impl ChunkRef {
             blob_id: try!(msg.get_blob_id()).to_owned(),
             offset: msg.get_offset() as usize,
             length: msg.get_length() as usize,
+            kind: match try!(msg.get_kind().which()) {
+                root_capnp::chunk_ref::kind::TreeBranch(()) => Kind::TreeBranch,
+                root_capnp::chunk_ref::kind::TreeLeaf(()) => Kind::TreeLeaf,
+            },
         })
     }
 }
@@ -187,7 +201,7 @@ pub enum Msg {
     /// Store a new data chunk into the current blob. The callback is triggered after the blob
     /// containing the chunk has been committed to persistent storage (it is then safe to use the
     /// `ChunkRef` as persistent reference).
-    Store(Vec<u8>, Box<FnBox(ChunkRef) + Send>),
+    Store(Vec<u8>, Kind, Box<FnBox(ChunkRef) + Send>),
     /// Retrieve the data chunk identified by `ChunkRef`.
     Retrieve(ChunkRef),
     /// Store a full named blob (used for writing root).
@@ -335,12 +349,13 @@ impl<B: StoreBackend> Store<B> {
 impl<B: StoreBackend> MsgHandler<Msg, Reply> for Store<B> {
     fn handle(&mut self, msg: Msg, reply: Box<Fn(Reply)>) {
         match msg {
-            Msg::Store(chunk, callback) => {
+            Msg::Store(chunk, kind, callback) => {
                 if chunk.is_empty() {
                     let id = ChunkRef {
                         blob_id: vec![0],
                         offset: 0,
                         length: 0,
+                        kind: kind,
                     };
                     let cb_id = id.clone();
                     thread::spawn(move || callback(cb_id));
@@ -351,6 +366,7 @@ impl<B: StoreBackend> MsgHandler<Msg, Reply> for Store<B> {
                     blob_id: self.blob_desc.name.clone(),
                     offset: self.buffer_data_len,
                     length: chunk.len(),
+                    kind: kind,
                 };
 
                 let new_size = self.buffer_data_len + chunk.len();
@@ -518,7 +534,9 @@ pub mod tests {
 
             let mut ids = Vec::new();
             for chunk in chunks.iter() {
-                match bs_p.send_reply(Msg::Store(chunk.to_owned(), Box::new(move |_| {}))) {
+                match bs_p.send_reply(Msg::Store(chunk.to_owned(),
+                                                 Kind::TreeLeaf,
+                                                 Box::new(move |_| {}))) {
                     Reply::StoreOk(id) => {
                         ids.push((id, chunk));
                     }
@@ -563,7 +581,9 @@ pub mod tests {
 
             let mut ids = Vec::new();
             for chunk in chunks.iter() {
-                match bs_p.send_reply(Msg::Store(chunk.to_owned(), Box::new(move |_| {}))) {
+                match bs_p.send_reply(Msg::Store(chunk.to_owned(),
+                                                 Kind::TreeLeaf,
+                                                 Box::new(move |_| {}))) {
                     Reply::StoreOk(id) => {
                         ids.push((id, chunk));
                     }
@@ -605,6 +625,7 @@ pub mod tests {
                 blob_id: name.to_vec(),
                 offset: offset,
                 length: length,
+                kind: Kind::TreeBranch,
             };
             let blob_id_bytes = blob_id.as_bytes();
             ChunkRef::from_bytes(&mut &blob_id_bytes[..]).unwrap() == blob_id

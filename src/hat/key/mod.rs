@@ -194,7 +194,12 @@ impl HashTreeBackend for HashStoreBackend {
                 let callback = Box::new(move |chunk_ref: blob::ChunkRef| {
                     local_hash_index.send_reply(hash::Msg::Commit(hash, chunk_ref));
                 });
-                match self.blob_store.send_reply(blob::Msg::Store(chunk, callback)) {
+                let kind = if level == 0 {
+                    blob::Kind::TreeLeaf
+                } else {
+                    blob::Kind::TreeBranch
+                };
+                match self.blob_store.send_reply(blob::Msg::Store(chunk, kind, callback)) {
                     blob::Reply::StoreOk(chunk_ref) => {
                         hash_entry.persistent_ref = Some(chunk_ref.clone());
                         self.hash_index.send_reply(hash::Msg::UpdateReserved(hash_entry));
