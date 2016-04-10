@@ -57,13 +57,17 @@ use std::sync::mpsc;
 
 pub struct Process<Msg, Reply> {
     sender: mpsc::SyncSender<(Msg, Option<mpsc::Sender<Reply>>)>,
+    shutdown_after: Option<i64>,
 }
 
 /// When cloning a `process` we clone the input-channel, allowing multiple threads to share the same
 /// `process`.
 impl<Msg: Send, Reply: Send> Clone for Process<Msg, Reply> {
     fn clone(&self) -> Process<Msg, Reply> {
-        Process { sender: self.sender.clone() }
+        Process {
+            sender: self.sender.clone(),
+            shutdown_after: None,
+        }
     }
 }
 
@@ -76,8 +80,19 @@ impl<Msg: 'static + Send, Reply: 'static + Send> Process<Msg, Reply> {
     pub fn new<H>(handler_proc: Box<FnBox() -> H + Send>) -> Process<Msg, Reply>
         where H: 'static + MsgHandler<Msg, Reply>
     {
+        return Process::new_with_shutdown(handler_proc, None);
+    }
+
+    pub fn new_with_shutdown<H>(handler_proc: Box<FnBox() -> H + Send>,
+                                shutdown_after: Option<i64>)
+                                -> Process<Msg, Reply>
+        where H: 'static + MsgHandler<Msg, Reply>
+    {
         let (sender, receiver) = mpsc::sync_channel(10);
-        let p = Process { sender: sender };
+        let p = Process {
+            sender: sender,
+            shutdown_after: shutdown_after,
+        };
 
         p.start(receiver, handler_proc);
 
@@ -90,22 +105,38 @@ impl<Msg: 'static + Send, Reply: 'static + Send> Process<Msg, Reply> {
                 handler_proc: Box<FnBox() -> H + Send>)
         where H: 'static + MsgHandler<Msg, Reply>
     {
+        let shutdown_after = self.shutdown_after.clone();
         thread::spawn(move || {
             // fork handler
             let mut my_handler = handler_proc();
-            loop {
+            let mut handle_msg = || {
                 match receiver.recv() {
                     Ok((msg, None)) => {
                         my_handler.handle(msg, Box::new(|_r: Reply| {}));
+                        Ok(())
                     }
                     Ok((msg, Some(rep))) => {
                         my_handler.handle(msg,
                                           Box::new(move |r| {
                                               rep.send(r).unwrap();
                                           }));
+                        Ok(())
                     }
-                    Err(_recv_error) => break,
-                };
+                    Err(err) => Err(err),
+                }
+            };
+            match shutdown_after {
+                Some(msg_count) => {
+                    for _ in 0..msg_count {
+                        if let Err(..) = handle_msg() {
+                            break;
+                        }
+                    }
+                }
+                None => {
+                    while let Ok(..) = handle_msg() {
+                    }
+                }
             }
         });
     }
