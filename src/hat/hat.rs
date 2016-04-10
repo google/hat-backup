@@ -224,16 +224,25 @@ impl<B: 'static + blob::StoreBackend + Clone + Send> Hat<B> {
     }
 
     #[cfg(test)]
-    pub fn new_for_testing(backend: B, max_blob_size: usize) -> Hat<B> {
-        let si_p = Process::new(Box::new(move || snapshot::Index::new_for_testing()));
-        let bi_p = Process::new(Box::new(move || blob::Index::new_for_testing()));
-        let hi_p = Process::new(Box::new(move || hash::Index::new_for_testing()));
+    pub fn new_for_testing(backend: B, max_blob_size: usize, shutdown_after: &[i64]) -> Hat<B> {
+        // If provided, we cycle the possible shutdown values to give every process one.
+        let mut shutdown = shutdown_after.iter().cycle();
+
+        let si_p = Process::new_with_shutdown(Box::new(move || snapshot::Index::new_for_testing()),
+                                              shutdown.next().cloned());
+        let bi_p = Process::new_with_shutdown(Box::new(move || blob::Index::new_for_testing()),
+                                              shutdown.next().cloned());
+        let hi_p = Process::new_with_shutdown(Box::new(move || hash::Index::new_for_testing()),
+                                              shutdown.next().cloned());
 
         let local_blob_index = bi_p.clone();
         let local_backend = backend.clone();
-        let bs_p = Process::new(Box::new(move || {
-            blob::Store::new(local_blob_index, local_backend, max_blob_size)
-        }));
+        let bs_p = Process::new_with_shutdown(Box::new(move || {
+                                                  blob::Store::new(local_blob_index,
+                                                                   local_backend,
+                                                                   max_blob_size)
+                                              }),
+                                              shutdown.next().cloned());
 
         let gc_backend = GcBackend { hash_index: hi_p.clone() };
         let gc = gc_rc::GcRc::new(Box::new(gc_backend));
@@ -261,26 +270,30 @@ impl<B: 'static + blob::StoreBackend + Clone + Send> Hat<B> {
     }
 
     pub fn open_family(&self, name: String) -> Option<Family> {
+        return self.open_family_with_shutdown(name, None);
+    }
+
+    pub fn open_family_with_shutdown(&self,
+                                     name: String,
+                                     shutdown_after: Option<i64>)
+                                     -> Option<Family> {
         // We setup a standard pipeline of processes:
         // key::Store -> key::Index
         //            -> hash::Index
         //            -> blob::Store -> blob::Index
 
-        let ki_p = match self.repository_root {
-            Some(ref root) => {
-                let key_index_path = concat_filename(root, name.clone());
-                Process::new(Box::new(move || key::Index::new(key_index_path)))
-            }
-            None => {
-                // Index is clean and in-memory only.
-                Process::new(Box::new(move || key::Index::new(From::from(":memory:".to_string()))))
-            }
+        let key_index_path = match self.repository_root {
+            Some(ref root) => concat_filename(root, name.clone()),
+            None => ":memory:".to_string(),
         };
+
+        let ki_p = Process::new_with_shutdown(Box::new(move || key::Index::new(key_index_path)),
+                                              shutdown_after);
 
         let local_ks = key::Store::new(ki_p.clone(),
                                        self.hash_index.clone(),
                                        self.blob_store.clone());
-        let ks_p = Process::new(Box::new(move || local_ks));
+        let ks_p = Process::new_with_shutdown(Box::new(move || local_ks), shutdown_after);
 
         let ks = key::Store::new(ki_p, self.hash_index.clone(), self.blob_store.clone());
 
@@ -1365,17 +1378,21 @@ mod tests {
     use blob::tests::MemoryBackend;
     use key;
 
-    fn setup_hat<B: Clone + Send + StoreBackend + 'static>(backend: B) -> Hat<B> {
+    fn setup_hat<B: Clone + Send + StoreBackend + 'static>(backend: B,
+                                                           shutdown_after: &[i64])
+                                                           -> Hat<B> {
         let max_blob_size = 1024 * 1024;
-        Hat::new_for_testing(backend.clone(), max_blob_size)
+        Hat::new_for_testing(backend, max_blob_size, shutdown_after)
     }
 
-    fn setup_family() -> (MemoryBackend, Hat<MemoryBackend>, Family) {
+    fn setup_family(shutdown_after: Option<Vec<i64>>) -> (MemoryBackend, Hat<MemoryBackend>, Family) {
+        let shutdown = shutdown_after.unwrap_or(vec![]);
+
         let backend = MemoryBackend::new();
-        let hat = setup_hat(backend.clone());
+        let hat = setup_hat(backend.clone(), &shutdown[..]);
 
         let family = "familyname".to_string();
-        let fam = hat.open_family(family.clone()).unwrap();
+        let fam = hat.open_family_with_shutdown(family.clone(), shutdown.last().cloned()).unwrap();
 
         (backend, hat, fam)
     }
@@ -1404,7 +1421,7 @@ mod tests {
 
     #[test]
     fn snapshot_commit() {
-        let (_, mut hat, fam) = setup_family();
+        let (_, mut hat, fam) = setup_family(None);
 
         snapshot_files(&fam,
                        vec![("name1", vec![0; 1000000]),
@@ -1422,7 +1439,7 @@ mod tests {
 
     #[test]
     fn snapshot_commit_many_empty_files() {
-        let (_, mut hat, fam) = setup_family();
+        let (_, mut hat, fam) = setup_family(None);
 
         let names: Vec<String> = (0..3000).map(|i| format!("name-{}", i)).collect();
         snapshot_files(&fam, names.iter().map(|n| (n.as_str(), vec![])).collect());
@@ -1443,7 +1460,7 @@ mod tests {
 
     #[test]
     fn snapshot_commit_many_empty_directories() {
-        let (_, mut hat, fam) = setup_family();
+        let (_, mut hat, fam) = setup_family(None);
 
         for i in 0..3000 {
             fam.snapshot_direct(entry(format!("name-{}", i).bytes().collect()), true, None);
@@ -1465,7 +1482,7 @@ mod tests {
 
     #[test]
     fn snapshot_gc() {
-        let (_, mut hat, fam) = setup_family();
+        let (_, mut hat, fam) = setup_family(None);
 
         snapshot_files(&fam,
                        vec![("name1", vec![0; 1000000]),
@@ -1483,7 +1500,7 @@ mod tests {
     #[test]
     fn recover() {
         // Prepare a snapshot.
-        let (backend, mut hat, fam) = setup_family();
+        let (backend, mut hat, fam) = setup_family(None);
 
         snapshot_files(&fam,
                        vec![("name1", vec![0; 1000000]),
@@ -1498,7 +1515,8 @@ mod tests {
         assert!(live1 > 0);
 
         // Create a new hat to wipe the index states.
-        let mut hat2 = setup_hat(backend.clone());
+        let shutdown = vec![];
+        let mut hat2 = setup_hat(backend.clone(), &shutdown[..]);
 
         // Recover index states.
         hat2.recover();
@@ -1514,5 +1532,23 @@ mod tests {
         let (deleted, live3) = hat2.gc();
         assert!(deleted > 0);
         assert_eq!(live3, 0);
+    }
+
+    #[test]
+    #[should_panic]
+    fn shutdown_early_panics() {
+        // TODO: Upgrade to proper error handling so we can test resuming.
+
+        let shutdown = vec![10];
+        let (_, mut hat, fam) = setup_family(Some(shutdown));
+
+        snapshot_files(&fam,
+                       vec![("name1", vec![0; 1000000]),
+                            ("name2", vec![1; 1000000]),
+                            ("name3", vec![2; 1000000])]);
+
+        fam.flush();
+        hat.commit(&fam, None);
+        hat.meta_commit();
     }
 }
