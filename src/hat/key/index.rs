@@ -295,27 +295,26 @@ impl MsgHandler<Msg, Reply> for Index {
                 };
 
                 reply(Reply::ListResult(rows.into_iter()
-                                                   .map(|mut r| {
-                                                       (Entry {
-                                                           id: Some(r.id as u64),
-                                                           parent_id: r.parent.map(|x| x as u64),
-                                                           name: r.name,
-                                                           created: r.created,
-                                                           modified: r.modified,
-                                                           accessed: r.accessed,
-                                                           permissions: r.permissions
-                                                                         .map(|x| x as u64),
-                                                           user_id: r.user_id.map(|x| x as u64),
-                                                           group_id: r.group_id.map(|x| x as u64),
-                                                           data_hash: r.hash,
-                                                           data_length: None,
-                                                       },
-                                                        r.persistent_ref.as_mut().map(|p| {
-                                                           blob::ChunkRef::from_bytes(&mut &p[..])
-                                                               .unwrap()
-                                                       }))
-                                                   })
-                                                   .collect()));
+                                            .map(|mut r| {
+                                                (Entry {
+                                                    id: Some(r.id as u64),
+                                                    parent_id: r.parent.map(|x| x as u64),
+                                                    name: r.name,
+                                                    created: r.created,
+                                                    modified: r.modified,
+                                                    accessed: r.accessed,
+                                                    permissions: r.permissions
+                                                                  .map(|x| x as u64),
+                                                    user_id: r.user_id.map(|x| x as u64),
+                                                    group_id: r.group_id.map(|x| x as u64),
+                                                    data_hash: r.hash,
+                                                    data_length: None,
+                                                },
+                                                 r.persistent_ref.as_mut().map(|p| {
+                                                    blob::ChunkRef::from_bytes(&mut &p[..]).unwrap()
+                                                }))
+                                            })
+                                            .collect()));
             }
         }
 
