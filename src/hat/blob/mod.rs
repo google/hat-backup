@@ -14,26 +14,39 @@
 
 //! Combines data chunks into larger blobs to be stored externally.
 
-use capnp;
-use root_capnp;
-use tags;
-use process::{Process, MsgHandler};
-
-use std::collections::BTreeMap;
-
 use std::boxed::FnBox;
-use std::sync::{Arc, Mutex};
-use std::thread;
+use std::collections::BTreeMap;
 
 use std::fs;
 use std::io::{Read, Write};
 use std::path::PathBuf;
+
+use std::sync::{mpsc, Arc, Mutex};
+use std::thread;
+
 use rustc_serialize::hex::ToHex;
 
+use capnp;
+use root_capnp;
 
-mod schema;
+use tags;
+use process::{Process, MsgHandler};
+
+
 mod index;
+mod schema;
+
 pub use self::index::{Index, BlobDesc};
+
+
+error_type! {
+    #[derive(Debug)]
+    pub enum MsgError {
+        Recv(mpsc::RecvError) {
+            cause;
+        }
+    }
+}
 
 
 pub type StoreProcess = Process<Msg, Reply>;
@@ -347,7 +360,9 @@ impl<B: StoreBackend> Store<B> {
 }
 
 impl<B: StoreBackend> MsgHandler<Msg, Reply> for Store<B> {
-    fn handle(&mut self, msg: Msg, reply: Box<Fn(Reply)>) {
+    type Err = MsgError;
+
+    fn handle(&mut self, msg: Msg, reply: Box<Fn(Reply)>) -> Result<(), MsgError> {
         match msg {
             Msg::Store(chunk, kind, callback) => {
                 if chunk.is_empty() {
@@ -359,7 +374,8 @@ impl<B: StoreBackend> MsgHandler<Msg, Reply> for Store<B> {
                     };
                     let cb_id = id.clone();
                     thread::spawn(move || callback(cb_id));
-                    return reply(Reply::StoreOk(id));
+                    reply(Reply::StoreOk(id));
+                    return Ok(());
                 }
 
                 let id = ChunkRef {
@@ -381,11 +397,12 @@ impl<B: StoreBackend> MsgHandler<Msg, Reply> for Store<B> {
             }
             Msg::Retrieve(id) => {
                 if id.offset == 0 && id.length == 0 {
-                    return reply(Reply::RetrieveOk(vec![]));
+                    reply(Reply::RetrieveOk(vec![]));
+                    return Ok(());
                 }
                 let blob = self.backend_read(&id.blob_id[..]);
                 let chunk = &blob[id.offset..id.offset + id.length];
-                return reply(Reply::RetrieveOk(chunk.to_vec()));
+                reply(Reply::RetrieveOk(chunk.to_vec()));
             }
             Msg::StoreNamed(name, data) => {
                 self.backend.store(name.as_bytes(), &data[..]).ok();
@@ -397,7 +414,8 @@ impl<B: StoreBackend> MsgHandler<Msg, Reply> for Store<B> {
             Msg::Recover(chunk) => {
                 if chunk.offset == 0 && chunk.length == 0 {
                     // This chunk is empty, so there is no blob to recover.
-                    return reply(Reply::RecoverOk);
+                    reply(Reply::RecoverOk);
+                    return Ok(());
                 }
                 match self.blob_index.send_reply(index::Msg::Recover(chunk.blob_id)) {
                     index::Reply::RecoverOk(..) => reply(Reply::RecoverOk),
@@ -436,7 +454,7 @@ impl<B: StoreBackend> MsgHandler<Msg, Reply> for Store<B> {
                     index::Reply::Ok => (),
                     _ => panic!("Unexpected reply from blob index."),
                 }
-                return reply(Reply::Ok);
+                reply(Reply::Ok);
             }
             Msg::Flush => {
                 self.flush();
@@ -444,9 +462,10 @@ impl<B: StoreBackend> MsgHandler<Msg, Reply> for Store<B> {
                     index::Reply::CommitOk => (),
                     _ => panic!("Unexpected reply from blob index."),
                 }
-                return reply(Reply::FlushOk);
+                reply(Reply::FlushOk);
             }
         }
+        return Ok(());
     }
 }
 

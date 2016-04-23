@@ -1,8 +1,8 @@
 [package]
-name = "hat-backup"
-version = "0.0.1-pre"
 authors = ["Johan Nielsen <sejr@google.com>"]
 build = "build.rs"
+name = "hat-backup"
+version = "0.0.1-pre"
 
 [[bin]]
 name = "hat"
@@ -12,35 +12,36 @@ path = "src/hat/main.rs"
 capnpc = "*"
 
 [dependencies]
-env_logger = "*"
-log = "*"
 capnp = "*"
-rand = "*"
-quickcheck = "*"
 clap = "*"
-num = "*"
-rustc-serialize = "*"
-time = "*"
-
+env_logger = "*"
+error-type = "0.1.2"
 libsodium-sys = "*"
+log = "*"
+num = "*"
+quickcheck = "*"
+rand = "*"
+rustc-serialize = "*"
 sodiumoxide = "*"
 threadpool = "*"
+time = "*"
 
 [dependencies.diesel]
-version = "0.6.*"
 default-features = false
 features = ["sqlite"]
+version = "0.6.*"
 
 [dependencies.diesel_codegen]
-version = "0.6.*"
 default-features = false
 features = ["nightly", "sqlite"]
+version = "0.6.*"
 
+[profile]
 
 [profile.dev]
-opt-level = 0
 debug = true
+opt-level = 0
 
 [profile.release]
-opt-level = 2
 debug = false
+opt-level = 2

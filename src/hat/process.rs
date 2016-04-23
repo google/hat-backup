@@ -56,7 +56,7 @@ use std::sync::mpsc;
 
 
 pub struct Process<Msg, Reply> {
-    sender: mpsc::SyncSender<(Msg, Option<mpsc::Sender<Reply>>)>,
+    sender: mpsc::SyncSender<(Msg, mpsc::Sender<Reply>)>,
     shutdown_after: Option<i64>,
 }
 
@@ -72,13 +72,15 @@ impl<Msg: Send, Reply: Send> Clone for Process<Msg, Reply> {
 }
 
 pub trait MsgHandler<Msg, Reply> {
-    fn handle(&mut self, msg: Msg, callback: Box<Fn(Reply)>);
+    type Err;
+
+    fn handle(&mut self, msg: Msg, callback: Box<Fn(Reply)>) -> Result<(), Self::Err>;
 }
 
 impl<Msg: 'static + Send, Reply: 'static + Send> Process<Msg, Reply> {
     /// Create and start a new process using `handler`.
     pub fn new<H>(handler_proc: Box<FnBox() -> H + Send>) -> Process<Msg, Reply>
-        where H: 'static + MsgHandler<Msg, Reply>
+        where H: 'static + MsgHandler<Msg, Reply>, H::Err: From<mpsc::RecvError>
     {
         return Process::new_with_shutdown(handler_proc, None);
     }
@@ -86,7 +88,7 @@ impl<Msg: 'static + Send, Reply: 'static + Send> Process<Msg, Reply> {
     pub fn new_with_shutdown<H>(handler_proc: Box<FnBox() -> H + Send>,
                                 shutdown_after: Option<i64>)
                                 -> Process<Msg, Reply>
-        where H: 'static + MsgHandler<Msg, Reply>
+        where H: 'static + MsgHandler<Msg, Reply>, H::Err: From<mpsc::RecvError>
     {
         let (sender, receiver) = mpsc::sync_channel(10);
         let p = Process {
@@ -101,29 +103,20 @@ impl<Msg: 'static + Send, Reply: 'static + Send> Process<Msg, Reply> {
 
 
     fn start<H>(&self,
-                receiver: mpsc::Receiver<(Msg, Option<mpsc::Sender<Reply>>)>,
+                receiver: mpsc::Receiver<(Msg, mpsc::Sender<Reply>)>,
                 handler_proc: Box<FnBox() -> H + Send>)
-        where H: 'static + MsgHandler<Msg, Reply>
+        where H: 'static + MsgHandler<Msg, Reply>, H::Err: From<mpsc::RecvError>
     {
         let shutdown_after = self.shutdown_after.clone();
         thread::spawn(move || {
             // fork handler
             let mut my_handler = handler_proc();
             let mut handle_msg = || {
-                match receiver.recv() {
-                    Ok((msg, None)) => {
-                        my_handler.handle(msg, Box::new(|_r: Reply| {}));
-                        Ok(())
-                    }
-                    Ok((msg, Some(rep))) => {
-                        my_handler.handle(msg,
-                                          Box::new(move |r| {
-                                              rep.send(r).unwrap();
-                                          }));
-                        Ok(())
-                    }
-                    Err(err) => Err(err),
-                }
+                let (msg, rep) = try!(receiver.recv());
+                my_handler.handle(msg,
+                                  Box::new(move |r| {
+                                             rep.send(r);
+                                           }))
             };
             match shutdown_after {
                 Some(msg_count) => {
@@ -137,7 +130,7 @@ impl<Msg: 'static + Send, Reply: 'static + Send> Process<Msg, Reply> {
                     while let Ok(..) = handle_msg() {
                     }
                 }
-            }
+            };
         });
     }
 
@@ -146,7 +139,7 @@ impl<Msg: 'static + Send, Reply: 'static + Send> Process<Msg, Reply> {
     /// Will always wait for a reply from the receiving `process`.
     pub fn send_reply(&self, msg: Msg) -> Reply {
         let (sender, receiver) = mpsc::channel();
-        self.sender.send((msg, Some(sender))).ok();
+        self.sender.send((msg, sender)).ok();
         return receiver.recv().expect("Failed to get reply for msg");
     }
 }

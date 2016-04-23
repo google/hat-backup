@@ -14,8 +14,7 @@
 
 //! Local state for known snapshots.
 
-use process;
-use tags;
+use std::sync::mpsc;
 
 use diesel;
 use diesel::prelude::*;
@@ -23,9 +22,21 @@ use diesel::sqlite::SqliteConnection;
 
 use blob;
 use hash;
+use process;
+use tags;
 use util;
 
 mod schema;
+
+
+error_type! {
+    #[derive(Debug)]
+    pub enum MsgError {
+        Recv(mpsc::RecvError) {
+            cause;
+        }
+    }
+}
 
 
 #[derive(Clone, Debug)]
@@ -401,7 +412,9 @@ impl Index {
 
 
 impl process::MsgHandler<Msg, Reply> for Index {
-    fn handle(&mut self, msg: Msg, reply: Box<Fn(Reply)>) {
+    type Err = MsgError;
+
+    fn handle(&mut self, msg: Msg, reply: Box<Fn(Reply)>) -> Result<(), MsgError> {
         match msg {
 
             Msg::Reserve(family) => {
@@ -410,61 +423,63 @@ impl process::MsgHandler<Msg, Reply> for Index {
 
             Msg::Update(snapshot, hash, tree_ref) => {
                 self.update(snapshot, "anonymous".to_owned(), hash, tree_ref);
-                return reply(Reply::UpdateOk);
+                reply(Reply::UpdateOk);
             }
 
             Msg::ReadyCommit(snapshot) => {
                 self.set_tag(snapshot, tags::Tag::Complete);
-                return reply(Reply::UpdateOk);
+                reply(Reply::UpdateOk);
             }
 
             Msg::Commit(snapshot) => {
                 self.set_tag(snapshot, tags::Tag::Done);
-                return reply(Reply::CommitOk);
+                reply(Reply::CommitOk);
             }
 
             Msg::Latest(name) => {
                 let res_opt = self.latest_snapshot(name);
-                return reply(Reply::Snapshot(res_opt));
+                reply(Reply::Snapshot(res_opt));
             }
 
             Msg::Lookup(name, id) => {
                 let res_opt = self.get_snapshot_info(name, id);
-                return reply(Reply::Snapshot(res_opt));
+                reply(Reply::Snapshot(res_opt));
             }
 
             Msg::WillDelete(snapshot) => {
                 self.set_tag(snapshot, tags::Tag::WillDelete);
-                return reply(Reply::UpdateOk);
+                reply(Reply::UpdateOk);
             }
 
             Msg::ReadyDelete(snapshot) => {
                 self.set_tag(snapshot, tags::Tag::ReadyDelete);
-                return reply(Reply::UpdateOk);
+                reply(Reply::UpdateOk);
             }
 
             Msg::Delete(snapshot) => {
                 self.delete_snapshot(snapshot);
-                return reply(Reply::UpdateOk);
+                reply(Reply::UpdateOk);
             }
 
             Msg::ListNotDone => {
-                return reply(Reply::NotDone(self.list_all(Some(tags::Tag::Done) /* not_tag */)));
+                reply(Reply::NotDone(self.list_all(Some(tags::Tag::Done) /* not_tag */)));
             }
 
             Msg::ListAll => {
-                return reply(Reply::All(self.list_all(None)));
+                reply(Reply::All(self.list_all(None)));
             }
 
             Msg::Recover(snapshot_id, family_name, msg, hash, tree_ref, work_opt) => {
                 self.recover(snapshot_id, family_name, msg, hash, tree_ref, work_opt);
-                return reply(Reply::RecoverOk);
+                reply(Reply::RecoverOk);
             }
 
             Msg::Flush => {
                 self.flush();
-                return reply(Reply::FlushOk);
+                reply(Reply::FlushOk);
             }
-        }
+        };
+
+        return Ok(());
     }
 }

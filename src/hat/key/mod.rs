@@ -15,6 +15,7 @@
 //! External API for creating and manipulating snapshots.
 
 use std::boxed::FnBox;
+use std::sync::mpsc;
 
 use blob;
 use hash;
@@ -28,6 +29,16 @@ mod index;
 
 
 pub use self::index::{Index, IndexProcess, Entry};
+
+
+error_type! {
+    #[derive(Debug)]
+    pub enum MsgError {
+        Recv(mpsc::RecvError) {
+            cause;
+        }
+    }
+}
 
 
 pub type StoreProcess<IT> = Process<Msg<IT>, Reply>;
@@ -228,11 +239,13 @@ fn file_size_warning(name: &[u8], wanted: u64, got: u64) {
 }
 
 impl<IT: Iterator<Item = Vec<u8>>> MsgHandler<Msg<IT>, Reply> for Store {
-    fn handle(&mut self, msg: Msg<IT>, reply: Box<Fn(Reply)>) {
+    type Err = MsgError;
+
+    fn handle(&mut self, msg: Msg<IT>, reply: Box<Fn(Reply)>) -> Result<(), MsgError> {
         match msg {
             Msg::Flush => {
                 self.flush();
-                return reply(Reply::FlushOk);
+                reply(Reply::FlushOk);
             }
 
             Msg::ListDir(parent) => {
@@ -255,7 +268,7 @@ impl<IT: Iterator<Item = Vec<u8>>> MsgHandler<Msg<IT>, Reply> for Store {
 
                             my_entries.push((entry, persistent_ref, open_fn));
                         }
-                        return reply(Reply::ListResult(my_entries));
+                        reply(Reply::ListResult(my_entries));
                     }
                     _ => panic!("Unexpected result from key index."),
                 }
@@ -273,11 +286,13 @@ impl<IT: Iterator<Item = Vec<u8>>> MsgHandler<Msg<IT>, Reply> for Store {
                             if let hash::Reply::HashKnown =
                                    self.hash_index.send_reply(hash::Msg::HashExists(hash)) {
                                 // Short-circuit: We have the data.
-                                return reply(Reply::Id(entry.id.unwrap()));
+                                reply(Reply::Id(entry.id.unwrap()));
+                                return Ok(());
                             }
                         } else if org_entry.data_hash.is_none() && org_entry.data_hash.is_none() {
                             // Short-circuit: No data needed.
-                            return reply(Reply::Id(entry.id.unwrap()));
+                            reply(Reply::Id(entry.id.unwrap()));
+                            return Ok(());
                         }
                         // Our stored entry is incomplete.
                         Entry { id: entry.id, ..org_entry }
@@ -307,7 +322,7 @@ impl<IT: Iterator<Item = Vec<u8>>> MsgHandler<Msg<IT>, Reply> for Store {
                     // No data is associated with this entry.
                     self.index.send_reply(index::Msg::UpdateDataHash(entry, None, None));
                     // Bail out before storing data that does not exist:
-                    return;
+                    return Ok(());
                 }
 
                 // Read and insert all file chunks:
@@ -336,6 +351,8 @@ impl<IT: Iterator<Item = Vec<u8>>> MsgHandler<Msg<IT>, Reply> for Store {
                 };
             }
         }
+
+        return Ok(());
     }
 }
 

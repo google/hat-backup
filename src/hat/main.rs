@@ -47,6 +47,10 @@ extern crate libsodium_sys;
 extern crate rustc_serialize;
 extern crate threadpool;
 
+// Error definition macros.
+#[macro_use]
+extern crate error_type;
+
 // Diesel supplies our SQLite wrapper.
 #[macro_use]
 extern crate diesel;

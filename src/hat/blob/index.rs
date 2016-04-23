@@ -14,20 +14,30 @@
 
 //! Local state for external blobs and their states.
 
-use std::sync::mpsc;
-use sodiumoxide::randombytes::randombytes;
-
 use std::collections::HashMap;
+use std::sync::mpsc;
 
 use diesel;
 use diesel::prelude::*;
 use diesel::sqlite::SqliteConnection;
+
+use sodiumoxide::randombytes::randombytes;
 
 use process::{Process, MsgHandler};
 use tags;
 use util;
 
 use super::schema;
+
+
+error_type! {
+    #[derive(Debug)]
+    pub enum MsgError {
+        Recv(mpsc::RecvError) {
+            cause;
+        }
+    }
+}
 
 
 pub type IndexProcess = Process<Msg, Reply>;
@@ -250,26 +260,28 @@ impl Index {
 }
 
 impl MsgHandler<Msg, Reply> for Index {
-    fn handle(&mut self, msg: Msg, reply: Box<Fn(Reply)>) {
+    type Err = MsgError;
+
+    fn handle(&mut self, msg: Msg, reply: Box<Fn(Reply)>) -> Result<(), MsgError> {
         match msg {
             Msg::Reserve => {
-                return reply(Reply::Reserved(self.reserve()));
+                reply(Reply::Reserved(self.reserve()));
             }
             Msg::InAir(blob) => {
                 self.in_air(&blob);
-                return reply(Reply::CommitOk);
+                reply(Reply::CommitOk);
             }
             Msg::CommitDone(blob) => {
                 self.commit_blob(&blob);
-                return reply(Reply::CommitOk);
+                reply(Reply::CommitOk);
             }
             Msg::Recover(name) => {
                 let blob = self.recover(name);
-                return reply(Reply::RecoverOk(blob));
+                reply(Reply::RecoverOk(blob));
             }
             Msg::Flush => {
                 self.new_transaction();
-                return reply(Reply::CommitOk);
+                reply(Reply::CommitOk);
             }
             Msg::Tag(blob, tag) => {
                 self.tag(tag, Some(blob));
@@ -287,5 +299,7 @@ impl MsgHandler<Msg, Reply> for Index {
                 reply(Reply::Ok);
             }
         }
+
+        return Ok(());
     }
 }

@@ -14,19 +14,30 @@
 
 //! Local state for keys in the snapshot in progress (the "index").
 
-use blob;
-use hash;
-use util;
-use super::schema;
-
 use diesel;
 use diesel::prelude::*;
 use diesel::sqlite::SqliteConnection;
 
+use std::sync::mpsc;
 use time::Duration;
 
+use blob;
+use hash;
 use periodic_timer::PeriodicTimer;
 use process::{Process, MsgHandler};
+use util;
+
+use super::schema;
+
+
+error_type! {
+    #[derive(Debug)]
+    pub enum MsgError {
+        Recv(mpsc::RecvError) {
+            cause;
+        }
+    }
+}
 
 
 #[derive(Clone, Debug)]
@@ -145,7 +156,9 @@ impl Clone for Index {
 }
 
 impl MsgHandler<Msg, Reply> for Index {
-    fn handle(&mut self, msg: Msg, reply: Box<Fn(Reply)>) {
+    type Err = MsgError;
+
+    fn handle(&mut self, msg: Msg, reply: Box<Fn(Reply)>) -> Result<(), MsgError> {
         match msg {
 
             Msg::Insert(entry) => {
@@ -191,7 +204,7 @@ impl MsgHandler<Msg, Reply> for Index {
                     }
                 };
 
-                return reply(Reply::Entry(entry));
+                reply(Reply::Entry(entry));
             }
 
             Msg::Lookup(parent_, name_) => {
@@ -214,9 +227,8 @@ impl MsgHandler<Msg, Reply> for Index {
                     }
                 };
 
-
                 if let Some(row) = row_opt {
-                    return reply(Reply::Entry(Entry {
+                    reply(Reply::Entry(Entry {
                         id: Some(row.id as u64),
                         parent_id: parent_,
                         name: name_,
@@ -229,9 +241,9 @@ impl MsgHandler<Msg, Reply> for Index {
                         data_hash: row.hash,
                         data_length: None,
                     }));
-                } else {
-                    return reply(Reply::NotFound);
+                    return Ok(());
                 }
+                reply(Reply::NotFound);
             }
 
             Msg::UpdateDataHash(entry, hash_opt, persistent_ref_opt) => {
@@ -258,12 +270,12 @@ impl MsgHandler<Msg, Reply> for Index {
                 }
 
                 self.maybe_flush();
-                return reply(Reply::UpdateOk);
+                reply(Reply::UpdateOk);
             }
 
             Msg::Flush => {
                 self.flush();
-                return reply(Reply::FlushOk);
+                reply(Reply::FlushOk);
             }
 
             Msg::ListDir(parent_opt) => {
@@ -282,7 +294,7 @@ impl MsgHandler<Msg, Reply> for Index {
                     }
                 };
 
-                return reply(Reply::ListResult(rows.into_iter()
+                reply(Reply::ListResult(rows.into_iter()
                                                    .map(|mut r| {
                                                        (Entry {
                                                            id: Some(r.id as u64),
@@ -306,5 +318,7 @@ impl MsgHandler<Msg, Reply> for Index {
                                                    .collect()));
             }
         }
+
+        return Ok(());
     }
 }

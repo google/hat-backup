@@ -14,8 +14,6 @@
 
 //! Local state for known hashes and their external location (blob reference).
 
-use blob;
-use util;
 use std::boxed::FnBox;
 use std::sync::mpsc;
 use time::Duration;
@@ -24,19 +22,29 @@ use diesel;
 use diesel::prelude::*;
 use diesel::sqlite::SqliteConnection;
 
-use cumulative_counter::CumulativeCounter;
-use unique_priority_queue::UniquePriorityQueue;
-use process::{Process, MsgHandler};
-use tags;
-
-use periodic_timer::PeriodicTimer;
-
 use libsodium_sys;
 use sodiumoxide::crypto::hash::sha512;
 
+use blob;
+use cumulative_counter::CumulativeCounter;
+use periodic_timer::PeriodicTimer;
+use process::{Process, MsgHandler};
+use tags;
+use unique_priority_queue::UniquePriorityQueue;
+use util;
 
 mod schema;
 pub mod tree;
+
+
+error_type! {
+    #[derive(Debug)]
+    pub enum MsgError {
+        Recv(mpsc::RecvError) {
+            cause;
+        }
+    }
+}
 
 
 pub static HASHBYTES: usize = sha512::DIGESTBYTES;
@@ -586,19 +594,21 @@ impl Index {
 }
 
 impl MsgHandler<Msg, Reply> for Index {
-    fn handle(&mut self, msg: Msg, reply: Box<Fn(Reply)>) {
+    type Err = MsgError;
+
+    fn handle(&mut self, msg: Msg, reply: Box<Fn(Reply)>) -> Result<(), MsgError> {
         match msg {
 
             Msg::GetID(hash) => {
                 assert!(!hash.bytes.is_empty());
-                return reply(match self.locate(&hash) {
+                reply(match self.locate(&hash) {
                     Some(entry) => Reply::HashID(entry.id),
                     None => Reply::HashNotKnown,
                 });
             }
 
             Msg::GetHash(id) => {
-                return reply(match self.locate_by_id(id) {
+                reply(match self.locate_by_id(id) {
                     Some(hash) => Reply::Entry(hash),
                     None => Reply::HashNotKnown,
                 });
@@ -606,7 +616,7 @@ impl MsgHandler<Msg, Reply> for Index {
 
             Msg::HashExists(hash) => {
                 assert!(!hash.bytes.is_empty());
-                return reply(match self.locate(&hash) {
+                reply(match self.locate(&hash) {
                     Some(_) => Reply::HashKnown,
                     None => Reply::HashNotKnown,
                 });
@@ -614,7 +624,7 @@ impl MsgHandler<Msg, Reply> for Index {
 
             Msg::FetchPayload(hash) => {
                 assert!(!hash.bytes.is_empty());
-                return reply(match self.locate(&hash) {
+                reply(match self.locate(&hash) {
                     Some(ref queue_entry) => Reply::Payload(queue_entry.payload.clone()),
                     None => Reply::HashNotKnown,
                 });
@@ -622,7 +632,7 @@ impl MsgHandler<Msg, Reply> for Index {
 
             Msg::FetchPersistentRef(hash) => {
                 assert!(!hash.bytes.is_empty());
-                return reply(match self.locate(&hash) {
+                reply(match self.locate(&hash) {
                     Some(ref queue_entry) if queue_entry.persistent_ref.is_none() => Reply::Retry,
                     Some(queue_entry) => {
                         Reply::PersistentRef(queue_entry.persistent_ref.expect("persistent_ref"))
@@ -636,7 +646,7 @@ impl MsgHandler<Msg, Reply> for Index {
                 // To avoid unused IO, we store entries in-memory until committed to persistent
                 // storage. This allows us to continue after a crash without needing to scan
                 // through and delete uncommitted entries.
-                return reply(match self.locate(&hash_entry.hash) {
+                reply(match self.locate(&hash_entry.hash) {
                     Some(_) => Reply::HashKnown,
                     None => {
                         self.reserve(hash_entry);
@@ -648,40 +658,40 @@ impl MsgHandler<Msg, Reply> for Index {
             Msg::UpdateReserved(hash_entry) => {
                 assert!(!hash_entry.hash.bytes.is_empty());
                 self.update_reserved(hash_entry);
-                return reply(Reply::ReserveOk);
+                reply(Reply::ReserveOk);
             }
 
             Msg::Commit(hash, persistent_ref) => {
                 assert!(!hash.bytes.is_empty());
                 self.commit(&hash, persistent_ref);
-                return reply(Reply::CommitOk);
+                reply(Reply::CommitOk);
             }
 
             Msg::List => {
-                return reply(Reply::Listing(self.list()));
+                reply(Reply::Listing(self.list()));
             }
 
             Msg::Delete(id) => {
                 self.delete(id);
-                return reply(Reply::Ok);
+                reply(Reply::Ok);
             }
 
             Msg::SetTag(id, tag) => {
                 self.set_tag(Some(id), tag);
-                return reply(Reply::Ok);
+                reply(Reply::Ok);
             }
 
             Msg::SetAllTags(tag) => {
                 self.set_tag(None, tag);
-                return reply(Reply::Ok);
+                reply(Reply::Ok);
             }
 
             Msg::GetTag(id) => {
-                return reply(Reply::HashTag(self.get_tag(id)));
+                reply(Reply::HashTag(self.get_tag(id)));
             }
 
             Msg::GetIDsByTag(tag) => {
-                return reply(Reply::HashIDs(self.list_ids_by_tag(tag)));
+                reply(Reply::HashIDs(self.list_ids_by_tag(tag)));
             }
 
             Msg::ReadGcData(hash_id, family_id) => {
@@ -694,19 +704,20 @@ impl MsgHandler<Msg, Reply> for Index {
 
             Msg::UpdateFamilyGcData(family_id, update_fs) => {
                 self.update_family_gc_data(family_id, update_fs);
-                return reply(Reply::Ok);
+                reply(Reply::Ok);
             }
 
             Msg::ManualCommit => {
                 self.flush();
                 self.flush_periodically = false;
-                return reply(Reply::CommitOk);
+                reply(Reply::CommitOk);
             }
 
             Msg::Flush => {
                 self.flush();
-                return reply(Reply::CommitOk);
+                reply(Reply::CommitOk);
             }
         }
+        return Ok(());
     }
 }
