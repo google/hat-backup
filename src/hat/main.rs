@@ -168,20 +168,21 @@ fn main() {
         ("resume", Some(_cmd)) => {
             // Setting up the repository triggers automatic resume.
             let backend = blob::FileBackend::new(blob_dir());
-            hat::Hat::open_repository(&PathBuf::from("repo"), backend, MAX_BLOB_SIZE);
+            hat::Hat::open_repository(&PathBuf::from("repo"), backend, MAX_BLOB_SIZE).unwrap();
         }
         ("snapshot", Some(cmd)) => {
             let name = cmd.value_of("NAME").unwrap().to_owned();
             let path = cmd.value_of("PATH").unwrap();
 
             let backend = blob::FileBackend::new(blob_dir());
-            let hat = hat::Hat::open_repository(&PathBuf::from("repo"), backend, MAX_BLOB_SIZE);
+            let hat = hat::Hat::open_repository(&PathBuf::from("repo"), backend, MAX_BLOB_SIZE)
+                          .unwrap();
 
             let family_opt = hat.open_family(name.clone());
             let family = family_opt.expect(&format!("Could not open family '{}'", name));
 
             family.snapshot_dir(PathBuf::from(path));
-            family.flush();
+            family.flush().unwrap();
 
             println!("Waiting for final flush...");
         }
@@ -190,42 +191,48 @@ fn main() {
             let path = cmd.value_of("PATH").unwrap();
 
             let backend = blob::FileBackend::new(blob_dir());
-            let hat = hat::Hat::open_repository(&PathBuf::from("repo"), backend, MAX_BLOB_SIZE);
+            let hat = hat::Hat::open_repository(&PathBuf::from("repo"), backend, MAX_BLOB_SIZE)
+                          .unwrap();
 
             hat.checkout_in_dir(name.clone(), PathBuf::from(path));
         }
         ("meta-commit", Some(_cmd)) => {
             let backend = blob::FileBackend::new(blob_dir());
-            let mut hat = hat::Hat::open_repository(&PathBuf::from("repo"), backend, MAX_BLOB_SIZE);
+            let mut hat = hat::Hat::open_repository(&PathBuf::from("repo"), backend, MAX_BLOB_SIZE)
+                              .unwrap();
 
             hat.meta_commit();
         }
         ("recover", Some(_cmd)) => {
             let backend = blob::FileBackend::new(blob_dir());
-            let mut hat = hat::Hat::open_repository(&PathBuf::from("repo"), backend, MAX_BLOB_SIZE);
+            let mut hat = hat::Hat::open_repository(&PathBuf::from("repo"), backend, MAX_BLOB_SIZE)
+                              .unwrap();
 
-            hat.recover();
+            hat.recover().unwrap();
         }
         ("commit", Some(cmd)) => {
             let name = cmd.value_of("NAME").unwrap().to_owned();
 
             let backend = blob::FileBackend::new(blob_dir());
-            let mut hat = hat::Hat::open_repository(&PathBuf::from("repo"), backend, MAX_BLOB_SIZE);
+            let mut hat = hat::Hat::open_repository(&PathBuf::from("repo"), backend, MAX_BLOB_SIZE)
+                              .unwrap();
 
-            hat.commit_by_name(name, None);
+            hat.commit_by_name(name, None).unwrap();
         }
         ("delete", Some(cmd)) => {
             let name = cmd.value_of("NAME").unwrap().to_owned();
             let id = cmd.value_of("ID").unwrap().to_owned();
 
             let backend = blob::FileBackend::new(blob_dir());
-            let mut hat = hat::Hat::open_repository(&PathBuf::from("repo"), backend, MAX_BLOB_SIZE);
+            let mut hat = hat::Hat::open_repository(&PathBuf::from("repo"), backend, MAX_BLOB_SIZE)
+                              .unwrap();
 
-            hat.deregister_by_name(name, id.parse::<i64>().unwrap());
+            hat.deregister_by_name(name, id.parse::<i64>().unwrap()).unwrap();
         }
         ("gc", Some(_cmd)) => {
             let backend = blob::FileBackend::new(blob_dir());
-            let mut hat = hat::Hat::open_repository(&PathBuf::from("repo"), backend, MAX_BLOB_SIZE);
+            let mut hat = hat::Hat::open_repository(&PathBuf::from("repo"), backend, MAX_BLOB_SIZE)
+                              .unwrap();
             let (deleted_hashes, live_blobs) = hat.gc();
             println!("Deleted hashes: {:?}", deleted_hashes);
             println!("Live data blobs after deletion: {:?}", live_blobs);

@@ -51,6 +51,7 @@
 /// times will likely cause runtime panicure when using `send_reply()`.
 
 use std::boxed::FnBox;
+use std::fmt;
 use std::thread;
 use std::sync::mpsc;
 
@@ -80,7 +81,8 @@ pub trait MsgHandler<Msg, Reply> {
 impl<Msg: 'static + Send, Reply: 'static + Send> Process<Msg, Reply> {
     /// Create and start a new process using `handler`.
     pub fn new<H>(handler_proc: Box<FnBox() -> H + Send>) -> Process<Msg, Reply>
-        where H: 'static + MsgHandler<Msg, Reply>, H::Err: From<mpsc::RecvError>
+        where H: 'static + MsgHandler<Msg, Reply>,
+              H::Err: From<mpsc::RecvError> + fmt::Debug
     {
         return Process::new_with_shutdown(handler_proc, None);
     }
@@ -88,7 +90,8 @@ impl<Msg: 'static + Send, Reply: 'static + Send> Process<Msg, Reply> {
     pub fn new_with_shutdown<H>(handler_proc: Box<FnBox() -> H + Send>,
                                 shutdown_after: Option<i64>)
                                 -> Process<Msg, Reply>
-        where H: 'static + MsgHandler<Msg, Reply>, H::Err: From<mpsc::RecvError>
+        where H: 'static + MsgHandler<Msg, Reply>,
+              H::Err: From<mpsc::RecvError> + fmt::Debug
     {
         let (sender, receiver) = mpsc::sync_channel(10);
         let p = Process {
@@ -105,29 +108,37 @@ impl<Msg: 'static + Send, Reply: 'static + Send> Process<Msg, Reply> {
     fn start<H>(&self,
                 receiver: mpsc::Receiver<(Msg, mpsc::Sender<Reply>)>,
                 handler_proc: Box<FnBox() -> H + Send>)
-        where H: 'static + MsgHandler<Msg, Reply>, H::Err: From<mpsc::RecvError>
+        where H: 'static + MsgHandler<Msg, Reply>,
+              H::Err: From<mpsc::RecvError> + fmt::Debug
     {
         let shutdown_after = self.shutdown_after.clone();
         thread::spawn(move || {
             // fork handler
             let mut my_handler = handler_proc();
-            let mut handle_msg = || {
-                let (msg, rep) = try!(receiver.recv());
+            let mut handle_msg = |msg, rep: mpsc::Sender<Reply>| {
                 my_handler.handle(msg,
                                   Box::new(move |r| {
-                                             rep.send(r);
-                                           }))
+                                      rep.send(r).expect("Message reply was ignored");
+                                  }))
+                          .expect("Process encountered unrecoverable error");
             };
             match shutdown_after {
                 Some(msg_count) => {
                     for _ in 0..msg_count {
-                        if let Err(..) = handle_msg() {
-                            break;
+                        if let Ok((msg, rep)) = receiver.recv() {
+                            handle_msg(msg, rep)
+                        } else {
+                            break;  // Shutting down.
                         }
                     }
                 }
                 None => {
-                    while let Ok(..) = handle_msg() {
+                    loop {
+                        if let Ok((msg, rep)) = receiver.recv() {
+                            handle_msg(msg, rep)
+                        } else {
+                            break;  // Shutting down.
+                        }
                     }
                 }
             };

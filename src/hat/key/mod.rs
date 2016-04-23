@@ -14,6 +14,7 @@
 
 //! External API for creating and manipulating snapshots.
 
+use std::borrow::Cow;
 use std::boxed::FnBox;
 use std::sync::mpsc;
 
@@ -36,12 +37,17 @@ error_type! {
     pub enum MsgError {
         Recv(mpsc::RecvError) {
             cause;
+        },
+        Message(Cow<'static, str>) {
+            desc (e) &**e;
+            from (s: &'static str) s.into();
+            from (s: String) s.into();
         }
-    }
+     }
 }
 
 
-pub type StoreProcess<IT> = Process<Msg<IT>, Reply>;
+pub type StoreProcess<IT> = Process<Msg<IT>, Result<Reply, MsgError>>;
 
 pub type DirElem = (Entry,
                     Option<blob::ChunkRef>,
@@ -238,14 +244,26 @@ fn file_size_warning(name: &[u8], wanted: u64, got: u64) {
     }
 }
 
-impl<IT: Iterator<Item = Vec<u8>>> MsgHandler<Msg<IT>, Reply> for Store {
+impl<IT: Iterator<Item = Vec<u8>>> MsgHandler<Msg<IT>, Result<Reply, MsgError>> for Store {
     type Err = MsgError;
 
-    fn handle(&mut self, msg: Msg<IT>, reply: Box<Fn(Reply)>) -> Result<(), MsgError> {
+    fn handle(&mut self,
+              msg: Msg<IT>,
+              reply: Box<Fn(Result<Reply, MsgError>)>)
+              -> Result<(), MsgError> {
+        let reply_ok = |x| {
+            reply(Ok(x));
+            Ok(())
+        };
+        let reply_err = |e| {
+            reply(Err(From::from(e)));
+            Ok(())
+        };
+
         match msg {
             Msg::Flush => {
                 self.flush();
-                reply(Reply::FlushOk);
+                return reply_ok(Reply::FlushOk);
             }
 
             Msg::ListDir(parent) => {
@@ -268,9 +286,9 @@ impl<IT: Iterator<Item = Vec<u8>>> MsgHandler<Msg<IT>, Reply> for Store {
 
                             my_entries.push((entry, persistent_ref, open_fn));
                         }
-                        reply(Reply::ListResult(my_entries));
+                        return reply_ok(Reply::ListResult(my_entries));
                     }
-                    _ => panic!("Unexpected result from key index."),
+                    _ => return reply_err("Unexpected result from key index"),
                 }
             }
 
@@ -286,31 +304,29 @@ impl<IT: Iterator<Item = Vec<u8>>> MsgHandler<Msg<IT>, Reply> for Store {
                             if let hash::Reply::HashKnown =
                                    self.hash_index.send_reply(hash::Msg::HashExists(hash)) {
                                 // Short-circuit: We have the data.
-                                reply(Reply::Id(entry.id.unwrap()));
-                                return Ok(());
+                                return reply_ok(Reply::Id(entry.id.unwrap()));
                             }
                         } else if org_entry.data_hash.is_none() && org_entry.data_hash.is_none() {
                             // Short-circuit: No data needed.
-                            reply(Reply::Id(entry.id.unwrap()));
-                            return Ok(());
+                            return reply_ok(Reply::Id(entry.id.unwrap()));
                         }
                         // Our stored entry is incomplete.
                         Entry { id: entry.id, ..org_entry }
                     }
                     index::Reply::Entry(entry) => Entry { id: entry.id, ..org_entry },
                     index::Reply::NotFound => org_entry,
-                    _ => panic!("Unexpected reply from key index"),
+                    _ => return reply_err("Unexpected reply from key index"),
                 };
 
                 let entry = match self.index.send_reply(index::Msg::Insert(entry)) {
                     index::Reply::Entry(entry) => entry,
-                    _ => panic!("Could not insert entry into key index."),
+                    _ => return reply_err("Could not insert entry into key index"),
                 };
 
                 // Send out the ID early to allow the client to continue its key discovery routine.
                 // The bounded input-channel will prevent the client from overflowing us.
                 assert!(entry.id.is_some());
-                reply(Reply::Id(entry.id.unwrap()));
+                reply(Ok(Reply::Id(entry.id.unwrap())));
 
 
                 // Setup hash tree structure
@@ -347,12 +363,16 @@ impl<IT: Iterator<Item = Vec<u8>>> MsgHandler<Msg<IT>, Reply> for Store {
                                                                        Some(hash),
                                                                        Some(persistent_ref))) {
                     index::Reply::UpdateOk => (),
-                    _ => panic!("Unexpected reply from key index."),
+                    _ => {
+                        // We lost the hash index before we completed the data transfer.
+                        // Returning an error here will terminate our process.
+                        return Err(From::from("Unexpected reply from key index"));
+                    }
                 };
+
+                Ok(())
             }
         }
-
-        return Ok(());
     }
 }
 
@@ -485,7 +505,8 @@ mod tests {
                                                        Some(Box::new(move || Some(local_file)))
                                                    } else {
                                                        None
-                                                   })) {
+                                                   }))
+                           .unwrap() {
             Reply::Id(id) => id,
             _ => panic!("unexpected reply from key store"),
         };
@@ -499,7 +520,7 @@ mod tests {
     }
 
     fn verify_filesystem(fs: &FileSystem, ks_p: StoreProcess<EntryStub>) -> usize {
-        let listing = match ks_p.send_reply(Msg::ListDir(fs.file.key_entry.id)) {
+        let listing = match ks_p.send_reply(Msg::ListDir(fs.file.key_entry.id)).unwrap() {
             Reply::ListResult(ls) => ls,
             _ => panic!("Unexpected result from key store."),
         };
@@ -561,7 +582,7 @@ mod tests {
             insert_and_update_fs(&mut fs, ks_p.clone());
             let fs = fs;
 
-            match ks_p.send_reply(Msg::Flush) {
+            match ks_p.send_reply(Msg::Flush).unwrap() {
                 Reply::FlushOk => (),
                 _ => panic!("Unexpected result from key store."),
             }
@@ -603,7 +624,8 @@ mod tests {
             };
 
             ks_p.send_reply(Msg::Insert(entry.key_entry.clone(),
-                                        Some(Box::new(move || Some(entry)))));
+                                        Some(Box::new(move || Some(entry)))))
+                .unwrap();
         });
 
         bench.bytes = 128 * 1024;
@@ -646,7 +668,8 @@ mod tests {
             };
 
             ks_p.send_reply(Msg::Insert(entry.key_entry.clone(),
-                                        Some(Box::new(move || Some(entry)))));
+                                        Some(Box::new(move || Some(entry)))))
+                .unwrap();
         });
 
         bench.bytes = 128 * 1024;
@@ -680,9 +703,10 @@ mod tests {
                 },
             };
             ks_p.send_reply(Msg::Insert(entry.key_entry.clone(),
-                                        Some(Box::new(move || Some(entry)))));
+                                        Some(Box::new(move || Some(entry)))))
+                .unwrap();
 
-            match ks_p.send_reply(Msg::Flush) {
+            match ks_p.send_reply(Msg::Flush).unwrap() {
                 Reply::FlushOk => (),
                 _ => panic!("Unexpected result from key store."),
             }
@@ -734,9 +758,10 @@ mod tests {
             };
 
             ks_p.send_reply(Msg::Insert(entry.key_entry.clone(),
-                                        Some(Box::new(move || Some(entry)))));
+                                        Some(Box::new(move || Some(entry)))))
+                .unwrap();
 
-            match ks_p.send_reply(Msg::Flush) {
+            match ks_p.send_reply(Msg::Flush).unwrap() {
                 Reply::FlushOk => (),
                 _ => panic!("Unexpected result from key store."),
             }
@@ -769,7 +794,7 @@ mod tests {
                     data_length: None,
                 },
             };
-            ks_p.send_reply(Msg::Insert(entry.key_entry.clone(), None));
+            ks_p.send_reply(Msg::Insert(entry.key_entry.clone(), None)).unwrap();
         });
     }
 
@@ -799,7 +824,7 @@ mod tests {
                     data_length: None,
                 },
             };
-            ks_p.send_reply(Msg::Insert(entry.key_entry.clone(), None));
+            ks_p.send_reply(Msg::Insert(entry.key_entry.clone(), None)).unwrap();
         });
     }
 
@@ -829,7 +854,7 @@ mod tests {
                     data_length: None,
                 },
             };
-            ks_p.send_reply(Msg::Insert(entry.key_entry.clone(), None));
+            ks_p.send_reply(Msg::Insert(entry.key_entry.clone(), None)).unwrap();
         });
     }
 }
