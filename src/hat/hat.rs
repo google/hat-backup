@@ -67,6 +67,9 @@ error_type! {
         Hashes(hash::MsgError) {
             cause;
         },
+        DataSerialization(capnp::Error) {
+            cause;
+        },
         Message(Cow<'static, str>) {
             desc (e) &**e;
             from (s: &'static str) s.into();
@@ -421,27 +424,27 @@ impl<B: 'static + blob::StoreBackend + Clone + Send> Hat<B> {
         fn recover_entry(hashes: &hash::IndexProcess,
                          blobs: &blob::StoreProcess,
                          entry: hash::Entry)
-                         -> i64 {
+                         -> Result<i64, HatError> {
             let hash = entry.hash.clone();
             let pref = entry.persistent_ref.clone().unwrap();
 
             // Make sure we have the blob described.
             match blobs.send_reply(blob::Msg::Recover(pref.clone())) {
                 blob::Reply::RecoverOk => (),
-                _ => panic!("Failed to add recovered blob"),
+                _ => return Err(From::from("Failed to add recovered blob")),
             }
             // Now insert the hash information if needed.
             match hashes.send_reply(hash::Msg::Reserve(entry)) {
-                hash::Reply::HashKnown => return get_hash_id(hashes, hash).unwrap(),
+                hash::Reply::HashKnown => return Ok(get_hash_id(hashes, hash).unwrap()),
                 hash::Reply::ReserveOk => (),
-                _ => panic!("Unexpected reply from hash index"),
+                _ => return Err(From::from("Unexpected reply from hash index")),
             }
             // Commit hash.
             match hashes.send_reply(hash::Msg::Commit(hash.clone(), pref.clone())) {
                 hash::Reply::CommitOk => (),
-                _ => panic!("Unexpected reply from hash index."),
+                _ => return Err(From::from("Unexpected reply from hash index")),
             }
-            return get_hash_id(hashes, hash).unwrap();
+            return Ok(get_hash_id(hashes, hash).unwrap());
         }
 
         let family = self.open_family(family_name.clone())
@@ -455,7 +458,7 @@ impl<B: 'static + blob::StoreBackend + Clone + Send> Hat<B> {
                                                                 recover_sender);
         // Recover hashes for tree child chunks.
         for entry in recover_receiver {
-            recover_entry(&self.hash_index, &self.blob_store, entry);
+            try!(recover_entry(&self.hash_index, &self.blob_store, entry));
         }
 
         // Recover hashes for tree-tops. These are also registered with the GC.
@@ -464,7 +467,7 @@ impl<B: 'static + blob::StoreBackend + Clone + Send> Hat<B> {
         let local_blob_store = self.blob_store.clone();
         thread::spawn(move || {
             for entry in register_receiver {
-                let id = recover_entry(&local_hash_index, &local_blob_store, entry);
+                let id = recover_entry(&local_hash_index, &local_blob_store, entry).unwrap();
                 id_sender.send(id).unwrap();
             }
         });
@@ -473,19 +476,21 @@ impl<B: 'static + blob::StoreBackend + Clone + Send> Hat<B> {
         self.flush_blob_store();
 
         // Recover final root hash for the snapshot.
-        recover_entry(&self.hash_index,
-                      &self.blob_store,
-                      hash::Entry {
-                          hash: hash.clone(),
-                          persistent_ref: Some(dir_ref),
-                          level: final_level,
-                          payload: final_payload,
-                      });
+        try!(recover_entry(&self.hash_index,
+                           &self.blob_store,
+                           hash::Entry {
+                               hash: hash.clone(),
+                               persistent_ref: Some(dir_ref),
+                               level: final_level,
+                               payload: final_payload,
+                           }));
 
         let final_id = get_hash_id(&self.hash_index, hash.clone()).unwrap();
         self.gc.register_final(info.clone(), final_id);
 
-        return self.commit_finalize(&family, info, hash);
+        try!(self.commit_finalize(&family, info, hash));
+
+        Ok(())
     }
 
     fn recover_dir_ref(&mut self,
@@ -576,10 +581,18 @@ impl<B: 'static + blob::StoreBackend + Clone + Send> Hat<B> {
                         }
                         (None, snapshot::WorkStatus::RecoverInProgress) => {
                             println!("Resuming recovery of: {}", snapshot.family_name);
-                            let hash = snapshot.hash.expect("recovered snapshot must have a hash");
-                            let tree = blob::ChunkRef::from_bytes(
-                                &mut &snapshot.tree_ref.expect(
-                                    "Snapshot has no tree ref")[..]).unwrap();
+                            let hash = match snapshot.hash {
+                                Some(h) => h,
+                                None => {
+                                    return Err(From::from("recovered snapshot must have a hash"))
+                                }
+                            };
+                            let tree = match snapshot.tree_ref {
+                                Some(tr) => try!(blob::ChunkRef::from_bytes(&mut &tr[..])),
+                                None => {
+                                    return Err(From::from("Recovered hash tree has no root hash"))
+                                }
+                            };
                             try!(self.recover_snapshot(snapshot.family_name,
                                                        snapshot.info,
                                                        hash,
