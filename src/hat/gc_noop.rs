@@ -16,8 +16,9 @@
 use std::boxed::FnBox;
 use std::sync::mpsc;
 
-use snapshot;
 use gc;
+use hat;
+use snapshot;
 
 
 pub struct GcNoop<B> {
@@ -34,25 +35,45 @@ impl<B: gc::GcBackend> GcNoop<B> {
 
 
 impl<B: gc::GcBackend> gc::Gc for GcNoop<B> {
-    fn register(&mut self, _snapshot: snapshot::Info, refs: mpsc::Receiver<gc::Id>) {
+    type Err = hat::HatError;
+
+    fn register(&mut self,
+                _snapshot: snapshot::Info,
+                refs: mpsc::Receiver<gc::Id>)
+                -> Result<(), Self::Err> {
         // It is an error to ignore the provided refereces, so we consume them here.
         refs.iter().last();
+        Ok(())
     }
 
-    fn register_final(&mut self, _snapshot: snapshot::Info, _ref_final: gc::Id) {}
+    fn register_final(&mut self,
+                      _snapshot: snapshot::Info,
+                      _ref_final: gc::Id)
+                      -> Result<(), Self::Err> {
+        Ok(())
+    }
 
-    fn register_cleanup(&mut self, _snapshot: snapshot::Info, _ref_final: gc::Id) {}
+    fn register_cleanup(&mut self,
+                        _snapshot: snapshot::Info,
+                        _ref_final: gc::Id)
+                        -> Result<(), Self::Err> {
+        Ok(())
+    }
 
     fn deregister(&mut self,
                   _snapshot: snapshot::Info,
                   _final_ref: gc::Id,
-                  _refs: Box<FnBox() -> mpsc::Receiver<gc::Id>>) {
+                  _refs: Box<FnBox() -> mpsc::Receiver<gc::Id>>)
+                  -> Result<(), Self::Err> {
+        Ok(())
     }
 
-    fn list_unused_ids(&mut self, _refs: mpsc::Sender<gc::Id>) {}
+    fn list_unused_ids(&mut self, _refs: mpsc::Sender<gc::Id>) -> Result<(), Self::Err> {
+        Ok(())
+    }
 
-    fn status(&mut self, _final_ref: gc::Id) -> Option<gc::Status> {
-        Some(gc::Status::Complete)
+    fn status(&mut self, _final_ref: gc::Id) -> Result<Option<gc::Status>, Self::Err> {
+        Ok(Some(gc::Status::Complete))
     }
 }
 

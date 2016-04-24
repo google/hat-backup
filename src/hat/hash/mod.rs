@@ -67,7 +67,7 @@ error_type! {
 
 pub static HASHBYTES: usize = sha512::DIGESTBYTES;
 
-pub type IndexProcess = Process<Msg, Reply>;
+pub type IndexProcess = Process<Msg, Result<Reply, MsgError>>;
 
 
 /// A wrapper around Hash digests.
@@ -611,132 +611,113 @@ impl Index {
     }
 }
 
-impl MsgHandler<Msg, Reply> for Index {
+impl MsgHandler<Msg, Result<Reply, MsgError>> for Index {
     type Err = MsgError;
 
-    fn handle(&mut self, msg: Msg, reply: Box<Fn(Reply)>) -> Result<(), MsgError> {
-        match msg {
+    fn handle(&mut self,
+              msg: Msg,
+              reply: Box<Fn(Result<Reply, Self::Err>)>)
+              -> Result<(), Self::Err> {
+        let reply_ok = |x| {
+            reply(Ok(x));
+            Ok(())
+        };
 
+        match msg {
             Msg::GetID(hash) => {
                 assert!(!hash.bytes.is_empty());
-                reply(match self.locate(&hash) {
+                reply_ok(match self.locate(&hash) {
                     Some(entry) => Reply::HashID(entry.id),
                     None => Reply::HashNotKnown,
-                });
+                })
             }
-
             Msg::GetHash(id) => {
-                reply(match self.locate_by_id(id) {
+                reply_ok(match self.locate_by_id(id) {
                     Some(hash) => Reply::Entry(hash),
                     None => Reply::HashNotKnown,
-                });
+                })
             }
-
             Msg::HashExists(hash) => {
                 assert!(!hash.bytes.is_empty());
-                reply(match self.locate(&hash) {
+                reply_ok(match self.locate(&hash) {
                     Some(_) => Reply::HashKnown,
                     None => Reply::HashNotKnown,
-                });
+                })
             }
-
             Msg::FetchPayload(hash) => {
                 assert!(!hash.bytes.is_empty());
-                reply(match self.locate(&hash) {
+                reply_ok(match self.locate(&hash) {
                     Some(ref queue_entry) => Reply::Payload(queue_entry.payload.clone()),
                     None => Reply::HashNotKnown,
-                });
+                })
             }
-
             Msg::FetchPersistentRef(hash) => {
                 assert!(!hash.bytes.is_empty());
-                reply(match self.locate(&hash) {
+                reply_ok(match self.locate(&hash) {
                     Some(ref queue_entry) if queue_entry.persistent_ref.is_none() => Reply::Retry,
                     Some(queue_entry) => {
                         Reply::PersistentRef(queue_entry.persistent_ref.expect("persistent_ref"))
                     }
                     None => Reply::HashNotKnown,
-                });
+                })
             }
-
             Msg::Reserve(hash_entry) => {
                 assert!(!hash_entry.hash.bytes.is_empty());
                 // To avoid unused IO, we store entries in-memory until committed to persistent
                 // storage. This allows us to continue after a crash without needing to scan
                 // through and delete uncommitted entries.
-                reply(match self.locate(&hash_entry.hash) {
+                reply_ok(match self.locate(&hash_entry.hash) {
                     Some(_) => Reply::HashKnown,
                     None => {
                         self.reserve(hash_entry);
                         Reply::ReserveOk
                     }
-                });
+                })
             }
-
             Msg::UpdateReserved(hash_entry) => {
                 assert!(!hash_entry.hash.bytes.is_empty());
                 self.update_reserved(hash_entry);
-                reply(Reply::ReserveOk);
+                reply_ok(Reply::ReserveOk)
             }
-
             Msg::Commit(hash, persistent_ref) => {
                 assert!(!hash.bytes.is_empty());
                 self.commit(&hash, persistent_ref);
-                reply(Reply::CommitOk);
+                reply_ok(Reply::CommitOk)
             }
-
-            Msg::List => {
-                reply(Reply::Listing(self.list()));
-            }
-
+            Msg::List => reply_ok(Reply::Listing(self.list())),
             Msg::Delete(id) => {
                 self.delete(id);
-                reply(Reply::Ok);
+                reply_ok(Reply::Ok)
             }
-
             Msg::SetTag(id, tag) => {
                 self.set_tag(Some(id), tag);
-                reply(Reply::Ok);
+                reply_ok(Reply::Ok)
             }
-
             Msg::SetAllTags(tag) => {
                 self.set_tag(None, tag);
-                reply(Reply::Ok);
+                reply_ok(Reply::Ok)
             }
-
-            Msg::GetTag(id) => {
-                reply(Reply::HashTag(self.get_tag(id)));
-            }
-
-            Msg::GetIDsByTag(tag) => {
-                reply(Reply::HashIDs(self.list_ids_by_tag(tag)));
-            }
-
+            Msg::GetTag(id) => reply_ok(Reply::HashTag(self.get_tag(id))),
+            Msg::GetIDsByTag(tag) => reply_ok(Reply::HashIDs(self.list_ids_by_tag(tag))),
             Msg::ReadGcData(hash_id, family_id) => {
-                reply(Reply::CurrentGcData(self.read_gc_data(hash_id, family_id)));
+                reply_ok(Reply::CurrentGcData(self.read_gc_data(hash_id, family_id)))
             }
-
             Msg::UpdateGcData(hash_id, family_id, update_fn) => {
-                reply(Reply::CurrentGcData(self.update_gc_data(hash_id, family_id, update_fn)));
+                reply_ok(Reply::CurrentGcData(self.update_gc_data(hash_id, family_id, update_fn)))
             }
-
             Msg::UpdateFamilyGcData(family_id, update_fs) => {
                 self.update_family_gc_data(family_id, update_fs);
-                reply(Reply::Ok);
+                reply_ok(Reply::Ok)
             }
-
             Msg::ManualCommit => {
                 self.flush();
                 self.flush_periodically = false;
-                reply(Reply::CommitOk);
+                reply_ok(Reply::CommitOk)
             }
-
             Msg::Flush => {
                 self.flush();
-                reply(Reply::CommitOk);
+                reply_ok(Reply::CommitOk)
             }
         }
-
-        Ok(())
     }
 }

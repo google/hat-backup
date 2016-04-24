@@ -87,83 +87,94 @@ struct GcBackend {
 }
 
 impl gc::GcBackend for GcBackend {
-    fn get_data(&self, hash_id: i64, family_id: i64) -> hash::GcData {
-        match self.hash_index.send_reply(hash::Msg::ReadGcData(hash_id, family_id)) {
-            hash::Reply::CurrentGcData(data) => data,
+    type Err = HatError;
+
+    fn get_data(&self, hash_id: i64, family_id: i64) -> Result<hash::GcData, Self::Err> {
+        match try!(self.hash_index.send_reply(hash::Msg::ReadGcData(hash_id, family_id))) {
+            hash::Reply::CurrentGcData(data) => Ok(data),
             _ => panic!("Unexpected reply from hash index."),
         }
     }
-    fn update_data(&mut self, hash_id: i64, family_id: i64, f: gc::UpdateFn) -> hash::GcData {
-        match self.hash_index.send_reply(hash::Msg::UpdateGcData(hash_id, family_id, f)) {
-            hash::Reply::CurrentGcData(data) => data,
+    fn update_data(&mut self,
+                   hash_id: i64,
+                   family_id: i64,
+                   f: gc::UpdateFn)
+                   -> Result<hash::GcData, Self::Err> {
+        match try!(self.hash_index.send_reply(hash::Msg::UpdateGcData(hash_id, family_id, f))) {
+            hash::Reply::CurrentGcData(data) => Ok(data),
             _ => panic!("Unexpected reply from hash index."),
         }
     }
-    fn update_all_data_by_family(&mut self, family_id: i64, fs: mpsc::Receiver<gc::UpdateFn>) {
-        match self.hash_index.send_reply(hash::Msg::UpdateFamilyGcData(family_id, fs)) {
-            hash::Reply::Ok => (),
+    fn update_all_data_by_family(&mut self,
+                                 family_id: i64,
+                                 fs: mpsc::Receiver<gc::UpdateFn>)
+                                 -> Result<(), Self::Err> {
+        match try!(self.hash_index.send_reply(hash::Msg::UpdateFamilyGcData(family_id, fs))) {
+            hash::Reply::Ok => Ok(()),
             _ => panic!("Unexpected reply from hash index."),
         }
     }
 
-    fn get_tag(&self, hash_id: i64) -> Option<tags::Tag> {
-        match self.hash_index.send_reply(hash::Msg::GetTag(hash_id)) {
-            hash::Reply::HashTag(tag) => tag,
+    fn get_tag(&self, hash_id: i64) -> Result<Option<tags::Tag>, Self::Err> {
+        match try!(self.hash_index.send_reply(hash::Msg::GetTag(hash_id))) {
+            hash::Reply::HashTag(tag) => Ok(tag),
             _ => panic!("Unexpected reply from hash index."),
         }
     }
 
-    fn set_tag(&mut self, hash_id: i64, tag: tags::Tag) {
-        match self.hash_index.send_reply(hash::Msg::SetTag(hash_id, tag)) {
-            hash::Reply::Ok => (),
+    fn set_tag(&mut self, hash_id: i64, tag: tags::Tag) -> Result<(), Self::Err> {
+        match try!(self.hash_index.send_reply(hash::Msg::SetTag(hash_id, tag))) {
+            hash::Reply::Ok => Ok(()),
             _ => panic!("Unexpected reply from hash index."),
         }
     }
 
-    fn set_all_tags(&mut self, tag: tags::Tag) {
-        match self.hash_index.send_reply(hash::Msg::SetAllTags(tag)) {
-            hash::Reply::Ok => (),
+    fn set_all_tags(&mut self, tag: tags::Tag) -> Result<(), Self::Err> {
+        match try!(self.hash_index.send_reply(hash::Msg::SetAllTags(tag))) {
+            hash::Reply::Ok => Ok(()),
             _ => panic!("Unexpected reply from hash index."),
         }
     }
 
-    fn reverse_refs(&self, hash_id: i64) -> Vec<i64> {
-        let entry = match self.hash_index.send_reply(hash::Msg::GetHash(hash_id)) {
+    fn reverse_refs(&self, hash_id: i64) -> Result<Vec<i64>, Self::Err> {
+        let entry = match try!(self.hash_index.send_reply(hash::Msg::GetHash(hash_id))) {
             hash::Reply::Entry(entry) => entry,
             hash::Reply::HashNotKnown => panic!("HashNotKnown in hash index."),
             _ => panic!("Unexpected reply from hash index."),
         };
         if entry.payload.is_none() {
-            return Vec::new();
+            return Ok(Vec::new());
         }
 
-        hash::tree::decode_metadata_refs(&entry.payload.unwrap())
-            .into_iter()
-            .map(|bytes| {
-                match self.hash_index.send_reply(hash::Msg::GetID(hash::Hash { bytes: bytes })) {
-                    hash::Reply::HashID(id) => id,
-                    hash::Reply::HashNotKnown => panic!("HashNotKnown in hash index."),
-                    _ => panic!("Unexpected result from hash index."),
-                }
-            })
-            .collect()
+        Ok(hash::tree::decode_metadata_refs(&entry.payload.unwrap())
+               .into_iter()
+               .map(|bytes| {
+                   match self.hash_index
+                             .send_reply(hash::Msg::GetID(hash::Hash { bytes: bytes }))
+                             .unwrap() {
+                       hash::Reply::HashID(id) => id,
+                       hash::Reply::HashNotKnown => panic!("HashNotKnown in hash index."),
+                       _ => panic!("Unexpected result from hash index."),
+                   }
+               })
+               .collect())
     }
 
-    fn list_ids_by_tag(&self, tag: tags::Tag) -> mpsc::Receiver<i64> {
+    fn list_ids_by_tag(&self, tag: tags::Tag) -> Result<mpsc::Receiver<i64>, Self::Err> {
         let (sender, receiver) = mpsc::channel();
-        match self.hash_index.send_reply(hash::Msg::GetIDsByTag(tag as i64)) {
+        match try!(self.hash_index.send_reply(hash::Msg::GetIDsByTag(tag as i64))) {
             hash::Reply::HashIDs(ids) => {
                 ids.iter().map(|i| sender.send(*i)).last();
             }
             _ => panic!("Unexpected reply from hash index."),
         }
 
-        receiver
+        Ok(receiver)
     }
 
-    fn manual_commit(&mut self) {
-        match self.hash_index.send_reply(hash::Msg::ManualCommit) {
-            hash::Reply::CommitOk => return,
+    fn manual_commit(&mut self) -> Result<(), Self::Err> {
+        match try!(self.hash_index.send_reply(hash::Msg::ManualCommit)) {
+            hash::Reply::CommitOk => Ok(()),
             _ => panic!("Unexpected reply from hash index."),
         }
     }
@@ -177,7 +188,7 @@ pub struct Hat<B> {
     hash_index: hash::IndexProcess,
     blob_backend: B,
     hash_backend: key::HashStoreBackend,
-    gc: Box<gc::Gc>,
+    gc: Box<gc::Gc<Err = HatError>>,
     max_blob_size: usize,
 }
 
@@ -216,10 +227,10 @@ fn list_snapshot(backend: &key::HashStoreBackend,
     }
 }
 
-fn get_hash_id(index: &hash::IndexProcess, hash: hash::Hash) -> Result<i64, String> {
-    match index.send_reply(hash::Msg::GetID(hash)) {
+fn get_hash_id(index: &hash::IndexProcess, hash: hash::Hash) -> Result<i64, HatError> {
+    match try!(index.send_reply(hash::Msg::GetID(hash))) {
         hash::Reply::HashID(id) => Ok(id),
-        _ => Err("Tried to register an unknown hash".to_owned()),
+        _ => Err(From::from("Tried to register an unknown hash")),
     }
 }
 
@@ -437,13 +448,13 @@ impl<B: 'static + blob::StoreBackend + Clone + Send> Hat<B> {
                 _ => return Err(From::from("Failed to add recovered blob")),
             }
             // Now insert the hash information if needed.
-            match hashes.send_reply(hash::Msg::Reserve(entry)) {
+            match try!(hashes.send_reply(hash::Msg::Reserve(entry))) {
                 hash::Reply::HashKnown => return Ok(get_hash_id(hashes, hash).unwrap()),
                 hash::Reply::ReserveOk => (),
                 _ => return Err(From::from("Unexpected reply from hash index")),
             }
             // Commit hash.
-            match hashes.send_reply(hash::Msg::Commit(hash.clone(), pref.clone())) {
+            match try!(hashes.send_reply(hash::Msg::Commit(hash.clone(), pref.clone()))) {
                 hash::Reply::CommitOk => (),
                 _ => return Err(From::from("Unexpected reply from hash index")),
             }
@@ -476,7 +487,7 @@ impl<B: 'static + blob::StoreBackend + Clone + Send> Hat<B> {
             }
         });
 
-        self.gc.register(info.clone(), id_receiver);
+        try!(self.gc.register(info.clone(), id_receiver));
         self.flush_blob_store();
 
         // Recover final root hash for the snapshot.
@@ -490,7 +501,7 @@ impl<B: 'static + blob::StoreBackend + Clone + Send> Hat<B> {
                            }));
 
         let final_id = get_hash_id(&self.hash_index, hash.clone()).unwrap();
-        self.gc.register_final(info.clone(), final_id);
+        try!(self.gc.register_final(info.clone(), final_id));
 
         try!(self.commit_finalize(&family, info, hash));
 
@@ -564,10 +575,14 @@ impl<B: 'static + blob::StoreBackend + Clone + Send> Hat<B> {
                     let done_hash_opt = match snapshot.hash.clone() {
                         None => None,
                         Some(h) => {
-                            let status = get_hash_id(&self.hash_index, h.clone())
-                                             .ok()
-                                             .and_then(|id| self.gc.status(id));
-                            match status {
+                            let status_res = get_hash_id(&self.hash_index, h.clone())
+                                                 .ok()
+                                                 .map(|id| self.gc.status(id));
+                            let status_opt = match status_res {
+                                None => None,
+                                Some(res) => try!(res),
+                            };
+                            match status_opt {
                                 None => None,  // We did not fully commit.
                                 Some(gc::Status::InProgress) | Some(gc::Status::Complete) => {
                                     Some(h)
@@ -630,7 +645,7 @@ impl<B: 'static + blob::StoreBackend + Clone + Send> Hat<B> {
                     let hash = snapshot.hash.expect("Snapshot has no hash");
                     let hash_id = get_hash_id(&self.hash_index, hash.clone())
                                       .expect("Snapshot hash not recognized");
-                    let status = self.gc.status(hash_id);
+                    let status = try!(self.gc.status(hash_id));
                     match status {
                         None | Some(gc::Status::InProgress) => {
                             println!("Resuming delete of: {} #{:?}",
@@ -715,7 +730,7 @@ impl<B: 'static + blob::StoreBackend + Clone + Send> Hat<B> {
             let (s, r) = mpsc::channel();
 
             thread::spawn(move || s.send(local_family.commit(hash_sender)));
-            self.gc.register(snap_info.clone(), hash_id_receiver);
+            try!(self.gc.register(snap_info.clone(), hash_id_receiver));
 
             try!(try!(r.recv()))
         };
@@ -739,7 +754,7 @@ impl<B: 'static + blob::StoreBackend + Clone + Send> Hat<B> {
         // After a successful flush, all GC work is done.
         // The GC must be able to tell if it has completed or not.
         let hash_id = get_hash_id(&self.hash_index, hash.clone()).unwrap();
-        self.gc.register_final(snap_info.clone(), hash_id);
+        try!(self.gc.register_final(snap_info.clone(), hash_id));
         try!(family.flush());
         try!(self.commit_finalize(family, snap_info, hash));
 
@@ -771,7 +786,7 @@ impl<B: 'static + blob::StoreBackend + Clone + Send> Hat<B> {
         self.flush_snapshot_index();
 
         let hash_id = get_hash_id(&self.hash_index, hash).unwrap();
-        self.gc.register_cleanup(snap_info.clone(), hash_id);
+        try!(self.gc.register_cleanup(snap_info.clone(), hash_id));
         try!(family.flush());
 
         // Tag 0: All is done.
@@ -897,12 +912,12 @@ impl<B: 'static + blob::StoreBackend + Clone + Send> Hat<B> {
 
             let (id_sender, id_receiver) = mpsc::channel();
             for hash in receiver.iter() {
-                match local_hash_index.send_reply(hash::Msg::GetID(hash)) {
+                match local_hash_index.send_reply(hash::Msg::GetID(hash)).unwrap() {
                     hash::Reply::HashID(id) => id_sender.send(id).unwrap(),
                     _ => panic!("Unexpected reply from hash index."),
                 }
             }
-            match local_hash_index.send_reply(hash::Msg::GetID(local_dir_hash)) {
+            match local_hash_index.send_reply(hash::Msg::GetID(local_dir_hash)).unwrap() {
                 hash::Reply::HashID(id) => id_sender.send(id).unwrap(),
                 _ => panic!("Unexpected reply from hash index."),
             }
@@ -911,7 +926,7 @@ impl<B: 'static + blob::StoreBackend + Clone + Send> Hat<B> {
 
         let final_ref = get_hash_id(&self.hash_index, dir_hash)
                             .expect("Snapshot hash does not exist");
-        self.gc.deregister(info.clone(), final_ref, listing);
+        try!(self.gc.deregister(info.clone(), final_ref, listing));
         try!(family.flush());
 
         self.deregister_finalize(family, info, final_ref)
@@ -941,7 +956,7 @@ impl<B: 'static + blob::StoreBackend + Clone + Send> Hat<B> {
         self.flush_snapshot_index();
 
         // Clear GC state.
-        self.gc.register_cleanup(snap_info.clone(), final_ref);
+        try!(self.gc.register_cleanup(snap_info.clone(), final_ref));
         try!(family.flush());
 
         // Delete snapshot metadata.
@@ -956,24 +971,24 @@ impl<B: 'static + blob::StoreBackend + Clone + Send> Hat<B> {
         Ok(self.flush_snapshot_index())
     }
 
-    pub fn gc(&mut self) -> (i64, i64) {
+    pub fn gc(&mut self) -> Result<(i64, i64), HatError> {
         // Remove unused hashes.
         let mut deleted_hashes = 0;
         let (sender, receiver) = mpsc::channel();
-        self.gc.list_unused_ids(sender);
+        try!(self.gc.list_unused_ids(sender));
         for id in receiver.iter() {
             deleted_hashes += 1;
-            match self.hash_index.send_reply(hash::Msg::Delete(id)) {
+            match try!(self.hash_index.send_reply(hash::Msg::Delete(id))) {
                 hash::Reply::Ok => (),
                 _ => panic!("Unexpected reply from hash index."),
             }
         }
-        match self.hash_index.send_reply(hash::Msg::Flush) {
+        match try!(self.hash_index.send_reply(hash::Msg::Flush)) {
             hash::Reply::CommitOk => (),
             _ => panic!("Unexpected reply from hash index."),
         }
         // Mark used blobs.
-        let entries = match self.hash_index.send_reply(hash::Msg::List) {
+        let entries = match try!(self.hash_index.send_reply(hash::Msg::List)) {
             hash::Reply::Listing(ch) => ch,
             _ => panic!("Unexpected reply from hash index."),
         };
@@ -1005,7 +1020,7 @@ impl<B: 'static + blob::StoreBackend + Clone + Send> Hat<B> {
             _ => panic!("Unexpected reply from blob store."),
         }
 
-        (deleted_hashes, live_blobs)
+        Ok((deleted_hashes, live_blobs))
     }
 }
 
@@ -1551,7 +1566,7 @@ mod tests {
         hat.commit(&fam, None).unwrap();
         hat.meta_commit();
 
-        let (deleted, live) = hat.gc();
+        let (deleted, live) = hat.gc().unwrap();
         assert_eq!(deleted, 0);
         assert!(live > 0);
     }
@@ -1567,12 +1582,12 @@ mod tests {
         hat.commit(&fam, None).unwrap();
         hat.meta_commit();
 
-        let (deleted, live) = hat.gc();
+        let (deleted, live) = hat.gc().unwrap();
         assert_eq!(deleted, 0);
         assert!(live > 0);
 
         hat.deregister(&fam, 1).unwrap();
-        let (deleted, live) = hat.gc();
+        let (deleted, live) = hat.gc().unwrap();
         assert!(deleted > 0);
         assert_eq!(live, 0);
     }
@@ -1590,12 +1605,12 @@ mod tests {
         hat.commit(&fam, None).unwrap();
         hat.meta_commit();
 
-        let (deleted, live) = hat.gc();
+        let (deleted, live) = hat.gc().unwrap();
         assert_eq!(deleted, 0);
         assert!(live > 0);
 
         hat.deregister(&fam, 1).unwrap();
-        let (deleted, live) = hat.gc();
+        let (deleted, live) = hat.gc().unwrap();
         assert!(deleted > 0);
         assert_eq!(live, 0);
     }
@@ -1612,7 +1627,7 @@ mod tests {
         fam.flush().unwrap();
 
         // No commit so everything is deleted.
-        let (deleted, live) = hat.gc();
+        let (deleted, live) = hat.gc().unwrap();
         assert!(deleted > 0);
         assert_eq!(live, 0);
     }
@@ -1630,7 +1645,7 @@ mod tests {
         hat.commit(&fam, None).unwrap();
         hat.meta_commit();
 
-        let (deleted, live1) = hat.gc();
+        let (deleted, live1) = hat.gc().unwrap();
         assert_eq!(deleted, 0);
         assert!(live1 > 0);
 
@@ -1642,14 +1657,14 @@ mod tests {
         hat2.recover().unwrap();
 
         // Check that we now reference all the blobs.
-        let (deleted, live2) = hat2.gc();
+        let (deleted, live2) = hat2.gc().unwrap();
         assert_eq!(deleted, 0);
         assert_eq!(live1, live2);
 
         // Check that we can delete the snapshot.
         hat2.deregister(&fam, 1).unwrap();
 
-        let (deleted, live3) = hat2.gc();
+        let (deleted, live3) = hat2.gc().unwrap();
         assert!(deleted > 0);
         assert_eq!(live3, 0);
     }

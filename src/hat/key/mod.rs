@@ -122,7 +122,7 @@ impl Store {
 
     pub fn flush(&mut self) -> Result<(), MsgError> {
         self.blob_store.send_reply(blob::Msg::Flush);
-        self.hash_index.send_reply(hash::Msg::Flush);
+        try!(self.hash_index.send_reply(hash::Msg::Flush));
         try!(self.index.send_reply(index::Msg::Flush));
 
         Ok(())
@@ -150,7 +150,7 @@ impl HashStoreBackend {
 
     fn fetch_chunk_from_hash(&mut self, hash: hash::Hash) -> Option<Vec<u8>> {
         assert!(!hash.bytes.is_empty());
-        match self.hash_index.send_reply(hash::Msg::FetchPersistentRef(hash)) {
+        match self.hash_index.send_reply(hash::Msg::FetchPersistentRef(hash)).unwrap() {
             hash::Reply::PersistentRef(chunk_ref) => {
                 self.fetch_chunk_from_persistent_ref(chunk_ref)
             }
@@ -195,7 +195,7 @@ impl HashTreeBackend for HashStoreBackend {
     fn fetch_persistent_ref(&mut self, hash: hash::Hash) -> Option<blob::ChunkRef> {
         assert!(!hash.bytes.is_empty());
         loop {
-            match self.hash_index.send_reply(hash::Msg::FetchPersistentRef(hash.clone())) {
+            match self.hash_index.send_reply(hash::Msg::FetchPersistentRef(hash.clone())).unwrap() {
                 hash::Reply::PersistentRef(r) => return Some(r), // done
                 hash::Reply::HashNotKnown => return None, // done
                 hash::Reply::Retry => (),  // continue loop
@@ -205,7 +205,7 @@ impl HashTreeBackend for HashStoreBackend {
     }
 
     fn fetch_payload(&mut self, hash: hash::Hash) -> Option<Vec<u8>> {
-        match self.hash_index.send_reply(hash::Msg::FetchPayload(hash)) {
+        match self.hash_index.send_reply(hash::Msg::FetchPayload(hash)).unwrap() {
             hash::Reply::Payload(p) => p, // done
             hash::Reply::HashNotKnown => None, // done
             _ => panic!("Unexpected reply from hash index."),
@@ -227,7 +227,7 @@ impl HashTreeBackend for HashStoreBackend {
             persistent_ref: None,
         };
 
-        match self.hash_index.send_reply(hash::Msg::Reserve(hash_entry.clone())) {
+        match self.hash_index.send_reply(hash::Msg::Reserve(hash_entry.clone())).unwrap() {
             hash::Reply::HashKnown => {
                 // Someone came before us: piggyback on their result.
                 return self.fetch_persistent_ref(hash)
@@ -238,7 +238,7 @@ impl HashTreeBackend for HashStoreBackend {
                 let local_hash_index = self.hash_index.clone();
 
                 let callback = Box::new(move |chunk_ref: blob::ChunkRef| {
-                    local_hash_index.send_reply(hash::Msg::Commit(hash, chunk_ref));
+                    local_hash_index.send_reply(hash::Msg::Commit(hash, chunk_ref)).unwrap();
                 });
                 let kind = if level == 0 {
                     blob::Kind::TreeLeaf
@@ -248,7 +248,7 @@ impl HashTreeBackend for HashStoreBackend {
                 match self.blob_store.send_reply(blob::Msg::Store(chunk, kind, callback)) {
                     blob::Reply::StoreOk(chunk_ref) => {
                         hash_entry.persistent_ref = Some(chunk_ref.clone());
-                        self.hash_index.send_reply(hash::Msg::UpdateReserved(hash_entry));
+                        self.hash_index.send_reply(hash::Msg::UpdateReserved(hash_entry)).unwrap();
                         return chunk_ref;
                     }
                     _ => panic!("Unexpected reply from BlobStore."),
@@ -285,7 +285,7 @@ impl<IT: Iterator<Item = Vec<u8>>> MsgHandler<Msg<IT>, Result<Reply, MsgError>> 
             Ok(())
         };
         let reply_err = |e| {
-            reply(Err(From::from(e)));
+            reply(Err(e));
             Ok(())
         };
 
@@ -296,8 +296,8 @@ impl<IT: Iterator<Item = Vec<u8>>> MsgHandler<Msg<IT>, Result<Reply, MsgError>> 
             }
 
             Msg::ListDir(parent) => {
-                match try!(self.index.send_reply(index::Msg::ListDir(parent))) {
-                    index::Reply::ListResult(entries) => {
+                match self.index.send_reply(index::Msg::ListDir(parent)) {
+                    Ok(index::Reply::ListResult(entries)) => {
                         let mut my_entries: Vec<DirElem> = Vec::with_capacity(entries.len());
                         for (entry, persistent_ref) in entries.into_iter() {
                             let open_fn = entry.data_hash.as_ref().map(|bytes| {
@@ -317,7 +317,8 @@ impl<IT: Iterator<Item = Vec<u8>>> MsgHandler<Msg<IT>, Result<Reply, MsgError>> 
                         }
                         reply_ok(Reply::ListResult(my_entries))
                     }
-                    _ => reply_err("Unexpected result from key index"),
+                    Err(e) => reply_err(From::from(e)),
+                    _ => reply_err(From::from("Unexpected result from key index")),
                 }
             }
 
@@ -332,7 +333,7 @@ impl<IT: Iterator<Item = Vec<u8>>> MsgHandler<Msg<IT>, Result<Reply, MsgError>> 
                         if org_entry.data_hash.is_some() && entry.data_hash.is_some() {
                             let hash = hash::Hash { bytes: entry.data_hash.clone().unwrap() };
                             if let hash::Reply::HashKnown =
-                                   self.hash_index.send_reply(hash::Msg::HashExists(hash)) {
+                                   try!(self.hash_index.send_reply(hash::Msg::HashExists(hash))) {
                                 // Short-circuit: We have the data.
                                 return reply_ok(Reply::Id(entry.id.unwrap()));
                             }
@@ -345,12 +346,12 @@ impl<IT: Iterator<Item = Vec<u8>>> MsgHandler<Msg<IT>, Result<Reply, MsgError>> 
                     }
                     index::Reply::Entry(entry) => Entry { id: entry.id, ..org_entry },
                     index::Reply::NotFound => org_entry,
-                    _ => return reply_err("Unexpected reply from key index"),
+                    _ => return reply_err(From::from("Unexpected reply from key index")),
                 };
 
                 let entry = match try!(self.index.send_reply(index::Msg::Insert(entry))) {
                     index::Reply::Entry(entry) => entry,
-                    _ => return reply_err("Could not insert entry into key index"),
+                    _ => return reply_err(From::from("Could not insert entry into key index")),
                 };
 
                 // Send out the ID early to allow the client to continue its key discovery routine.

@@ -233,7 +233,7 @@ fn main() {
             let backend = blob::FileBackend::new(blob_dir()).unwrap();
             let mut hat = hat::Hat::open_repository(&PathBuf::from("repo"), backend, MAX_BLOB_SIZE)
                               .unwrap();
-            let (deleted_hashes, live_blobs) = hat.gc();
+            let (deleted_hashes, live_blobs) = hat.gc().unwrap();
             println!("Deleted hashes: {:?}", deleted_hashes);
             println!("Live data blobs after deletion: {:?}", live_blobs);
 
