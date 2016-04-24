@@ -38,6 +38,9 @@ error_type! {
         Recv(mpsc::RecvError) {
             cause;
         },
+        Sql(diesel::result::Error) {
+            cause;
+        },
         Message(Cow<'static, str>) {
             desc (e) &**e;
             from (s: &'static str) s.into();
@@ -144,15 +147,19 @@ impl Index {
             .unwrap()
     }
 
-    pub fn maybe_flush(&mut self) {
+    pub fn maybe_flush(&mut self) -> Result<(), MsgError> {
         if self.flush_timer.did_fire() {
-            self.flush();
+            try!(self.flush());
         }
+
+        Ok(())
     }
 
-    pub fn flush(&mut self) {
-        self.conn.commit_transaction().unwrap();
-        self.conn.begin_transaction().unwrap();
+    pub fn flush(&mut self) -> Result<(), MsgError> {
+        try!(self.conn.commit_transaction());
+        try!(self.conn.begin_transaction());
+
+        Ok(())
     }
 }
 
@@ -180,14 +187,13 @@ impl MsgHandler<Msg, Result<Reply, MsgError>> for Index {
                 let entry = match entry.id {
                     Some(id_) => {
                         // Replace existing entry.
-                        diesel::update(keys.find(id_ as i64))
-                            .set((parent.eq(entry.parent_id.map(|x| x as i64)),
-                                  name.eq(&entry.name[..]),
-                                  created.eq(entry.created),
-                                  modified.eq(entry.modified),
-                                  accessed.eq(entry.accessed)))
-                            .execute(&self.conn)
-                            .expect("Error updating key");
+                        try!(diesel::update(keys.find(id_ as i64))
+                                 .set((parent.eq(entry.parent_id.map(|x| x as i64)),
+                                       name.eq(&entry.name[..]),
+                                       created.eq(entry.created),
+                                       modified.eq(entry.modified),
+                                       accessed.eq(entry.accessed)))
+                                 .execute(&self.conn));
                         entry
                     }
                     None => {
@@ -206,10 +212,9 @@ impl MsgHandler<Msg, Result<Reply, MsgError>> for Index {
                                 persistent_ref: None,
                             };
 
-                            diesel::insert(&new)
-                                .into(keys)
-                                .execute(&self.conn)
-                                .expect("Error inserting key");
+                            try!(diesel::insert(&new)
+                                     .into(keys)
+                                     .execute(&self.conn));
                         }
                         let mut entry = entry;
                         entry.id = Some(self.last_insert_rowid() as u64);
@@ -225,18 +230,16 @@ impl MsgHandler<Msg, Result<Reply, MsgError>> for Index {
 
                 let row_opt = match parent_ {
                     Some(p) => {
-                        keys.filter(parent.eq(p as i64))
-                            .filter(name.eq(&name_[..]))
-                            .first::<schema::Key>(&self.conn)
-                            .optional()
-                            .expect("Error searching keys")
+                        try!(keys.filter(parent.eq(p as i64))
+                                 .filter(name.eq(&name_[..]))
+                                 .first::<schema::Key>(&self.conn)
+                                 .optional())
                     }
                     None => {
-                        keys.filter(parent.is_null())
-                            .filter(name.eq(&name_[..]))
-                            .first::<schema::Key>(&self.conn)
-                            .optional()
-                            .expect("Error searching keys")
+                        try!(keys.filter(parent.is_null())
+                                 .filter(name.eq(&name_[..]))
+                                 .first::<schema::Key>(&self.conn)
+                                 .optional())
                     }
                 };
 
@@ -268,25 +271,23 @@ impl MsgHandler<Msg, Result<Reply, MsgError>> for Index {
                 let persistent_ref_bytes = persistent_ref_opt.map(|p| p.as_bytes());
 
                 if entry.modified.is_some() {
-                    diesel::update(keys.find(id_)
-                                       .filter(modified.eq::<Option<i64>>(None)
-                                                       .or(modified.le(entry.modified))))
-                        .set((hash.eq(hash_bytes), persistent_ref.eq(persistent_ref_bytes)))
-                        .execute(&self.conn)
-                        .expect("Error updating key");
+                    try!(diesel::update(keys.find(id_)
+                                            .filter(modified.eq::<Option<i64>>(None)
+                                                            .or(modified.le(entry.modified))))
+                             .set((hash.eq(hash_bytes), persistent_ref.eq(persistent_ref_bytes)))
+                             .execute(&self.conn));
                 } else {
-                    diesel::update(keys.find(id_))
-                        .set((hash.eq(hash_bytes), persistent_ref.eq(persistent_ref_bytes)))
-                        .execute(&self.conn)
-                        .expect("Error updating key");
+                    try!(diesel::update(keys.find(id_))
+                             .set((hash.eq(hash_bytes), persistent_ref.eq(persistent_ref_bytes)))
+                             .execute(&self.conn));
                 }
 
-                self.maybe_flush();
+                try!(self.maybe_flush());
                 return reply_ok(Reply::UpdateOk);
             }
 
             Msg::Flush => {
-                self.flush();
+                try!(self.flush());
                 return reply_ok(Reply::FlushOk);
             }
 
@@ -295,14 +296,12 @@ impl MsgHandler<Msg, Result<Reply, MsgError>> for Index {
 
                 let rows = match parent_opt {
                     Some(p) => {
-                        keys.filter(parent.eq(p as i64))
-                            .load::<schema::Key>(&self.conn)
-                            .expect("Error listing keys")
+                        try!(keys.filter(parent.eq(p as i64))
+                                 .load::<schema::Key>(&self.conn))
                     }
                     None => {
-                        keys.filter(parent.is_null())
-                            .load::<schema::Key>(&self.conn)
-                            .expect("Error listing keys")
+                        try!(keys.filter(parent.is_null())
+                                 .load::<schema::Key>(&self.conn))
                     }
                 };
 
