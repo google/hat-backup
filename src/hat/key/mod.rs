@@ -182,10 +182,12 @@ impl HashTreeBackend for HashStoreBackend {
         return data_opt.and_then(|data| {
             let actual_hash = hash::Hash::new(&data[..]);
             if hash == actual_hash {
-              Some(data)
+                Some(data)
             } else {
-                error!("Data hash does not match expectation: {:?} instead of {:?}", actual_hash, hash);
-                return None;
+                error!("Data hash does not match expectation: {:?} instead of {:?}",
+                       actual_hash,
+                       hash);
+                None
             }
         });
     }

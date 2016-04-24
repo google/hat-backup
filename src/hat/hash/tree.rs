@@ -189,11 +189,11 @@ impl<B: HashTreeBackend + Clone> SimpleHashTreeWriter<B> {
     /// 1-byte blocks when reading; if needed, accummulation of data must be handled by the
     /// `backend`).
     pub fn append(&mut self, chunk: Vec<u8>) {
-        let hash = Hash::new(&chunk[..]);
-        self.append_at(0, hash, chunk, None);
+        self.append_at(0, chunk, None);
     }
 
-    fn append_at(&mut self, level: usize, hash: Hash, data: Vec<u8>, metadata: Option<Vec<u8>>) {
+    fn append_at(&mut self, level: usize, data: Vec<u8>, metadata: Option<Vec<u8>>) {
+        let hash = Hash::new(&data[..]);
         let persistent_ref = self.backend.insert_chunk(hash.clone(), level as i64, metadata, data);
         let hash_ref = HashRef {
             hash: hash.bytes,
@@ -236,8 +236,7 @@ impl<B: HashTreeBackend + Clone> SimpleHashTreeWriter<B> {
             metadata
         };
 
-        let hash = Hash::new(&metadata_bytes[..]);
-        self.append_at(level + 1, hash, data, Some(metadata_bytes));
+        self.append_at(level + 1, data, Some(metadata_bytes));
     }
 
     /// Retrieve the hash and backend persistent reference that identified this tree.
