@@ -70,6 +70,9 @@ error_type! {
         DataSerialization(capnp::Error) {
             cause;
         },
+        IO(io::Error) {
+            cause;
+        },
         Message(Cow<'static, str>) {
             desc (e) &**e;
             from (s: &'static str) s.into();
@@ -665,8 +668,7 @@ impl<B: 'static + blob::StoreBackend + Clone + Send> Hat<B> {
                           family_name: String,
                           resume_info: Option<snapshot::Info>)
                           -> Result<(), HatError> {
-        let family = self.open_family(family_name.clone())
-                         .expect(&format!("Could not open family '{}'", family_name));
+        let family = try!(self.open_family(family_name.clone()));
         try!(self.commit(&family, resume_info));
 
         Ok(())
@@ -746,7 +748,7 @@ impl<B: 'static + blob::StoreBackend + Clone + Send> Hat<B> {
                                snap_info: snapshot::Info,
                                hash: hash::Hash)
                                -> Result<(), HatError> {
-        let family = self.open_family(family_name).expect("Unknown family name");
+        let family = try!(self.open_family(family_name));
         try!(self.commit_finalize(&family, snap_info, hash));
 
         Ok(())
@@ -761,7 +763,7 @@ impl<B: 'static + blob::StoreBackend + Clone + Send> Hat<B> {
         match self.snapshot_index
                   .send_reply(snapshot::Msg::ReadyCommit(snap_info.clone())) {
             snapshot::Reply::UpdateOk => (),
-            _ => panic!("Invalid reply from snapshot index"),
+            _ => return Err(From::from("Invalid reply from snapshot index")),
         };
         self.flush_snapshot_index();
 
@@ -772,7 +774,7 @@ impl<B: 'static + blob::StoreBackend + Clone + Send> Hat<B> {
         // Tag 0: All is done.
         match self.snapshot_index.send_reply(snapshot::Msg::Commit(snap_info)) {
             snapshot::Reply::CommitOk => (),
-            _ => panic!("Invalid reply from snapshot index"),
+            _ => return Err(From::from("Invalid reply from snapshot index")),
         };
         self.flush_snapshot_index();
 
@@ -846,8 +848,7 @@ impl<B: 'static + blob::StoreBackend + Clone + Send> Hat<B> {
                               family_name: String,
                               snapshot_id: i64)
                               -> Result<(), HatError> {
-        let family = self.open_family(family_name.clone())
-                         .expect(&format!("Could not open family '{}'", family_name));
+        let family = try!(self.open_family(family_name.clone()));
         try!(self.deregister(&family, snapshot_id));
 
         Ok(())
@@ -861,19 +862,20 @@ impl<B: 'static + blob::StoreBackend + Clone + Send> Hat<B> {
                     match opt {
                         Some((i, h, Some(r))) => (i, h, r),
                         _ => {
-                            panic!("No complete snapshot found for family {} with id {:?}",
-                                   family.name,
-                                   snapshot_id)
+                            return Err(From::from(format!("No complete snapshot found for \
+                                                           family {} with id {:?}",
+                                                          family.name,
+                                                          snapshot_id)));
                         }
                     }
                 }
-                _ => panic!("Unexpected reply from snapshot index."),
+                _ => return Err(From::from("Unexpected reply from snapshot index")),
             };
 
         // Make the snapshot to enable resuming.
         match self.snapshot_index.send_reply(snapshot::Msg::WillDelete(info.clone())) {
             snapshot::Reply::UpdateOk => (),
-            _ => panic!("Unexpected reply from snapshot index."),
+            _ => return Err(From::from("Unexpected reply from snapshot index")),
         }
         self.flush_snapshot_index();
 
@@ -917,7 +919,7 @@ impl<B: 'static + blob::StoreBackend + Clone + Send> Hat<B> {
                                    snap_info: snapshot::Info,
                                    hash_id: gc::Id)
                                    -> Result<(), HatError> {
-        let family = self.open_family(family_name).expect("Unknown family name");
+        let family = try!(self.open_family(family_name));
         try!(self.deregister_finalize(&family, snap_info, hash_id));
 
         Ok(())
@@ -931,7 +933,7 @@ impl<B: 'static + blob::StoreBackend + Clone + Send> Hat<B> {
         // Mark the snapshot to enable resuming.
         match self.snapshot_index.send_reply(snapshot::Msg::ReadyDelete(snap_info.clone())) {
             snapshot::Reply::UpdateOk => (),
-            _ => panic!("Unexpected reply from snapshot index."),
+            _ => return Err(From::from("Unexpected reply from snapshot index.")),
         }
         self.flush_snapshot_index();
 
@@ -945,7 +947,7 @@ impl<B: 'static + blob::StoreBackend + Clone + Send> Hat<B> {
 
         match self.snapshot_index.send_reply(snapshot::Msg::Flush) {
             snapshot::Reply::FlushOk => (),
-            _ => panic!("Unexpected reply from snapshot index."),
+            _ => return Err(From::from("Unexpected reply from snapshot index.")),
         };
 
         Ok(self.flush_snapshot_index())
@@ -1436,10 +1438,9 @@ impl Family {
                         data_ref.expect("has data")
                                 .populate_msg(hash_ref_root.borrow().init_chunk_ref());
                         // Set as file content.
-                        file_msg.borrow()
-                                .init_content()
-                                .set_data(hash_ref_root.as_reader())
-                                .unwrap();
+                        try!(file_msg.borrow()
+                                     .init_content()
+                                     .set_data(hash_ref_root.as_reader()));
                         hash_ch.send(hash::Hash { bytes: hash_bytes }).unwrap();
                     } else {
                         drop(data_ref);  // May not use data reference without hash.
@@ -1458,10 +1459,9 @@ impl Family {
                         hash_ref_root.set_hash(&dir_hash.bytes);
                         dir_ref.populate_msg(hash_ref_root.borrow().init_chunk_ref());
                         // Set as directory content.
-                        file_msg.borrow()
-                                .init_content()
-                                .set_directory(hash_ref_root.as_reader())
-                                .unwrap();
+                        try!(file_msg.borrow()
+                                     .init_content()
+                                     .set_directory(hash_ref_root.as_reader()));
 
                         hash_ch.send(dir_hash).unwrap();
                     }
@@ -1474,7 +1474,7 @@ impl Family {
                 break;
             } else {
                 let mut buf = vec![];
-                capnp::serialize_packed::write_message(&mut buf, &files_msg).unwrap();
+                try!(capnp::serialize_packed::write_message(&mut buf, &files_msg));
                 tree.append(buf);
             }
         }
