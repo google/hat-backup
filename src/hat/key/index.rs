@@ -37,6 +37,9 @@ error_type! {
         Recv(mpsc::RecvError) {
             cause;
         },
+        SqlConnection(diesel::ConnectionError) {
+            cause;
+        },
         SqlMigration(diesel::migrations::MigrationError) {
             cause;
         },
@@ -113,17 +116,9 @@ pub struct Index {
 }
 
 
-fn i64_to_u64_or_panic(x: i64) -> u64 {
-    if x < 0 {
-        panic!("expected u64, got {:?}", x);
-    }
-    return x as u64;
-}
-
-
 impl Index {
     pub fn new(path: String) -> Result<Index, IndexError> {
-        let conn = SqliteConnection::establish(&path).expect("Could not open SQLite database");
+        let conn = try!(SqliteConnection::establish(&path));
 
         let ki = Index {
             path: path,
@@ -145,10 +140,10 @@ impl Index {
         Index::new(":memory:".to_string())
     }
 
-    fn last_insert_rowid(&self) -> i64 {
-        diesel::select(diesel::expression::sql("last_insert_rowid()"))
-            .first::<i64>(&self.conn)
-            .unwrap()
+    fn last_insert_rowid(&self) -> Result<i64, IndexError> {
+        let id = try!(diesel::select(diesel::expression::sql("last_insert_rowid()"))
+                          .first::<i64>(&self.conn));
+        Ok(id)
     }
 
     pub fn maybe_flush(&mut self) -> Result<(), IndexError> {
@@ -184,6 +179,10 @@ impl MsgHandler<Msg, Result<Reply, IndexError>> for Index {
               -> Result<(), IndexError> {
         let reply_ok = |x| {
             reply(Ok(x));
+            Ok(())
+        };
+        let reply_err = |e| {
+            reply(Err(e));
             Ok(())
         };
         match msg {
@@ -223,7 +222,7 @@ impl MsgHandler<Msg, Result<Reply, IndexError>> for Index {
                                      .execute(&self.conn));
                         }
                         let mut entry = entry;
-                        entry.id = Some(self.last_insert_rowid() as u64);
+                        entry.id = Some(try!(self.last_insert_rowid()) as u64);
                         entry
                     }
                 };
@@ -270,7 +269,12 @@ impl MsgHandler<Msg, Result<Reply, IndexError>> for Index {
             Msg::UpdateDataHash(entry, hash_opt, persistent_ref_opt) => {
                 use super::schema::keys::dsl::*;
 
-                let id_ = entry.id.expect("Tried to update without an id") as i64;
+                let id_ = match entry.id {
+                    Some(i) => i as i64,
+                    None => {
+                        return reply_err(From::from("Tried to update data hash without an id"));
+                    }
+                };
                 assert!(hash_opt.is_some() == persistent_ref_opt.is_some());
 
                 let hash_bytes = hash_opt.map(|h| h.bytes);
@@ -311,27 +315,27 @@ impl MsgHandler<Msg, Result<Reply, IndexError>> for Index {
                     }
                 };
 
-                return reply_ok(Reply::ListResult(rows.into_iter()
-                                                      .map(|mut r| {
-                                                          (Entry {
-                                                    id: Some(r.id as u64),
-                                                    parent_id: r.parent.map(|x| x as u64),
-                                                    name: r.name,
-                                                    created: r.created,
-                                                    modified: r.modified,
-                                                    accessed: r.accessed,
-                                                    permissions: r.permissions
-                                                                  .map(|x| x as u64),
-                                                    user_id: r.user_id.map(|x| x as u64),
-                                                    group_id: r.group_id.map(|x| x as u64),
-                                                    data_hash: r.hash,
-                                                    data_length: None,
-                                                },
-                                                 r.persistent_ref.as_mut().map(|p| {
-                                                    blob::ChunkRef::from_bytes(&mut &p[..]).unwrap()
-                                                }))
-                                                      })
-                                                      .collect()));
+                let res = rows.into_iter()
+                              .map(|mut r| {
+                                  (Entry {
+                                      id: Some(r.id as u64),
+                                      parent_id: r.parent.map(|x| x as u64),
+                                      name: r.name,
+                                      created: r.created,
+                                      modified: r.modified,
+                                      accessed: r.accessed,
+                                      permissions: r.permissions
+                                                    .map(|x| x as u64),
+                                      user_id: r.user_id.map(|x| x as u64),
+                                      group_id: r.group_id.map(|x| x as u64),
+                                      data_hash: r.hash,
+                                      data_length: None,
+                                  },
+                                   r.persistent_ref
+                                    .as_mut()
+                                    .map(|p| blob::ChunkRef::from_bytes(&mut &p[..]).unwrap()))
+                              });
+                return reply_ok(Reply::ListResult(res.collect()));
             }
         }
     }
