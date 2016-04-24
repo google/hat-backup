@@ -172,10 +172,22 @@ impl HashTreeBackend for HashStoreBackend {
                    persistent_ref: Option<blob::ChunkRef>)
                    -> Option<Vec<u8>> {
         assert!(!hash.bytes.is_empty());
-        if let Some(r) = persistent_ref {
-            return self.fetch_chunk_from_persistent_ref(r);
-        }
-        return self.fetch_chunk_from_hash(hash);
+
+        let data_opt = if let Some(r) = persistent_ref {
+            self.fetch_chunk_from_persistent_ref(r)
+        } else {
+            self.fetch_chunk_from_hash(hash.clone())
+        };
+
+        return data_opt.and_then(|data| {
+            let actual_hash = hash::Hash::new(&data[..]);
+            if hash == actual_hash {
+              Some(data)
+            } else {
+                error!("Data hash does not match expectation: {:?} instead of {:?}", actual_hash, hash);
+                return None;
+            }
+        });
     }
 
     fn fetch_persistent_ref(&mut self, hash: hash::Hash) -> Option<blob::ChunkRef> {
