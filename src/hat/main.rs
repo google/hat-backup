@@ -167,19 +167,19 @@ fn main() {
     match matches.subcommand() {
         ("resume", Some(_cmd)) => {
             // Setting up the repository triggers automatic resume.
-            let backend = blob::FileBackend::new(blob_dir());
+            let backend = blob::FileBackend::new(blob_dir()).unwrap();
             hat::Hat::open_repository(&PathBuf::from("repo"), backend, MAX_BLOB_SIZE).unwrap();
         }
         ("snapshot", Some(cmd)) => {
             let name = cmd.value_of("NAME").unwrap().to_owned();
             let path = cmd.value_of("PATH").unwrap();
 
-            let backend = blob::FileBackend::new(blob_dir());
+            let backend = blob::FileBackend::new(blob_dir()).unwrap();
             let hat = hat::Hat::open_repository(&PathBuf::from("repo"), backend, MAX_BLOB_SIZE)
                           .unwrap();
 
-            let family_opt = hat.open_family(name.clone());
-            let family = family_opt.expect(&format!("Could not open family '{}'", name));
+            let family = hat.open_family(name.clone())
+                            .expect(&format!("Could not open family '{}'", name));
 
             family.snapshot_dir(PathBuf::from(path));
             family.flush().unwrap();
@@ -190,21 +190,21 @@ fn main() {
             let name = cmd.value_of("NAME").unwrap().to_owned();
             let path = cmd.value_of("PATH").unwrap();
 
-            let backend = blob::FileBackend::new(blob_dir());
+            let backend = blob::FileBackend::new(blob_dir()).unwrap();
             let hat = hat::Hat::open_repository(&PathBuf::from("repo"), backend, MAX_BLOB_SIZE)
                           .unwrap();
 
             hat.checkout_in_dir(name.clone(), PathBuf::from(path));
         }
         ("meta-commit", Some(_cmd)) => {
-            let backend = blob::FileBackend::new(blob_dir());
+            let backend = blob::FileBackend::new(blob_dir()).unwrap();
             let mut hat = hat::Hat::open_repository(&PathBuf::from("repo"), backend, MAX_BLOB_SIZE)
                               .unwrap();
 
             hat.meta_commit();
         }
         ("recover", Some(_cmd)) => {
-            let backend = blob::FileBackend::new(blob_dir());
+            let backend = blob::FileBackend::new(blob_dir()).unwrap();
             let mut hat = hat::Hat::open_repository(&PathBuf::from("repo"), backend, MAX_BLOB_SIZE)
                               .unwrap();
 
@@ -213,7 +213,7 @@ fn main() {
         ("commit", Some(cmd)) => {
             let name = cmd.value_of("NAME").unwrap().to_owned();
 
-            let backend = blob::FileBackend::new(blob_dir());
+            let backend = blob::FileBackend::new(blob_dir()).unwrap();
             let mut hat = hat::Hat::open_repository(&PathBuf::from("repo"), backend, MAX_BLOB_SIZE)
                               .unwrap();
 
@@ -223,14 +223,14 @@ fn main() {
             let name = cmd.value_of("NAME").unwrap().to_owned();
             let id = cmd.value_of("ID").unwrap().to_owned();
 
-            let backend = blob::FileBackend::new(blob_dir());
+            let backend = blob::FileBackend::new(blob_dir()).unwrap();
             let mut hat = hat::Hat::open_repository(&PathBuf::from("repo"), backend, MAX_BLOB_SIZE)
                               .unwrap();
 
             hat.deregister_by_name(name, id.parse::<i64>().unwrap()).unwrap();
         }
         ("gc", Some(_cmd)) => {
-            let backend = blob::FileBackend::new(blob_dir());
+            let backend = blob::FileBackend::new(blob_dir()).unwrap();
             let mut hat = hat::Hat::open_repository(&PathBuf::from("repo"), backend, MAX_BLOB_SIZE)
                               .unwrap();
             let (deleted_hashes, live_blobs) = hat.gc();

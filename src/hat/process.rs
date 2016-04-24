@@ -80,17 +80,18 @@ pub trait MsgHandler<Msg, Reply> {
 
 impl<Msg: 'static + Send, Reply: 'static + Send> Process<Msg, Reply> {
     /// Create and start a new process using `handler`.
-    pub fn new<H>(handler_proc: Box<FnBox() -> H + Send>) -> Process<Msg, Reply>
-        where H: 'static + MsgHandler<Msg, Reply>,
+    pub fn new<H>(handler_proc: Box<FnBox() -> Result<H, H::Err>>)
+                  -> Result<Process<Msg, Reply>, H::Err>
+        where H: 'static + MsgHandler<Msg, Reply> + Send,
               H::Err: From<mpsc::RecvError> + fmt::Debug
     {
         return Process::new_with_shutdown(handler_proc, None);
     }
 
-    pub fn new_with_shutdown<H>(handler_proc: Box<FnBox() -> H + Send>,
+    pub fn new_with_shutdown<H>(handler_proc: Box<FnBox() -> Result<H, H::Err>>,
                                 shutdown_after: Option<i64>)
-                                -> Process<Msg, Reply>
-        where H: 'static + MsgHandler<Msg, Reply>,
+                                -> Result<Process<Msg, Reply>, H::Err>
+        where H: 'static + MsgHandler<Msg, Reply> + Send,
               H::Err: From<mpsc::RecvError> + fmt::Debug
     {
         let (sender, receiver) = mpsc::sync_channel(10);
@@ -99,22 +100,23 @@ impl<Msg: 'static + Send, Reply: 'static + Send> Process<Msg, Reply> {
             shutdown_after: shutdown_after,
         };
 
-        p.start(receiver, handler_proc);
+        try!(p.start(receiver, handler_proc));
 
-        p
+        Ok(p)
     }
 
 
     fn start<H>(&self,
                 receiver: mpsc::Receiver<(Msg, mpsc::Sender<Reply>)>,
-                handler_proc: Box<FnBox() -> H + Send>)
-        where H: 'static + MsgHandler<Msg, Reply>,
+                handler_proc: Box<FnBox() -> Result<H, H::Err>>)
+                -> Result<(), H::Err>
+        where H: 'static + MsgHandler<Msg, Reply> + Send,
               H::Err: From<mpsc::RecvError> + fmt::Debug
     {
         let shutdown_after = self.shutdown_after.clone();
+        let mut my_handler = try!(handler_proc());
         thread::spawn(move || {
             // fork handler
-            let mut my_handler = handler_proc();
             let mut handle_msg = |msg, rep: mpsc::Sender<Reply>| {
                 my_handler.handle(msg,
                                   Box::new(move |r| {
@@ -143,6 +145,8 @@ impl<Msg: 'static + Send, Reply: 'static + Send> Process<Msg, Reply> {
                 }
             };
         });
+
+        Ok(())
     }
 
     /// Synchronous send.

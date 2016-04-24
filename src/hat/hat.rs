@@ -47,10 +47,25 @@ error_type! {
     #[derive(Debug)]
     pub enum HatError {
         Recv(mpsc::RecvError) {
-            cause (e) Some(e);
+            cause;
         },
-        Key(key::MsgError) {
-            cause (e) Some(e);
+        Keys(key::MsgError) {
+            cause;
+        },
+        KeyDb(key::IndexError) {
+            cause;
+        },
+        Snapshots(snapshot::MsgError) {
+            cause;
+        },
+        Blobs(blob::MsgError) {
+            cause;
+        },
+        BlobDb(blob::IndexError) {
+            cause;
+        },
+        Hashes(hash::MsgError) {
+            cause;
         },
         Message(Cow<'static, str>) {
             desc (e) &**e;
@@ -210,15 +225,15 @@ impl<B: 'static + blob::StoreBackend + Clone + Send> Hat<B> {
         let snapshot_index_path = snapshot_index_name(repository_root);
         let blob_index_path = blob_index_name(repository_root);
         let hash_index_path = hash_index_name(repository_root);
-        let si_p = Process::new(Box::new(move || snapshot::Index::new(snapshot_index_path)));
-        let bi_p = Process::new(Box::new(move || blob::Index::new(blob_index_path)));
-        let hi_p = Process::new(Box::new(move || hash::Index::new(hash_index_path)));
+        let si_p = try!(Process::new(Box::new(move || snapshot::Index::new(snapshot_index_path))));
+        let bi_p = try!(Process::new(Box::new(move || blob::Index::new(blob_index_path))));
+        let hi_p = try!(Process::new(Box::new(move || hash::Index::new(hash_index_path))));
 
         let local_blob_index = bi_p.clone();
         let local_backend = backend.clone();
-        let bs_p = Process::new(Box::new(move || {
+        let bs_p = try!(Process::new(Box::new(move || {
             blob::Store::new(local_blob_index, local_backend, max_blob_size)
-        }));
+        })));
 
         let gc_backend = GcBackend { hash_index: hi_p.clone() };
         let gc = gc_rc::GcRc::new(Box::new(gc_backend));
@@ -249,11 +264,14 @@ impl<B: 'static + blob::StoreBackend + Clone + Send> Hat<B> {
         let mut shutdown = shutdown_after.iter().cycle();
 
         let si_p = Process::new_with_shutdown(Box::new(move || snapshot::Index::new_for_testing()),
-                                              shutdown.next().cloned());
+                                              shutdown.next().cloned())
+                       .unwrap();
         let bi_p = Process::new_with_shutdown(Box::new(move || blob::Index::new_for_testing()),
-                                              shutdown.next().cloned());
+                                              shutdown.next().cloned())
+                       .unwrap();
         let hi_p = Process::new_with_shutdown(Box::new(move || hash::Index::new_for_testing()),
-                                              shutdown.next().cloned());
+                                              shutdown.next().cloned())
+                       .unwrap();
 
         let local_blob_index = bi_p.clone();
         let local_backend = backend.clone();
@@ -262,7 +280,8 @@ impl<B: 'static + blob::StoreBackend + Clone + Send> Hat<B> {
                                                                    local_backend,
                                                                    max_blob_size)
                                               }),
-                                              shutdown.next().cloned());
+                                              shutdown.next().cloned())
+                       .unwrap();
 
         let gc_backend = GcBackend { hash_index: hi_p.clone() };
         let gc = gc_rc::GcRc::new(Box::new(gc_backend));
@@ -289,14 +308,14 @@ impl<B: 'static + blob::StoreBackend + Clone + Send> Hat<B> {
         return hash::tree::SimpleHashTreeWriter::new(8, backend);
     }
 
-    pub fn open_family(&self, name: String) -> Option<Family> {
+    pub fn open_family(&self, name: String) -> Result<Family, HatError> {
         return self.open_family_with_shutdown(name, None);
     }
 
     pub fn open_family_with_shutdown(&self,
                                      name: String,
                                      shutdown_after: Option<i64>)
-                                     -> Option<Family> {
+                                     -> Result<Family, HatError> {
         // We setup a standard pipeline of processes:
         // key::Store -> key::Index
         //            -> hash::Index
@@ -307,17 +326,19 @@ impl<B: 'static + blob::StoreBackend + Clone + Send> Hat<B> {
             None => ":memory:".to_string(),
         };
 
-        let ki_p = Process::new_with_shutdown(Box::new(move || key::Index::new(key_index_path)),
-                                              shutdown_after);
+        let ki_p = try!(Process::new_with_shutdown(Box::new(move || {
+                                                       key::Index::new(key_index_path)
+                                                   }),
+                                                   shutdown_after));
 
         let local_ks = key::Store::new(ki_p.clone(),
                                        self.hash_index.clone(),
                                        self.blob_store.clone());
-        let ks_p = Process::new_with_shutdown(Box::new(move || local_ks), shutdown_after);
+        let ks_p = try!(Process::new_with_shutdown(Box::new(move || local_ks), shutdown_after));
 
-        let ks = key::Store::new(ki_p, self.hash_index.clone(), self.blob_store.clone());
+        let ks = try!(key::Store::new(ki_p, self.hash_index.clone(), self.blob_store.clone()));
 
-        Some(Family {
+        Ok(Family {
             name: name,
             key_store: ks,
             key_store_process: ks_p,

@@ -14,6 +14,7 @@
 
 //! Local state for known snapshots.
 
+use std::borrow::Cow;
 use std::sync::mpsc;
 
 use diesel;
@@ -34,6 +35,23 @@ error_type! {
     pub enum MsgError {
         Recv(mpsc::RecvError) {
             cause;
+        },
+        SqlConnection(diesel::ConnectionError) {
+            cause;
+        },
+        SqlMigration(diesel::migrations::MigrationError) {
+            cause;
+        },
+        SqlRunMigration(diesel::migrations::RunMigrationsError) {
+            cause;
+        },
+        SqlExecute(diesel::result::Error) {
+            cause;
+        },
+        Message(Cow<'static, str>) {
+            desc (e) &**e;
+            from (s: &'static str) s.into();
+            from (s: String) s.into();
         }
     }
 }
@@ -144,23 +162,22 @@ fn work_status_to_tag(status: WorkStatus) -> tags::Tag {
 }
 
 impl Index {
-    pub fn new(path: String) -> Index {
-        let conn = SqliteConnection::establish(&path).expect("Could not open SQLite database");
+    pub fn new(path: String) -> Result<Index, MsgError> {
+        let conn = try!(SqliteConnection::establish(&path));
 
         let si = Index { conn: conn };
 
-        let dir = diesel::migrations::find_migrations_directory().unwrap();
-        diesel::migrations::run_pending_migrations_in_directory(&si.conn,
-                                                                &dir,
-                                                                &mut util::InfoWriter)
-            .unwrap();
+        let dir = try!(diesel::migrations::find_migrations_directory());
+        try!(diesel::migrations::run_pending_migrations_in_directory(&si.conn,
+                                                                     &dir,
+                                                                     &mut util::InfoWriter));
 
-        si.conn.begin_transaction().unwrap();
-        si
+        try!(si.conn.begin_transaction());
+        Ok(si)
     }
 
     #[cfg(test)]
-    pub fn new_for_testing() -> Index {
+    pub fn new_for_testing() -> Result<Index, MsgError> {
         Index::new(":memory:".to_string())
     }
 

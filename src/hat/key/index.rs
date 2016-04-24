@@ -31,14 +31,19 @@ use util;
 
 use super::schema;
 
-
 error_type! {
     #[derive(Debug)]
-    pub enum MsgError {
+    pub enum IndexError {
         Recv(mpsc::RecvError) {
             cause;
         },
-        Sql(diesel::result::Error) {
+        SqlMigration(diesel::migrations::MigrationError) {
+            cause;
+        },
+        SqlRunMigration(diesel::migrations::RunMigrationsError) {
+            cause;
+        },
+        SqlExecute(diesel::result::Error) {
             cause;
         },
         Message(Cow<'static, str>) {
@@ -69,7 +74,7 @@ pub struct Entry {
     pub data_length: Option<u64>,
 }
 
-pub type IndexProcess = Process<Msg, Result<Reply, MsgError>>;
+pub type IndexProcess = Process<Msg, Result<Reply, IndexError>>;
 
 pub enum Msg {
     /// Insert an entry in the key index.
@@ -117,7 +122,7 @@ fn i64_to_u64_or_panic(x: i64) -> u64 {
 
 
 impl Index {
-    pub fn new(path: String) -> Index {
+    pub fn new(path: String) -> Result<Index, IndexError> {
         let conn = SqliteConnection::establish(&path).expect("Could not open SQLite database");
 
         let ki = Index {
@@ -126,18 +131,17 @@ impl Index {
             flush_timer: PeriodicTimer::new(Duration::seconds(5)),
         };
 
-        let dir = diesel::migrations::find_migrations_directory().unwrap();
-        diesel::migrations::run_pending_migrations_in_directory(&ki.conn,
-                                                                &dir,
-                                                                &mut util::InfoWriter)
-            .unwrap();
-        ki.conn.begin_transaction().unwrap();
+        let dir = try!(diesel::migrations::find_migrations_directory());
+        try!(diesel::migrations::run_pending_migrations_in_directory(&ki.conn,
+                                                                     &dir,
+                                                                     &mut util::InfoWriter));
+        try!(ki.conn.begin_transaction());
 
-        ki
+        Ok(ki)
     }
 
     #[cfg(test)]
-    pub fn new_for_testing() -> Index {
+    pub fn new_for_testing() -> Result<Index, IndexError> {
         Index::new(":memory:".to_string())
     }
 
@@ -147,7 +151,7 @@ impl Index {
             .unwrap()
     }
 
-    pub fn maybe_flush(&mut self) -> Result<(), MsgError> {
+    pub fn maybe_flush(&mut self) -> Result<(), IndexError> {
         if self.flush_timer.did_fire() {
             try!(self.flush());
         }
@@ -155,7 +159,7 @@ impl Index {
         Ok(())
     }
 
-    pub fn flush(&mut self) -> Result<(), MsgError> {
+    pub fn flush(&mut self) -> Result<(), IndexError> {
         try!(self.conn.commit_transaction());
         try!(self.conn.begin_transaction());
 
@@ -165,17 +169,19 @@ impl Index {
 
 impl Clone for Index {
     fn clone(&self) -> Index {
-        Index::new(self.path.clone())
+        // We succeeded setup once, and so should succeed again unless the underlying database has
+        // disappeared, in which case it is acceptable to terminate the program.
+        Index::new(self.path.clone()).expect("Could not clone index")
     }
 }
 
-impl MsgHandler<Msg, Result<Reply, MsgError>> for Index {
-    type Err = MsgError;
+impl MsgHandler<Msg, Result<Reply, IndexError>> for Index {
+    type Err = IndexError;
 
     fn handle(&mut self,
               msg: Msg,
-              reply: Box<Fn(Result<Reply, MsgError>)>)
-              -> Result<(), MsgError> {
+              reply: Box<Fn(Result<Reply, IndexError>)>)
+              -> Result<(), IndexError> {
         let reply_ok = |x| {
             reply(Ok(x));
             Ok(())

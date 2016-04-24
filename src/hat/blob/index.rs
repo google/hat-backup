@@ -14,6 +14,7 @@
 
 //! Local state for external blobs and their states.
 
+use std::borrow::Cow;
 use std::collections::HashMap;
 use std::sync::mpsc;
 
@@ -32,9 +33,26 @@ use super::schema;
 
 error_type! {
     #[derive(Debug)]
-    pub enum MsgError {
+    pub enum IndexError {
         Recv(mpsc::RecvError) {
             cause;
+        },
+        SqlConnection(diesel::ConnectionError) {
+            cause;
+        },
+        SqlMigration(diesel::migrations::MigrationError) {
+            cause;
+        },
+        SqlRunMigration(diesel::migrations::RunMigrationsError) {
+            cause;
+        },
+        SqlExecute(diesel::result::Error) {
+            cause;
+        },
+        Message(Cow<'static, str>) {
+            desc (e) &**e;
+            from (s: &'static str) s.into();
+            from (s: String) s.into();
         }
     }
 }
@@ -89,7 +107,7 @@ pub struct Index {
 
 
 impl Index {
-    pub fn new(path: String) -> Index {
+    pub fn new(path: String) -> Result<Index, IndexError> {
         let conn = SqliteConnection::establish(&path).expect("Could not open SQLite database");
 
         let mut bi = Index {
@@ -98,18 +116,17 @@ impl Index {
             reserved: HashMap::new(),
         };
 
-        let dir = diesel::migrations::find_migrations_directory().unwrap();
-        diesel::migrations::run_pending_migrations_in_directory(&bi.conn,
-                                                                &dir,
-                                                                &mut util::InfoWriter)
-            .unwrap();
-        bi.conn.begin_transaction().unwrap();
+        let dir = try!(diesel::migrations::find_migrations_directory());
+        try!(diesel::migrations::run_pending_migrations_in_directory(&bi.conn,
+                                                                     &dir,
+                                                                     &mut util::InfoWriter));
+        try!(bi.conn.begin_transaction());
         bi.refresh_next_id();
-        bi
+        Ok(bi)
     }
 
     #[cfg(test)]
-    pub fn new_for_testing() -> Index {
+    pub fn new_for_testing() -> Result<Index, IndexError> {
         Index::new(":memory:".to_string())
     }
 
@@ -260,9 +277,9 @@ impl Index {
 }
 
 impl MsgHandler<Msg, Reply> for Index {
-    type Err = MsgError;
+    type Err = IndexError;
 
-    fn handle(&mut self, msg: Msg, reply: Box<Fn(Reply)>) -> Result<(), MsgError> {
+    fn handle(&mut self, msg: Msg, reply: Box<Fn(Reply)>) -> Result<(), IndexError> {
         match msg {
             Msg::Reserve => {
                 reply(Reply::Reserved(self.reserve()));

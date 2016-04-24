@@ -36,13 +36,16 @@ use process::{Process, MsgHandler};
 mod index;
 mod schema;
 
-pub use self::index::{Index, BlobDesc};
+pub use self::index::{Index, IndexError, BlobDesc};
 
 
 error_type! {
     #[derive(Debug)]
     pub enum MsgError {
         Recv(mpsc::RecvError) {
+            cause;
+        },
+        Index(IndexError) {
             cause;
         }
     }
@@ -66,12 +69,12 @@ pub struct FileBackend {
 }
 
 impl FileBackend {
-    pub fn new(root: PathBuf) -> FileBackend {
-        FileBackend {
+    pub fn new(root: PathBuf) -> Result<FileBackend, MsgError> {
+        Ok(FileBackend {
             root: root,
             read_cache: Arc::new(Mutex::new(BTreeMap::new())),
             max_cache_size: 10,
-        }
+        })
     }
 
     fn guarded_cache_get(&self, name: &[u8]) -> Option<Result<Vec<u8>, String>> {
@@ -265,7 +268,10 @@ fn empty_blob_desc() -> BlobDesc {
 
 
 impl<B: StoreBackend> Store<B> {
-    pub fn new(index: index::IndexProcess, backend: B, max_blob_size: usize) -> Store<B> {
+    pub fn new(index: index::IndexProcess,
+               backend: B,
+               max_blob_size: usize)
+               -> Result<Store<B>, MsgError> {
         let mut bs = Store {
             backend: backend,
             blob_index: index,
@@ -275,12 +281,12 @@ impl<B: StoreBackend> Store<B> {
             max_blob_size: max_blob_size,
         };
         bs.reserve_new_blob();
-        bs
+        Ok(bs)
     }
 
     #[cfg(test)]
-    pub fn new_for_testing(backend: B, max_blob_size: usize) -> Store<B> {
-        let bi_p = Process::new(Box::new(move || index::Index::new_for_testing()));
+    pub fn new_for_testing(backend: B, max_blob_size: usize) -> Result<Store<B>, MsgError> {
+        let bi_p = try!(Process::new(Box::new(move || index::Index::new_for_testing())));
         let mut bs = Store {
             backend: backend,
             blob_index: bi_p,
@@ -290,7 +296,7 @@ impl<B: StoreBackend> Store<B> {
             max_blob_size: max_blob_size,
         };
         bs.reserve_new_blob();
-        bs
+        Ok(bs)
     }
 
     fn reserve_new_blob(&mut self) -> BlobDesc {
@@ -548,8 +554,9 @@ pub mod tests {
 
             let local_backend = backend.clone();
             let bs_p: StoreProcess = Process::new(Box::new(move || {
-                Store::new_for_testing(local_backend, 1024)
-            }));
+                                         Store::new_for_testing(local_backend, 1024)
+                                     }))
+                                         .unwrap();
 
             let mut ids = Vec::new();
             for chunk in chunks.iter() {
@@ -595,8 +602,9 @@ pub mod tests {
 
             let local_backend = backend.clone();
             let bs_p: StoreProcess = Process::new(Box::new(move || {
-                Store::new_for_testing(local_backend, 1024)
-            }));
+                                         Store::new_for_testing(local_backend, 1024)
+                                     }))
+                                         .unwrap();
 
             let mut ids = Vec::new();
             for chunk in chunks.iter() {
