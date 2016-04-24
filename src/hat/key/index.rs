@@ -14,6 +14,8 @@
 
 //! Local state for keys in the snapshot in progress (the "index").
 
+use std::borrow::Cow;
+
 use diesel;
 use diesel::prelude::*;
 use diesel::sqlite::SqliteConnection;
@@ -35,8 +37,13 @@ error_type! {
     pub enum MsgError {
         Recv(mpsc::RecvError) {
             cause;
+        },
+        Message(Cow<'static, str>) {
+            desc (e) &**e;
+            from (s: &'static str) s.into();
+            from (s: String) s.into();
         }
-    }
+     }
 }
 
 
@@ -59,7 +66,7 @@ pub struct Entry {
     pub data_length: Option<u64>,
 }
 
-pub type IndexProcess = Process<Msg, Reply>;
+pub type IndexProcess = Process<Msg, Result<Reply, MsgError>>;
 
 pub enum Msg {
     /// Insert an entry in the key index.
@@ -155,12 +162,18 @@ impl Clone for Index {
     }
 }
 
-impl MsgHandler<Msg, Reply> for Index {
+impl MsgHandler<Msg, Result<Reply, MsgError>> for Index {
     type Err = MsgError;
 
-    fn handle(&mut self, msg: Msg, reply: Box<Fn(Reply)>) -> Result<(), MsgError> {
+    fn handle(&mut self,
+              msg: Msg,
+              reply: Box<Fn(Result<Reply, MsgError>)>)
+              -> Result<(), MsgError> {
+        let reply_ok = |x| {
+            reply(Ok(x));
+            Ok(())
+        };
         match msg {
-
             Msg::Insert(entry) => {
                 use super::schema::keys::dsl::*;
 
@@ -204,7 +217,7 @@ impl MsgHandler<Msg, Reply> for Index {
                     }
                 };
 
-                reply(Reply::Entry(entry));
+                return reply_ok(Reply::Entry(entry));
             }
 
             Msg::Lookup(parent_, name_) => {
@@ -228,7 +241,7 @@ impl MsgHandler<Msg, Reply> for Index {
                 };
 
                 if let Some(row) = row_opt {
-                    reply(Reply::Entry(Entry {
+                    return reply_ok(Reply::Entry(Entry {
                         id: Some(row.id as u64),
                         parent_id: parent_,
                         name: name_,
@@ -241,9 +254,8 @@ impl MsgHandler<Msg, Reply> for Index {
                         data_hash: row.hash,
                         data_length: None,
                     }));
-                    return Ok(());
                 }
-                reply(Reply::NotFound);
+                return reply_ok(Reply::NotFound);
             }
 
             Msg::UpdateDataHash(entry, hash_opt, persistent_ref_opt) => {
@@ -270,12 +282,12 @@ impl MsgHandler<Msg, Reply> for Index {
                 }
 
                 self.maybe_flush();
-                reply(Reply::UpdateOk);
+                return reply_ok(Reply::UpdateOk);
             }
 
             Msg::Flush => {
                 self.flush();
-                reply(Reply::FlushOk);
+                return reply_ok(Reply::FlushOk);
             }
 
             Msg::ListDir(parent_opt) => {
@@ -294,9 +306,9 @@ impl MsgHandler<Msg, Reply> for Index {
                     }
                 };
 
-                reply(Reply::ListResult(rows.into_iter()
-                                            .map(|mut r| {
-                                                (Entry {
+                return reply_ok(Reply::ListResult(rows.into_iter()
+                                                      .map(|mut r| {
+                                                          (Entry {
                                                     id: Some(r.id as u64),
                                                     parent_id: r.parent.map(|x| x as u64),
                                                     name: r.name,
@@ -313,11 +325,9 @@ impl MsgHandler<Msg, Reply> for Index {
                                                  r.persistent_ref.as_mut().map(|p| {
                                                     blob::ChunkRef::from_bytes(&mut &p[..]).unwrap()
                                                 }))
-                                            })
-                                            .collect()));
+                                                      })
+                                                      .collect()));
             }
         }
-
-        return Ok(());
     }
 }
