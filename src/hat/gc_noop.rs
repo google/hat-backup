@@ -52,7 +52,7 @@ impl<B: gc::GcBackend> gc::Gc for GcNoop<B> {
     fn list_unused_ids(&mut self, _refs: mpsc::Sender<gc::Id>) {}
 
     fn status(&mut self, _final_ref: gc::Id) -> Option<gc::Status> {
-        return Some(gc::Status::Complete);
+        Some(gc::Status::Complete)
     }
 }
 

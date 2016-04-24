@@ -227,9 +227,8 @@ impl MsgHandler<Msg, Result<Reply, IndexError>> for Index {
                     }
                 };
 
-                return reply_ok(Reply::Entry(entry));
+                reply_ok(Reply::Entry(entry))
             }
-
             Msg::Lookup(parent_, name_) => {
                 use super::schema::keys::dsl::*;
 
@@ -263,9 +262,9 @@ impl MsgHandler<Msg, Result<Reply, IndexError>> for Index {
                         data_length: None,
                     }));
                 }
-                return reply_ok(Reply::NotFound);
-            }
 
+                reply_ok(Reply::NotFound)
+            }
             Msg::UpdateDataHash(entry, hash_opt, persistent_ref_opt) => {
                 use super::schema::keys::dsl::*;
 
@@ -293,12 +292,14 @@ impl MsgHandler<Msg, Result<Reply, IndexError>> for Index {
                 }
 
                 try!(self.maybe_flush());
-                return reply_ok(Reply::UpdateOk);
+
+                reply_ok(Reply::UpdateOk)
             }
 
             Msg::Flush => {
                 try!(self.flush());
-                return reply_ok(Reply::FlushOk);
+
+                reply_ok(Reply::FlushOk)
             }
 
             Msg::ListDir(parent_opt) => {
@@ -335,7 +336,8 @@ impl MsgHandler<Msg, Result<Reply, IndexError>> for Index {
                                     .as_mut()
                                     .map(|p| blob::ChunkRef::from_bytes(&mut &p[..]).unwrap()))
                               });
-                return reply_ok(Reply::ListResult(res.collect()));
+
+                reply_ok(Reply::ListResult(res.collect()))
             }
         }
     }

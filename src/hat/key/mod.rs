@@ -130,7 +130,7 @@ impl Store {
 
     pub fn hash_tree_writer(&mut self) -> SimpleHashTreeWriter<HashStoreBackend> {
         let backend = HashStoreBackend::new(self.hash_index.clone(), self.blob_store.clone());
-        return SimpleHashTreeWriter::new(8, backend);
+        SimpleHashTreeWriter::new(8, backend)
     }
 }
 
@@ -179,7 +179,7 @@ impl HashTreeBackend for HashStoreBackend {
             self.fetch_chunk_from_hash(hash.clone())
         };
 
-        return data_opt.and_then(|data| {
+        data_opt.and_then(|data| {
             let actual_hash = hash::Hash::new(&data[..]);
             if hash == actual_hash {
                 Some(data)
@@ -189,7 +189,7 @@ impl HashTreeBackend for HashStoreBackend {
                        hash);
                 None
             }
-        });
+        })
     }
 
     fn fetch_persistent_ref(&mut self, hash: hash::Hash) -> Option<blob::ChunkRef> {
@@ -206,8 +206,8 @@ impl HashTreeBackend for HashStoreBackend {
 
     fn fetch_payload(&mut self, hash: hash::Hash) -> Option<Vec<u8>> {
         match self.hash_index.send_reply(hash::Msg::FetchPayload(hash)) {
-            hash::Reply::Payload(p) => return p, // done
-            hash::Reply::HashNotKnown => return None, // done
+            hash::Reply::Payload(p) => p, // done
+            hash::Reply::HashNotKnown => None, // done
             _ => panic!("Unexpected reply from hash index."),
         }
     }
@@ -292,7 +292,7 @@ impl<IT: Iterator<Item = Vec<u8>>> MsgHandler<Msg<IT>, Result<Reply, MsgError>> 
         match msg {
             Msg::Flush => {
                 try!(self.flush());
-                return reply_ok(Reply::FlushOk);
+                reply_ok(Reply::FlushOk)
             }
 
             Msg::ListDir(parent) => {
@@ -315,9 +315,9 @@ impl<IT: Iterator<Item = Vec<u8>>> MsgHandler<Msg<IT>, Result<Reply, MsgError>> 
 
                             my_entries.push((entry, persistent_ref, open_fn));
                         }
-                        return reply_ok(Reply::ListResult(my_entries));
+                        reply_ok(Reply::ListResult(my_entries))
                     }
-                    _ => return reply_err("Unexpected result from key index"),
+                    _ => reply_err("Unexpected result from key index"),
                 }
             }
 

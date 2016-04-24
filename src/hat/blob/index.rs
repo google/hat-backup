@@ -153,6 +153,7 @@ impl Index {
     fn next_id(&mut self) -> i64 {
         let id = self.next_id;
         self.next_id += 1;
+
         id
     }
 
@@ -172,12 +173,14 @@ impl Index {
         self.reserved.insert(blob.name.clone(), blob.clone());
         self.in_air(&blob);
         self.commit_blob(&blob);
-        return blob;
+
+        blob
     }
 
     fn reserve(&mut self) -> BlobDesc {
         let blob = self.new_blob_desc();
         self.reserved.insert(blob.name.clone(), blob.clone());
+
         blob
     }
 
@@ -218,11 +221,11 @@ impl Index {
 
     fn find_id(&mut self, name_: &[u8]) -> Option<i64> {
         use super::schema::blobs::dsl::*;
-        return blobs.filter(name.eq(name_))
-                    .select(id)
-                    .first::<i64>(&self.conn)
-                    .optional()
-                    .expect("Error reading blob");
+        blobs.filter(name.eq(name_))
+             .select(id)
+             .first::<i64>(&self.conn)
+             .optional()
+             .expect("Error reading blob")
     }
 
     fn tag(&mut self, tag_: tags::Tag, target: Option<BlobDesc>) {
@@ -272,7 +275,8 @@ impl Index {
                 break; // channel closed.
             }
         }
-        return receiver;
+
+        receiver
     }
 }
 
@@ -317,6 +321,6 @@ impl MsgHandler<Msg, Reply> for Index {
             }
         }
 
-        return Ok(());
+        Ok(())
     }
 }

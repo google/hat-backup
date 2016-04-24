@@ -285,11 +285,12 @@ impl Index {
             .expect("Error inserting snapshot");
 
         let unique_id_ = self.last_insert_rowid();
-        return Info {
+
+        Info {
             unique_id: unique_id_,
             family_id: family_id_,
             snapshot_id: snapshot_id_,
-        };
+        }
     }
 
     fn update(&mut self,
@@ -359,8 +360,7 @@ impl Index {
         rows.into_iter()
             .map(|(snap, fam)| {
                 let status = tags::tag_from_num(snap.tag as i64)
-                                 .map(tag_to_work_status)
-                                 .unwrap_or(WorkStatus::CommitComplete);
+                                 .map_or(WorkStatus::CommitComplete, tag_to_work_status);
                 let hash_ = snap.hash.and_then(|bytes| {
                     if bytes.is_empty() {
                         None
@@ -411,7 +411,7 @@ impl Index {
                 msg: Some(&msg_[..]),
                 hash: Some(&hash_[..]),
                 tree_ref: Some(&tree_bytes[..]),
-                tag: work_opt_.map(work_status_to_tag).unwrap_or(tags::Tag::Done) as i32,
+                tag: work_opt_.map_or(tags::Tag::Done, work_status_to_tag) as i32,
             };
 
             diesel::insert(&new)
@@ -497,6 +497,6 @@ impl process::MsgHandler<Msg, Reply> for Index {
             }
         };
 
-        return Ok(());
+        Ok(())
     }
 }

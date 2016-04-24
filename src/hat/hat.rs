@@ -311,11 +311,11 @@ impl<B: 'static + blob::StoreBackend + Clone + Send> Hat<B> {
 
     pub fn hash_tree_writer(&mut self) -> hash::tree::SimpleHashTreeWriter<key::HashStoreBackend> {
         let backend = key::HashStoreBackend::new(self.hash_index.clone(), self.blob_store.clone());
-        return hash::tree::SimpleHashTreeWriter::new(8, backend);
+        hash::tree::SimpleHashTreeWriter::new(8, backend)
     }
 
     pub fn open_family(&self, name: String) -> Result<Family, HatError> {
-        return self.open_family_with_shutdown(name, None);
+        self.open_family_with_shutdown(name, None)
     }
 
     pub fn open_family_with_shutdown(&self,
@@ -447,7 +447,8 @@ impl<B: 'static + blob::StoreBackend + Clone + Send> Hat<B> {
                 hash::Reply::CommitOk => (),
                 _ => return Err(From::from("Unexpected reply from hash index")),
             }
-            return Ok(get_hash_id(hashes, hash).unwrap());
+
+            Ok(get_hash_id(hashes, hash).unwrap())
         }
 
         let family = self.open_family(family_name.clone())
@@ -509,8 +510,9 @@ impl<B: 'static + blob::StoreBackend + Clone + Send> Hat<B> {
                                                                 out: mpsc::Sender<hash::Entry>)
                                                                 -> (Option<Vec<u8>>, i64) {
             match hash::tree::SimpleHashTreeReader::open(backend, hash, Some(pref)).unwrap() {
-                hash::tree::ReaderResult::Empty => (None, 0),
-                hash::tree::ReaderResult::SingleBlock(..) => (None, 0),
+                hash::tree::ReaderResult::Empty | hash::tree::ReaderResult::SingleBlock(..) => {
+                    (None, 0)
+                }
                 hash::tree::ReaderResult::Tree(mut reader) => {
                     let (payload, level) = reader.list_entries(out);
                     (Some(payload), level)
@@ -545,7 +547,8 @@ impl<B: 'static + blob::StoreBackend + Clone + Send> Hat<B> {
             };
             register_out.send(r).unwrap();
         }
-        return recover_tree(self.hash_backend.clone(), dir_hash, dir_ref, recover_out);
+
+        recover_tree(self.hash_backend.clone(), dir_hash, dir_ref, recover_out)
     }
 
     pub fn resume(&mut self) -> Result<(), HatError> {
@@ -911,7 +914,7 @@ impl<B: 'static + blob::StoreBackend + Clone + Send> Hat<B> {
         self.gc.deregister(info.clone(), final_ref, listing);
         try!(family.flush());
 
-        return self.deregister_finalize(family, info, final_ref);
+        self.deregister_finalize(family, info, final_ref)
     }
 
     fn deregister_finalize_by_name(&mut self,
@@ -1001,7 +1004,8 @@ impl<B: 'static + blob::StoreBackend + Clone + Send> Hat<B> {
             blob::Reply::FlushOk => (),
             _ => panic!("Unexpected reply from blob store."),
         }
-        return (deleted_hashes, live_blobs);
+
+        (deleted_hashes, live_blobs)
     }
 }
 
@@ -1237,10 +1241,10 @@ impl Family {
                 key::Msg::Insert(file,
                       if is_directory { None }
                       else { Some(Box::new(move|| {
-                          contents.map(|b| FileIterator::from_bytes(b))
+                          contents.map(FileIterator::from_bytes)
                       }))}))) {
             key::Reply::Id(..) => return Ok(()),
-            _ => return Err(From::from("Unexpected reply from key store")),
+            _ => Err(From::from("Unexpected reply from key store")),
         }
     }
 
@@ -1395,10 +1399,10 @@ impl Family {
 
         loop {
             let mut current_msg_is_empty = true;
-            let mut files_msg = capnp::message::Builder::new_default();
+            let mut file_block_msg = capnp::message::Builder::new_default();
 
             {
-                let files_root = files_msg.init_root::<root_capnp::file_list::Builder>();
+                let files_root = file_block_msg.init_root::<root_capnp::file_list::Builder>();
                 let mut files = files_root.init_files(files_at_a_time as u32);
 
                 for (idx, (entry, data_ref, _data_res_open)) in it.by_ref()
@@ -1474,7 +1478,7 @@ impl Family {
                 break;
             } else {
                 let mut buf = vec![];
-                try!(capnp::serialize_packed::write_message(&mut buf, &files_msg));
+                try!(capnp::serialize_packed::write_message(&mut buf, &file_block_msg));
                 tree.append(buf);
             }
         }

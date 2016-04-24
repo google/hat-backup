@@ -134,7 +134,7 @@ impl StoreBackend for FileBackend {
         // Update cache to contain key:
         self.guarded_cache_put(name.to_vec(), res.clone());
 
-        return res;
+        res
     }
 
     fn delete(&mut self, name: &[u8]) -> Result<(), String> {
@@ -173,7 +173,8 @@ impl ChunkRef {
         let reader = try!(capnp::serialize_packed::read_message(bytes,
                                                        capnp::message::ReaderOptions::new()));
         let root = try!(reader.get_root::<root_capnp::chunk_ref::Reader>());
-        return Ok(try!(ChunkRef::read_msg(&root)));
+
+        Ok(try!(ChunkRef::read_msg(&root)))
     }
 
     pub fn as_bytes(&self) -> Vec<u8> {
@@ -185,6 +186,7 @@ impl ChunkRef {
 
         let mut out = Vec::new();
         capnp::serialize_packed::write_message(&mut out, &message).unwrap();
+
         out
     }
 
@@ -471,7 +473,8 @@ impl<B: StoreBackend> MsgHandler<Msg, Reply> for Store<B> {
                 reply(Reply::FlushOk);
             }
         }
-        return Ok(());
+
+        Ok(())
     }
 }
 

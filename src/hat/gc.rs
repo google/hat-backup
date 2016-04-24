@@ -134,7 +134,8 @@ impl SafeMemoryBackend {
                        .unwrap_or(&vec![])
                        .clone();
         refs.iter().map(|id| sender.send(*id)).last();
-        return receiver;
+
+        receiver
     }
 
     fn commit(&mut self) {
@@ -183,7 +184,8 @@ impl GcBackend for SafeMemoryBackend {
             }
         };
         self.backend.lock().unwrap().gc_data.insert((hash_id, family_id), new.clone());
-        return new;
+
+        new
     }
 
     fn update_all_data_by_family(&mut self, family_id: Id, fs: mpsc::Receiver<UpdateFn>) {
@@ -230,7 +232,8 @@ impl GcBackend for SafeMemoryBackend {
 
         let (sender, receiver) = mpsc::channel();
         ids.iter().map(|id| sender.send(*id)).last();
-        return receiver;
+
+        receiver
     }
 
     fn manual_commit(&mut self) {
@@ -326,7 +329,8 @@ pub fn resume_register_test<GC>(mk_gc: Box<FnBox(SafeMemoryBackend) -> Box<GC>>,
         let (sender, receiver) = mpsc::channel();
         refs[..n].iter().map(|id| sender.send(*id as Id)).last();
         drop(sender);
-        return receiver;
+
+        receiver
     };
 
     for n in 1..refs.len() {
@@ -376,7 +380,8 @@ pub fn resume_deregister_test<GC>(mk_gc: Box<FnBox(SafeMemoryBackend) -> Box<GC>
         let (sender, receiver) = mpsc::channel();
         refs[..n].iter().map(|id| sender.send(*id as Id)).last();
         drop(sender);
-        return receiver;
+
+        receiver
     };
     gc.register(info.clone(), receiver(refs.len() - 1));
     let final_ref = *refs.last().expect("nonempty");

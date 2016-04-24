@@ -85,7 +85,7 @@ impl<Msg: 'static + Send, Reply: 'static + Send> Process<Msg, Reply> {
         where H: 'static + MsgHandler<Msg, Reply> + Send,
               H::Err: From<mpsc::RecvError> + fmt::Debug
     {
-        return Process::new_with_shutdown(handler_proc, None);
+        Process::new_with_shutdown(handler_proc, None)
     }
 
     pub fn new_with_shutdown<H>(handler_proc: Box<FnBox() -> Result<H, H::Err>>,
@@ -113,7 +113,7 @@ impl<Msg: 'static + Send, Reply: 'static + Send> Process<Msg, Reply> {
         where H: 'static + MsgHandler<Msg, Reply> + Send,
               H::Err: From<mpsc::RecvError> + fmt::Debug
     {
-        let shutdown_after = self.shutdown_after.clone();
+        let shutdown_after = self.shutdown_after;
         let mut my_handler = try!(handler_proc());
         thread::spawn(move || {
             // fork handler
@@ -135,12 +135,8 @@ impl<Msg: 'static + Send, Reply: 'static + Send> Process<Msg, Reply> {
                     }
                 }
                 None => {
-                    loop {
-                        if let Ok((msg, rep)) = receiver.recv() {
-                            handle_msg(msg, rep)
-                        } else {
-                            break;  // Shutting down.
-                        }
+                    while let Ok((msg, rep)) = receiver.recv() {
+                        handle_msg(msg, rep)
                     }
                 }
             };
@@ -155,6 +151,7 @@ impl<Msg: 'static + Send, Reply: 'static + Send> Process<Msg, Reply> {
     pub fn send_reply(&self, msg: Msg) -> Reply {
         let (sender, receiver) = mpsc::channel();
         self.sender.send((msg, sender)).ok();
-        return receiver.recv().expect("Failed to get reply for msg");
+
+        receiver.recv().expect("Failed to get reply for msg")
     }
 }

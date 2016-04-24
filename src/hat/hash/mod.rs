@@ -295,7 +295,8 @@ impl Index {
                                .first::<schema::Hash>(&self.conn)
                                .optional()
                                .expect("Error querying hashes");
-        return result_opt.map(|result| {
+
+        result_opt.map(|result| {
             Entry {
                 hash: Hash { bytes: result.hash },
                 level: result.height,
@@ -314,7 +315,7 @@ impl Index {
                     }
                 }),
             }
-        });
+        })
     }
 
     fn refresh_id_counter(&mut self) {
@@ -427,7 +428,7 @@ impl Index {
                             .optional()
                             .expect("Error querying hash tag");
 
-        return tag_opt.and_then(tags::tag_from_num);
+        tag_opt.and_then(tags::tag_from_num)
     }
 
     fn list_ids_by_tag(&mut self, tag_: i64) -> Vec<i64> {
@@ -436,12 +437,11 @@ impl Index {
         // TODO(jos): consider moving this requirement closer to the code that needs it.
         use self::schema::hashes::dsl::*;
 
-        return hashes.filter(tag.eq(tag_))
-                     .order(height.desc())
-                     .select(id)
-                     .load::<i64>(&self.conn)
-                     .expect("Error listing hashes");
-
+        hashes.filter(tag.eq(tag_))
+              .order(height.desc())
+              .select(id)
+              .load::<i64>(&self.conn)
+              .expect("Error listing hashes")
     }
 
     fn read_gc_data(&mut self, hash_id_: i64, family_id_: i64) -> GcData {
@@ -577,7 +577,8 @@ impl Index {
                 break;
             }
         }
-        return receiver;
+
+        receiver
     }
 
     fn delete(&mut self, id_: i64) {
@@ -735,6 +736,7 @@ impl MsgHandler<Msg, Reply> for Index {
                 reply(Reply::CommitOk);
             }
         }
-        return Ok(());
+
+        Ok(())
     }
 }

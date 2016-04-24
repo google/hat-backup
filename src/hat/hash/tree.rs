@@ -349,7 +349,7 @@ impl<B: HashTreeBackend + Clone> SimpleHashTreeReader<B> {
         let mut metadata = vec![];
         while !self.stack.is_empty() {
             let child = self.stack.pop().expect("!is_empty()");
-            metadata.extend(child.hash.iter());
+            metadata.extend_from_slice(&child.hash);
 
             let hash = Hash { bytes: child.hash.clone() };
             match child.persistent_ref.kind {
@@ -391,7 +391,8 @@ impl<B: HashTreeBackend + Clone> SimpleHashTreeReader<B> {
 
         }
         assert!(!metadata.is_empty());
-        return (metadata, level);
+
+        (metadata, level)
     }
 
     fn extract(&mut self) -> Option<Vec<u8>> {
@@ -441,7 +442,8 @@ impl<B: HashTreeBackend + Clone> Iterator for ReaderResult<B> {
         if force_empty || res.is_none() {
             *self = ReaderResult::Empty;
         }
-        return res;
+
+        res
     }
 }
 
