@@ -14,6 +14,7 @@
 
 use std::collections::BTreeMap;
 use std::fmt::Debug;
+use std::mem;
 
 use ordered_collection::OrderedCollection;
 
@@ -54,11 +55,8 @@ impl<P: Debug + Clone + Ord, K: Debug + Ord + Clone, V: Clone> UniquePriorityQue
 
     pub fn put_value(&mut self, k: K, v: V) {
         let prio = self.key_to_priority.get(&k).expect("put_value: Key must exist.");
-        self.priority.update_value(prio.clone(), |opt| {
-            match opt {
-                Some(&(ref status, None)) => (status.clone(), Some(v.clone())),
-                _ => unreachable!(),
-            }
+        self.priority.update_value(prio, move |cur| {
+            cur.1 = Some(v);
         });
     }
 
@@ -68,25 +66,23 @@ impl<P: Debug + Clone + Ord, K: Debug + Ord + Clone, V: Clone> UniquePriorityQue
     }
 
     pub fn update_value<F>(&mut self, k: &K, f: F)
-        where F: Fn(&V) -> V
+        where F: Fn(V) -> V
     {
         let prio = self.key_to_priority.get(k).expect("update_value: Key must exist.");
-        self.priority.update_value(prio.clone(), |opt| {
-            match opt {
-                Some(&(ref status, Some(ref v))) => (status.clone(), Some(f(v))),
-                _ => unreachable!(),
-            }
+        self.priority.update_value(prio, |cur| {
+            let v = mem::replace(&mut cur.1, None).unwrap();
+            cur.1 = Some(f(v));
         });
     }
 
-    pub fn set_ready(&mut self, p: P) {
-        self.priority.update_value(p, |opt| {
-            match opt {
-                Some(&(Status::Pending(ref k), ref v_opt)) => {
-                    (Status::Ready(k.clone()), v_opt.clone())
-                }
+    pub fn set_ready(&mut self, p: &P) {
+        self.priority.update_value(p, |cur| {
+            let k = match cur.0 {
+                Status::Pending(ref k) => k.clone(),
                 _ => unreachable!(),
-            }
+            };
+
+            cur.0 = Status::Ready(k);
         });
     }
 
@@ -134,7 +130,7 @@ mod tests {
             assert_eq!(upq.pop_min_if_complete(), None);
             upq.put_value(key, value);
             assert_eq!(upq.pop_min_if_complete(), None);
-            upq.set_ready(priority);
+            upq.set_ready(&priority);
             assert_eq!(upq.pop_min_if_complete(), Some((priority, key, value)));
 
             true
@@ -173,7 +169,7 @@ mod tests {
 
             // Commit all
             for (p, _) in in_use1.iter() {
-                upq.set_ready(*p);
+                upq.set_ready(p);
             }
 
             // Verify that everything is now there, and all entries are complete

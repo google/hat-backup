@@ -13,36 +13,26 @@
 // limitations under the License.
 
 use std::collections::BTreeMap;
-use std::collections::btree_map;
 
 pub trait OrderedCollection<K: Clone + Ord, V> {
-    fn insert_unique(&mut self, k: K, v: V) {
-        self.update_value(k, move |v_opt| {
-            match v_opt {
-                Some(_) => panic!("Key already exists."),
-                None => v,
-            }
-        });
-    }
-
+    fn insert_unique(&mut self, k: K, v: V);
     fn pop_min_when<F>(&mut self, ready: F) -> Option<(K, V)> where F: Fn(&K, &V) -> bool;
-    fn update_value<F>(&mut self, k: K, f: F) where F: FnOnce(Option<&V>) -> V;
+    fn update_value<F>(&mut self, k: &K, f: F) where F: FnOnce(&mut V);
     fn find_min(&self) -> Option<(&K, &V)>;
 }
 
 impl<K: Clone + Ord, V> OrderedCollection<K, V> for BTreeMap<K, V> {
-    fn update_value<F>(&mut self, k: K, f: F)
-        where F: FnOnce(Option<&V>) -> V
-    {
-        match self.entry(k) {
-            btree_map::Entry::Occupied(mut entry) => {
-                let new_v = f(Some(entry.get()));
-                entry.insert(new_v);
-            }
-            btree_map::Entry::Vacant(space) => {
-                space.insert(f(None));
-            }
+    fn insert_unique(&mut self, k: K, v: V) {
+        if self.insert(k, v).is_some() {
+            panic!("Key already exists.");
         }
+    }
+
+    fn update_value<F>(&mut self, k: &K, f: F)
+        where F: FnOnce(&mut V)
+    {
+        let v = self.get_mut(k).expect("Value must be present");
+        f(v);
     }
 
     fn pop_min_when<F>(&mut self, ready: F) -> Option<(K, V)>
