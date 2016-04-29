@@ -22,8 +22,6 @@
 // Unstable APIs:
 #![feature(test)]
 
-#![feature(fnbox)]
-
 // Standard Rust imports.
 #[macro_use]
 extern crate log;

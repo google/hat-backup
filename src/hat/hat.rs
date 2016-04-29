@@ -1196,7 +1196,7 @@ impl listdir::PathHandler<Option<u64>> for InsertPathHandler {
                     key::Msg::Insert(
                       file_entry.key_entry,
                       if is_directory { None }
-                      else { Some(Box::new(move|| {
+                      else { Some(Box::new(move|()| {
                               match local_file_entry.file_iterator() {
                                   Err(e) => {
                                       println!("Skipping '{}': {}",
@@ -1255,7 +1255,7 @@ impl Family {
         match try!(self.key_store_process.send_reply(
                 key::Msg::Insert(file,
                       if is_directory { None }
-                      else { Some(Box::new(move|| {
+                      else { Some(Box::new(move|()| {
                           contents.map(FileIterator::from_bytes)
                       }))}))) {
             key::Reply::Id(..) => return Ok(()),
@@ -1519,7 +1519,7 @@ mod tests {
         Hat::new_for_testing(backend, max_blob_size, shutdown_after).unwrap()
     }
 
-    fn setup_family(shutdown_after: Option<Vec<i64>>) -> (MemoryBackend, Hat<MemoryBackend>, Family) {
+    fn setup_family(shutdown_after: Option<Vec<i64>>) -> (MemoryBackend, HatRc<MemoryBackend>, Family) {
         let shutdown = shutdown_after.unwrap_or(vec![]);
 
         let backend = MemoryBackend::new();

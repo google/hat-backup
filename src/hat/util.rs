@@ -27,3 +27,19 @@ impl io::Write for InfoWriter {
         Ok(())
     }
 }
+
+/*
+  This is a hack until FnBox gets stabilized, see issue #28796.
+  TODO(idolf): When #28796 gets stabalized, remove this and use the
+               the library implementation. Then FnOnce gets a proper
+               implementation, use that.
+*/
+pub trait FnBox<A, B> : Send {
+    fn call(self: Box<Self>, args: A) -> B;
+}
+
+impl<A, B, F> FnBox<A, B> for F where F: FnOnce(A) -> B + Send {
+    fn call(self: Box<F>, args: A) -> B {
+        self(args)
+    }
+}

@@ -14,7 +14,6 @@
 
 //! Combines data chunks into larger blobs to be stored externally.
 
-use std::boxed::FnBox;
 use std::collections::BTreeMap;
 
 use std::fs;
@@ -31,6 +30,8 @@ use root_capnp;
 
 use tags;
 use process::{Process, MsgHandler};
+
+use util::FnBox;
 
 
 mod index;
@@ -219,7 +220,7 @@ pub enum Msg {
     /// Store a new data chunk into the current blob. The callback is triggered after the blob
     /// containing the chunk has been committed to persistent storage (it is then safe to use the
     /// `ChunkRef` as persistent reference).
-    Store(Vec<u8>, Kind, Box<FnBox(ChunkRef) + Send>),
+    Store(Vec<u8>, Kind, Box<FnBox<ChunkRef, ()>>),
     /// Retrieve the data chunk identified by `ChunkRef`.
     Retrieve(ChunkRef),
     /// Store a full named blob (used for writing root).
@@ -254,7 +255,7 @@ pub struct Store<B> {
     blob_index: index::IndexProcess,
     blob_desc: BlobDesc,
 
-    buffer_data: Vec<(ChunkRef, Vec<u8>, Box<FnBox(ChunkRef) + Send>)>,
+    buffer_data: Vec<(ChunkRef, Vec<u8>, Box<FnBox<ChunkRef, ()>>)>,
     buffer_data_len: usize,
 
     max_blob_size: usize,
@@ -356,7 +357,7 @@ impl<B: StoreBackend> Store<B> {
 
         // Go through callbacks
         for (blobid, callback) in ready_callback.into_iter() {
-            callback(blobid);
+            callback.call(blobid);
         }
     }
 
@@ -381,7 +382,7 @@ impl<B: StoreBackend> MsgHandler<Msg, Reply> for Store<B> {
                         kind: kind,
                     };
                     let cb_id = id.clone();
-                    thread::spawn(move || callback(cb_id));
+                    thread::spawn(move || callback.call(cb_id));
                     reply(Reply::StoreOk(id));
                     return Ok(());
                 }

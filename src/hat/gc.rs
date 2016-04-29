@@ -13,7 +13,6 @@
 // limitations under the License.
 
 
-use std::boxed::FnBox;
 use std::collections::HashMap;
 use std::fmt;
 use std::mem;
@@ -22,10 +21,11 @@ use std::sync::{mpsc, Arc, Mutex};
 use hash::GcData;
 use snapshot;
 use tags;
+use util::FnBox;
 
 
 pub type Id = i64;
-pub type UpdateFn = Box<FnBox(GcData) -> Option<GcData> + Send>;
+pub type UpdateFn = Box<FnBox<GcData, Option<GcData>>>;
 
 
 #[derive(PartialEq, Debug)]
@@ -204,7 +204,7 @@ impl GcBackend for SafeMemoryBackend {
                    family_id: Id,
                    f: UpdateFn)
                    -> Result<GcData, Self::Err> {
-        let new = match f(try!(self.get_data(hash_id, family_id))) {
+        let new = match f.call(try!(self.get_data(hash_id, family_id))) {
             Some(d) => d,
             None => {
                 GcData {
@@ -225,7 +225,7 @@ impl GcBackend for SafeMemoryBackend {
         for (k, v) in &mut self.backend.lock().unwrap().gc_data {
             if k.1 == family_id {
                 let f = fs.recv().unwrap();
-                *v = f(v.clone()).unwrap_or(GcData {
+                *v = f.call(v.clone()).unwrap_or(GcData {
                     num: 0,
                     bytes: vec![],
                 });
