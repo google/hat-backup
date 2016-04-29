@@ -58,9 +58,21 @@ error_type! {
 
 pub type StoreProcess<IT> = Process<Msg<IT>, Result<Reply, MsgError>>;
 
-pub type DirElem = (Entry,
-                    Option<blob::ChunkRef>,
-                    Option<Box<FnBox() -> Option<ReaderResult<HashStoreBackend>> + Send>>);
+pub type DirElem = (Entry, Option<blob::ChunkRef>, Option<HashStoreInitializer>);
+
+pub struct HashStoreInitializer {
+    local_hash: hash::Hash,
+    local_ref: Option<blob::ChunkRef>,
+    local_hash_index: hash::IndexProcess,
+    local_blob_store: blob::StoreProcess,
+}
+
+impl HashStoreInitializer {
+    pub fn init(self) -> Option<ReaderResult<HashStoreBackend>> {
+        let backend = HashStoreBackend::new(self.local_hash_index, self.local_blob_store);
+        SimpleHashTreeReader::open(backend, self.local_hash, self.local_ref)
+    }
+}
 
 // Public structs
 pub enum Msg<IT> {
@@ -301,16 +313,12 @@ impl<IT: Iterator<Item = Vec<u8>>> MsgHandler<Msg<IT>, Result<Reply, MsgError>> 
                         let mut my_entries: Vec<DirElem> = Vec::with_capacity(entries.len());
                         for (entry, persistent_ref) in entries.into_iter() {
                             let open_fn = entry.data_hash.as_ref().map(|bytes| {
-                                let local_hash = hash::Hash { bytes: bytes.clone() };
-                                let local_ref = persistent_ref.clone();
-                                let local_hash_index = self.hash_index.clone();
-                                let local_blob_store = self.blob_store.clone();
-                                Box::new(move || {
-                                    SimpleHashTreeReader::open(
-                                        HashStoreBackend::new(local_hash_index.clone(),
-                                                              local_blob_store.clone()),
-                                        local_hash, local_ref) })
-                                    as Box<FnBox() -> Option<ReaderResult<HashStoreBackend>> + Send>
+                                HashStoreInitializer {
+                                    local_hash: hash::Hash { bytes: bytes.clone() },
+                                    local_ref: persistent_ref.clone(),
+                                    local_hash_index: self.hash_index.clone(),
+                                    local_blob_store: self.blob_store.clone(),
+                                }
                             });
 
                             my_entries.push((entry, persistent_ref, open_fn));
@@ -573,7 +581,7 @@ mod tests {
 
                     match dir.file.data {
                         Some(ref original) => {
-                            let it = match tree_data.expect("has data")() {
+                            let it = match tree_data.expect("has data").init() {
                                 None => panic!("No data."),
                                 Some(it) => it,
                             };

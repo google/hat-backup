@@ -1297,7 +1297,7 @@ impl Family {
                 Some(read_fn) => {
                     // This is a file, write it
                     let mut fd = fs::File::create(&path).unwrap();
-                    if let Some(tree) = read_fn() {
+                    if let Some(tree) = read_fn.init() {
                         self.write_file_chunks(&mut fd, tree);
                     }
                 }
