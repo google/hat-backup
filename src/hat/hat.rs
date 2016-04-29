@@ -34,6 +34,7 @@ use time;
 
 use blob;
 use gc;
+use gc::Gc;
 use gc_rc;
 use hash;
 use key;
@@ -82,7 +83,7 @@ error_type! {
 }
 
 
-struct GcBackend {
+pub struct GcBackend {
     hash_index: hash::IndexProcess,
 }
 
@@ -181,16 +182,18 @@ impl gc::GcBackend for GcBackend {
 }
 
 
-pub struct Hat<B> {
+pub struct Hat<B, G: gc::Gc> {
     repository_root: Option<PathBuf>,
     snapshot_index: snapshot::IndexProcess,
     blob_store: blob::StoreProcess,
     hash_index: hash::IndexProcess,
     blob_backend: B,
     hash_backend: key::HashStoreBackend,
-    gc: Box<gc::Gc<Err = HatError>>,
+    gc: G,
     max_blob_size: usize,
 }
+
+pub type HatRc<B> = Hat<B, gc_rc::GcRc<GcBackend>>;
 
 fn concat_filename(a: &PathBuf, b: String) -> String {
     let mut result = a.clone();
@@ -234,11 +237,11 @@ fn get_hash_id(index: &hash::IndexProcess, hash: hash::Hash) -> Result<i64, HatE
     }
 }
 
-impl<B: 'static + blob::StoreBackend + Clone + Send> Hat<B> {
+impl<B: 'static + blob::StoreBackend + Clone + Send> HatRc<B> {
     pub fn open_repository(repository_root: &PathBuf,
                            backend: B,
                            max_blob_size: usize)
-                           -> Result<Hat<B>, HatError> {
+                           -> Result<HatRc<B>, HatError> {
         let snapshot_index_path = snapshot_index_name(repository_root);
         let blob_index_path = blob_index_name(repository_root);
         let hash_index_path = hash_index_name(repository_root);
@@ -253,7 +256,7 @@ impl<B: 'static + blob::StoreBackend + Clone + Send> Hat<B> {
         }));
 
         let gc_backend = GcBackend { hash_index: hi_p.clone() };
-        let gc = gc_rc::GcRc::new(Box::new(gc_backend));
+        let gc = gc::Gc::new(gc_backend);
 
         let mut hat = Hat {
             repository_root: Some(repository_root.clone()),
@@ -262,7 +265,7 @@ impl<B: 'static + blob::StoreBackend + Clone + Send> Hat<B> {
             blob_store: bs_p.clone(),
             blob_backend: backend.clone(),
             hash_backend: key::HashStoreBackend::new(hi_p, bs_p),
-            gc: Box::new(gc),
+            gc: gc,
             max_blob_size: max_blob_size,
         };
 
@@ -276,7 +279,7 @@ impl<B: 'static + blob::StoreBackend + Clone + Send> Hat<B> {
     pub fn new_for_testing(backend: B,
                            max_blob_size: usize,
                            shutdown_after: &[i64])
-                           -> Result<Hat<B>, HatError> {
+                           -> Result<HatRc<B>, HatError> {
         // If provided, we cycle the possible shutdown values to give every process one.
         let mut shutdown = shutdown_after.iter().cycle();
 
@@ -301,7 +304,7 @@ impl<B: 'static + blob::StoreBackend + Clone + Send> Hat<B> {
                        .unwrap();
 
         let gc_backend = GcBackend { hash_index: hi_p.clone() };
-        let gc = gc_rc::GcRc::new(Box::new(gc_backend));
+        let gc = gc::Gc::new(gc_backend);
 
         let mut hat = Hat {
             repository_root: None,
@@ -310,7 +313,7 @@ impl<B: 'static + blob::StoreBackend + Clone + Send> Hat<B> {
             blob_store: bs_p.clone(),
             blob_backend: backend.clone(),
             hash_backend: key::HashStoreBackend::new(hi_p, bs_p),
-            gc: Box::new(gc),
+            gc: gc,
             max_blob_size: max_blob_size,
         };
 
@@ -898,7 +901,7 @@ impl<B: 'static + blob::StoreBackend + Clone + Send> Hat<B> {
         let local_hash_index = self.hash_index.clone();
         let local_hash_backend = self.hash_backend.clone();
         let local_dir_hash = dir_hash.clone();
-        let listing = Box::new(move || {
+        let listing = move || {
             let (sender, receiver) = mpsc::channel();
             list_snapshot(&local_hash_backend,
                           &sender,
@@ -919,7 +922,7 @@ impl<B: 'static + blob::StoreBackend + Clone + Send> Hat<B> {
                 _ => panic!("Unexpected reply from hash index."),
             }
             id_receiver
-        });
+        };
 
         let final_ref = get_hash_id(&self.hash_index, dir_hash)
                             .expect("Snapshot hash does not exist");
@@ -1511,7 +1514,7 @@ mod tests {
 
     fn setup_hat<B: Clone + Send + StoreBackend + 'static>(backend: B,
                                                            shutdown_after: &[i64])
-                                                           -> Hat<B> {
+                                                           -> HatRc<B> {
         let max_blob_size = 1024 * 1024;
         Hat::new_for_testing(backend, max_blob_size, shutdown_after).unwrap()
     }
