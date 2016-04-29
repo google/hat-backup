@@ -120,11 +120,9 @@ impl Store {
     pub fn new_for_testing<B: 'static + blob::StoreBackend + Send + Clone>
         (backend: B)
          -> Result<Store, MsgError> {
-        let ki_p = try!(Process::new(Box::new(move || index::Index::new_for_testing())));
-        let hi_p = try!(Process::new(Box::new(move || hash::Index::new_for_testing())));
-        let bs_p = try!(Process::new(Box::new(move || {
-            blob::Store::new_for_testing(backend, 1024)
-        })));
+        let ki_p = try!(Process::new(move || index::Index::new_for_testing()));
+        let hi_p = try!(Process::new(move || hash::Index::new_for_testing()));
+        let bs_p = try!(Process::new(move || blob::Store::new_for_testing(backend, 1024)));
         Ok(Store {
             index: ki_p,
             hash_index: hi_p,
@@ -616,7 +614,7 @@ mod tests {
     fn identity() {
         fn prop(size: u8) -> bool {
             let backend = MemoryBackend::new();
-            let ks_p = Process::new(Box::new(move || Store::new_for_testing(backend))).unwrap();
+            let ks_p = Process::new(move || Store::new_for_testing(backend)).unwrap();
 
             let mut fs = rng_filesystem(size as usize);
             insert_and_update_fs(&mut fs, ks_p.clone());
@@ -636,9 +634,7 @@ mod tests {
     #[bench]
     fn insert_1_key_x_128000_zeros(bench: &mut Bencher) {
         let backend = DevNullBackend;
-        let ks_p: StoreProcess<EntryStub> = Process::new(Box::new(move || {
-                                                Store::new_for_testing(backend)
-                                            }))
+        let ks_p: StoreProcess<EntryStub> = Process::new(move || Store::new_for_testing(backend))
                                                 .unwrap();
 
         let bytes = vec![0u8; 128*1024];
@@ -676,9 +672,7 @@ mod tests {
     #[bench]
     fn insert_1_key_x_128000_unique(bench: &mut Bencher) {
         let backend = DevNullBackend;
-        let ks_p: StoreProcess<EntryStub> = Process::new(Box::new(move || {
-                                                Store::new_for_testing(backend)
-                                            }))
+        let ks_p: StoreProcess<EntryStub> = Process::new(move || Store::new_for_testing(backend))
                                                 .unwrap();
 
         let bytes = vec![0u8; 128*1024];
@@ -721,9 +715,7 @@ mod tests {
     #[bench]
     fn insert_1_key_x_16_x_128000_zeros(bench: &mut Bencher) {
         let backend = DevNullBackend;
-        let ks_p: StoreProcess<EntryStub> = Process::new(Box::new(move || {
-                                                Store::new_for_testing(backend)
-                                            }))
+        let ks_p: StoreProcess<EntryStub> = Process::new(move || Store::new_for_testing(backend))
                                                 .unwrap();
 
         bench.iter(|| {
@@ -761,9 +753,7 @@ mod tests {
     #[bench]
     fn insert_1_key_x_16_x_128000_unique(bench: &mut Bencher) {
         let backend = DevNullBackend;
-        let ks_p: StoreProcess<EntryStub> = Process::new(Box::new(move || {
-                                                Store::new_for_testing(backend)
-                                            }))
+        let ks_p: StoreProcess<EntryStub> = Process::new(move || Store::new_for_testing(backend))
                                                 .unwrap();
 
         let bytes = vec![0u8; 128*1024];
@@ -817,9 +807,7 @@ mod tests {
     #[bench]
     fn insert_1_key_unchanged_empty(bench: &mut Bencher) {
         let backend = DevNullBackend;
-        let ks_p: StoreProcess<EntryStub> = Process::new(Box::new(move || {
-                                                Store::new_for_testing(backend)
-                                            }))
+        let ks_p: StoreProcess<EntryStub> = Process::new(move || Store::new_for_testing(backend))
                                                 .unwrap();
 
         bench.iter(|| {
@@ -846,9 +834,7 @@ mod tests {
     #[bench]
     fn insert_1_key_updated_empty(bench: &mut Bencher) {
         let backend = DevNullBackend;
-        let ks_p: StoreProcess<EntryStub> = Process::new(Box::new(move || {
-                                                Store::new_for_testing(backend)
-                                            }))
+        let ks_p: StoreProcess<EntryStub> = Process::new(move || Store::new_for_testing(backend))
                                                 .unwrap();
 
         let mut i = 0;
@@ -877,9 +863,7 @@ mod tests {
     #[bench]
     fn insert_1_key_unique_empty(bench: &mut Bencher) {
         let backend = DevNullBackend;
-        let ks_p: StoreProcess<EntryStub> = Process::new(Box::new(move || {
-                                                Store::new_for_testing(backend)
-                                            }))
+        let ks_p: StoreProcess<EntryStub> = Process::new(move || Store::new_for_testing(backend))
                                                 .unwrap();
 
         let mut i = 0;

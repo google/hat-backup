@@ -288,7 +288,7 @@ impl<B: StoreBackend> Store<B> {
 
     #[cfg(test)]
     pub fn new_for_testing(backend: B, max_blob_size: usize) -> Result<Store<B>, MsgError> {
-        let bi_p = try!(Process::new(Box::new(move || index::Index::new_for_testing())));
+        let bi_p = try!(Process::new(move || index::Index::new_for_testing()));
         let mut bs = Store {
             backend: backend,
             blob_index: bi_p,
@@ -556,9 +556,9 @@ pub mod tests {
             let mut backend = MemoryBackend::new();
 
             let local_backend = backend.clone();
-            let bs_p: StoreProcess = Process::new(Box::new(move || {
+            let bs_p: StoreProcess = Process::new(move || {
                                          Store::new_for_testing(local_backend, 1024)
-                                     }))
+                                     })
                                          .unwrap();
 
             let mut ids = Vec::new();
@@ -604,9 +604,9 @@ pub mod tests {
             let mut backend = MemoryBackend::new();
 
             let local_backend = backend.clone();
-            let bs_p: StoreProcess = Process::new(Box::new(move || {
+            let bs_p: StoreProcess = Process::new(move || {
                                          Store::new_for_testing(local_backend, 1024)
-                                     }))
+                                     })
                                          .unwrap();
 
             let mut ids = Vec::new();
