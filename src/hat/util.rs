@@ -29,10 +29,10 @@ impl io::Write for InfoWriter {
 }
 
 /*
-  This is a hack until FnBox gets stabilized, see issue #28796.
-  TODO(idolf): When #28796 gets stabalized, remove this and use the
-               the library implementation. Then FnOnce gets a proper
-               implementation, use that.
+  TODO(idolf): This is a hack until FnBox gets stabilized, see issue
+               rust-lang/rust#28796.  When this issue gets stabilized, remove
+               this and use the the library implementation. Then FnOnce gets a
+               proper implementation, use that.
 */
 pub trait FnBox<A, B> : Send {
     fn call(self: Box<Self>, args: A) -> B;
