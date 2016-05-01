@@ -58,19 +58,19 @@ error_type! {
 
 pub type StoreProcess<IT> = Process<Msg<IT>, Result<Reply, MsgError>>;
 
-pub type DirElem = (Entry, Option<blob::ChunkRef>, Option<HashStoreInitializer>);
+pub type DirElem = (Entry, Option<blob::ChunkRef>, Option<HashTreeReaderInitializer>);
 
-pub struct HashStoreInitializer {
-    local_hash: hash::Hash,
-    local_ref: Option<blob::ChunkRef>,
-    local_hash_index: hash::IndexProcess,
-    local_blob_store: blob::StoreProcess,
+pub struct HashTreeReaderInitializer {
+    hash: hash::Hash,
+    persistent_ref: Option<blob::ChunkRef>,
+    hash_index: hash::IndexProcess,
+    blob_store: blob::StoreProcess,
 }
 
-impl HashStoreInitializer {
+impl HashTreeReaderInitializer {
     pub fn init(self) -> Option<ReaderResult<HashStoreBackend>> {
-        let backend = HashStoreBackend::new(self.local_hash_index, self.local_blob_store);
-        SimpleHashTreeReader::open(backend, self.local_hash, self.local_ref)
+        let backend = HashStoreBackend::new(self.hash_index, self.blob_store);
+        SimpleHashTreeReader::open(backend, self.hash, self.persistent_ref)
     }
 }
 
@@ -311,11 +311,11 @@ impl<IT: Iterator<Item = Vec<u8>>> MsgHandler<Msg<IT>, Result<Reply, MsgError>> 
                         let mut my_entries: Vec<DirElem> = Vec::with_capacity(entries.len());
                         for (entry, persistent_ref) in entries.into_iter() {
                             let open_fn = entry.data_hash.as_ref().map(|bytes| {
-                                HashStoreInitializer {
-                                    local_hash: hash::Hash { bytes: bytes.clone() },
-                                    local_ref: persistent_ref.clone(),
-                                    local_hash_index: self.hash_index.clone(),
-                                    local_blob_store: self.blob_store.clone(),
+                                HashTreeReaderInitializer {
+                                    hash: hash::Hash { bytes: bytes.clone() },
+                                    persistent_ref: persistent_ref.clone(),
+                                    hash_index: self.hash_index.clone(),
+                                    blob_store: self.blob_store.clone(),
                                 }
                             });
 
