@@ -419,13 +419,12 @@ impl<IT: Iterator<Item = Vec<u8>>> MsgHandler<Msg<IT>, Result<Reply, MsgError>> 
 mod tests {
     use super::*;
 
-    use blob::tests::{MemoryBackend, DevNullBackend};
+    use blob::tests::MemoryBackend;
     use process::Process;
 
     use rand::Rng;
     use rand::thread_rng;
 
-    use test::Bencher;
     use quickcheck;
 
     fn random_ascii_bytes() -> Vec<u8> {
@@ -434,9 +433,9 @@ mod tests {
     }
 
     #[derive(Clone, Debug)]
-    struct EntryStub {
-        key_entry: Entry,
-        data: Option<Vec<Vec<u8>>>,
+    pub struct EntryStub {
+        pub key_entry: Entry,
+        pub data: Option<Vec<Vec<u8>>>,
     }
 
     impl Iterator for EntryStub {
@@ -630,6 +629,16 @@ mod tests {
         }
         quickcheck::quickcheck(prop as fn(u8) -> bool);
     }
+}
+
+#[cfg(all(test, feature = "benchmarks"))]
+mod bench {
+    use super::*;
+    use super::tests::*;
+
+    use blob::tests::DevNullBackend;
+    use process::Process;
+    use test::Bencher;
 
     #[bench]
     fn insert_1_key_x_128000_zeros(bench: &mut Bencher) {
@@ -710,7 +719,6 @@ mod tests {
 
         bench.bytes = 128 * 1024;
     }
-
 
     #[bench]
     fn insert_1_key_x_16_x_128000_zeros(bench: &mut Bencher) {
