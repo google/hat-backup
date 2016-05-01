@@ -10,6 +10,7 @@ path = "src/hat/main.rs"
 
 [build-dependencies]
 capnpc = "*"
+syntex = "*"
 
 [dependencies]
 capnp = "*"
@@ -31,9 +32,9 @@ default-features = false
 features = ["sqlite"]
 version = "0.6.*"
 
-[dependencies.diesel_codegen]
+[build-dependencies.diesel_codegen]
 default-features = false
-features = ["nightly", "sqlite"]
+features = ["with-syntex", "sqlite"]
 version = "0.6.*"
 
 [profile]
