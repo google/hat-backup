@@ -22,15 +22,7 @@
 // Unstable APIs:
 #![feature(test)]
 
-#![feature(custom_attribute)]
-#![feature(custom_derive)]
-#![feature(plugin)]
-
 #![feature(fnbox)]
-
-#![feature(custom_derive, custom_attribute, plugin)]
-#![plugin(diesel_codegen)]
-
 
 // Standard Rust imports.
 #[macro_use]
