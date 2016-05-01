@@ -13,7 +13,6 @@
 // limitations under the License.
 
 
-use std::boxed::FnBox;
 use std::collections::HashMap;
 use std::fmt;
 use std::mem;
@@ -22,10 +21,11 @@ use std::sync::{mpsc, Arc, Mutex};
 use hash::GcData;
 use snapshot;
 use tags;
+use util::FnBox;
 
 
 pub type Id = i64;
-pub type UpdateFn = Box<FnBox(GcData) -> Option<GcData> + Send>;
+pub type UpdateFn = Box<FnBox<GcData, Option<GcData>>>;
 
 
 #[derive(PartialEq, Debug)]
@@ -62,7 +62,7 @@ pub trait GcBackend {
 }
 
 
-pub fn mark_tree<B>(backend: &mut Box<B>, root: Id, tag: tags::Tag) -> Result<(), B::Err>
+pub fn mark_tree<B>(backend: &mut B, root: Id, tag: tags::Tag) -> Result<(), B::Err>
     where B: GcBackend
 {
     try!(backend.set_tag(root, tag.clone()));
@@ -79,9 +79,11 @@ pub fn mark_tree<B>(backend: &mut Box<B>, root: Id, tag: tags::Tag) -> Result<()
     Ok(())
 }
 
-
 pub trait Gc {
     type Err;
+    type Backend;
+
+    fn new(Self::Backend) -> Self;
 
     fn register(&mut self,
                 snapshot: snapshot::Info,
@@ -93,11 +95,12 @@ pub trait Gc {
                         final_ref: Id)
                         -> Result<(), Self::Err>;
 
-    fn deregister(&mut self,
-                  snapshot: snapshot::Info,
-                  final_ref: Id,
-                  Box<FnBox() -> mpsc::Receiver<Id>>)
-                  -> Result<(), Self::Err>;
+    fn deregister<F>(&mut self,
+                     snapshot: snapshot::Info,
+                     final_ref: Id,
+                     refs: F)
+                     -> Result<(), Self::Err>
+        where F: FnOnce() -> mpsc::Receiver<Id>;
 
     fn list_unused_ids(&mut self, refs: mpsc::Sender<Id>) -> Result<(), Self::Err>;
 
@@ -201,7 +204,7 @@ impl GcBackend for SafeMemoryBackend {
                    family_id: Id,
                    f: UpdateFn)
                    -> Result<GcData, Self::Err> {
-        let new = match f(try!(self.get_data(hash_id, family_id))) {
+        let new = match f.call(try!(self.get_data(hash_id, family_id))) {
             Some(d) => d,
             None => {
                 GcData {
@@ -222,7 +225,7 @@ impl GcBackend for SafeMemoryBackend {
         for (k, v) in &mut self.backend.lock().unwrap().gc_data {
             if k.1 == family_id {
                 let f = fs.recv().unwrap();
-                *v = f(v.clone()).unwrap_or(GcData {
+                *v = f.call(v.clone()).unwrap_or(GcData {
                     num: 0,
                     bytes: vec![],
                 });
@@ -282,10 +285,9 @@ pub enum GcType {
     InExact, // Includes probalistic gc.
 }
 
-pub fn gc_test<GC>(snapshots: Vec<Vec<u8>>,
-                   mk_gc: Box<FnBox(SafeMemoryBackend) -> Box<GC>>,
-                   gc_type: GcType)
-    where GC: Gc,
+pub fn gc_test<GC, F>(snapshots: Vec<Vec<u8>>, mk_gc: F, gc_type: GcType)
+    where F: FnOnce(SafeMemoryBackend) -> GC,
+          GC: Gc,
           GC::Err: fmt::Debug
 {
     let mut backend = SafeMemoryBackend::new();
@@ -324,7 +326,7 @@ pub fn gc_test<GC>(snapshots: Vec<Vec<u8>>,
         // Deregister snapshot.
         let last = backend.list_snapshot_refs(infos[i].clone()).iter().last().unwrap();
         let refs = backend.list_snapshot_refs(infos[i].clone());
-        gc.deregister(infos[i].clone(), last, Box::new(|| refs)).unwrap();
+        gc.deregister(infos[i].clone(), last, || refs).unwrap();
     }
 
     let mut all_refs: Vec<u8> = snapshots.iter().flat_map(|v| v.clone().into_iter()).collect();
@@ -347,8 +349,9 @@ pub fn gc_test<GC>(snapshots: Vec<Vec<u8>>,
     }
 }
 
-pub fn resume_register_test<GC>(mk_gc: Box<FnBox(SafeMemoryBackend) -> Box<GC>>, gc_type: GcType)
-    where GC: Gc,
+pub fn resume_register_test<GC, F>(mk_gc: F, gc_type: GcType)
+    where F: FnOnce(SafeMemoryBackend) -> GC,
+          GC: Gc,
           GC::Err: fmt::Debug
 {
     let mut backend = SafeMemoryBackend::new();
@@ -386,7 +389,7 @@ pub fn resume_register_test<GC>(mk_gc: Box<FnBox(SafeMemoryBackend) -> Box<GC>>,
 
     let last = receiver(refs.len()).iter().last().unwrap();
     let receive = receiver(refs.len());
-    gc.deregister(info.clone(), last, Box::new(move || receive)).unwrap();
+    gc.deregister(info.clone(), last, move || receive).unwrap();
 
     let (sender, receiver) = mpsc::channel();
     gc.list_unused_ids(sender).unwrap();
@@ -399,8 +402,9 @@ pub fn resume_register_test<GC>(mk_gc: Box<FnBox(SafeMemoryBackend) -> Box<GC>>,
     }
 }
 
-pub fn resume_deregister_test<GC>(mk_gc: Box<FnBox(SafeMemoryBackend) -> Box<GC>>, gc_type: GcType)
-    where GC: Gc,
+pub fn resume_deregister_test<GC, F>(mk_gc: F, gc_type: GcType)
+    where F: FnOnce(SafeMemoryBackend) -> GC,
+          GC: Gc,
           GC::Err: fmt::Debug
 {
     let mut backend = SafeMemoryBackend::new();
@@ -432,7 +436,7 @@ pub fn resume_deregister_test<GC>(mk_gc: Box<FnBox(SafeMemoryBackend) -> Box<GC>
 
         let receive = receiver(refs.len());
 
-        gc.deregister(info.clone(), final_ref, Box::new(move || receive)).unwrap();
+        gc.deregister(info.clone(), final_ref, move || receive).unwrap();
         assert_eq!(gc.status(final_ref).ok(), Some(Some(Status::Complete)));
     }
 

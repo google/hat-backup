@@ -13,7 +13,6 @@
 // limitations under the License.
 
 
-use std::boxed::FnBox;
 use std::sync::mpsc;
 
 use gc;
@@ -22,20 +21,18 @@ use snapshot;
 
 
 pub struct GcNoop<B> {
-    backend: Box<B>,
+    backend: B,
 }
 
-impl<B: gc::GcBackend> GcNoop<B> {
-    pub fn new(backend: Box<B>) -> GcNoop<B>
+impl<B: gc::GcBackend> gc::Gc for GcNoop<B> {
+    type Err = hat::HatError;
+    type Backend = B;
+
+    fn new(backend: B) -> GcNoop<B>
         where B: gc::GcBackend
     {
         GcNoop { backend: backend }
     }
-}
-
-
-impl<B: gc::GcBackend> gc::Gc for GcNoop<B> {
-    type Err = hat::HatError;
 
     fn register(&mut self,
                 _snapshot: snapshot::Info,
@@ -60,11 +57,13 @@ impl<B: gc::GcBackend> gc::Gc for GcNoop<B> {
         Ok(())
     }
 
-    fn deregister(&mut self,
-                  _snapshot: snapshot::Info,
-                  _final_ref: gc::Id,
-                  _refs: Box<FnBox() -> mpsc::Receiver<gc::Id>>)
-                  -> Result<(), Self::Err> {
+    fn deregister<F>(&mut self,
+                     _snapshot: snapshot::Info,
+                     _final_ref: gc::Id,
+                     _refs: F)
+                     -> Result<(), Self::Err>
+        where F: FnOnce() -> mpsc::Receiver<gc::Id>
+    {
         Ok(())
     }
 
@@ -79,7 +78,7 @@ impl<B: gc::GcBackend> gc::Gc for GcNoop<B> {
 
 #[test]
 fn gc_noop_test() {
-    gc::gc_test(vec![vec![1], vec![2], vec![1, 2, 3]],
-                Box::new(move |backend| Box::new(GcNoop::new(Box::new(backend)))),
-                gc::GcType::InExact);
+    gc::gc_test::<GcNoop<_>, _>(vec![vec![1], vec![2], vec![1, 2, 3]],
+                                move |backend| gc::Gc::new(backend),
+                                gc::GcType::InExact);
 }

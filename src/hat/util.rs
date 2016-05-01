@@ -27,3 +27,19 @@ impl io::Write for InfoWriter {
         Ok(())
     }
 }
+
+/*
+  TODO(idolf): This is a hack until FnBox gets stabilized, see issue
+               rust-lang/rust#28796.  When this issue gets stabilized, remove
+               this and use the the library implementation. Then FnOnce gets a
+               proper implementation, use that.
+*/
+pub trait FnBox<A, B> : Send {
+    fn call(self: Box<Self>, args: A) -> B;
+}
+
+impl<A, B, F> FnBox<A, B> for F where F: FnOnce(A) -> B + Send {
+    fn call(self: Box<F>, args: A) -> B {
+        self(args)
+    }
+}

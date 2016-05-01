@@ -15,7 +15,6 @@
 //! Local state for known hashes and their external location (blob reference).
 
 use std::borrow::Cow;
-use std::boxed::FnBox;
 use std::sync::mpsc;
 use time::Duration;
 
@@ -33,6 +32,7 @@ use process::{Process, MsgHandler};
 use tags;
 use unique_priority_queue::UniquePriorityQueue;
 use util;
+use util::FnBox;
 
 mod schema;
 pub mod tree;
@@ -169,8 +169,8 @@ pub enum Msg {
 
     /// APIs related to garbage collector metadata tied to (hash id, family id) pairs.
     ReadGcData(i64, i64),
-    UpdateGcData(i64, i64, Box<FnBox(GcData) -> Option<GcData> + Send>),
-    UpdateFamilyGcData(i64, mpsc::Receiver<Box<FnBox(GcData) -> Option<GcData> + Send>>),
+    UpdateGcData(i64, i64, Box<FnBox<GcData, Option<GcData>>>),
+    UpdateFamilyGcData(i64, mpsc::Receiver<Box<FnBox<GcData, Option<GcData>>>>),
 
     /// Manual commit. This also disables automatic periodic commit.
     ManualCommit,
@@ -496,10 +496,10 @@ impl Index {
     fn update_gc_data(&mut self,
                       hash_id: i64,
                       family_id: i64,
-                      f: Box<FnBox(GcData) -> Option<GcData> + Send>)
+                      f: Box<FnBox<GcData, Option<GcData>>>)
                       -> GcData {
         let data = self.read_gc_data(hash_id, family_id);
-        match f(data.clone()) {
+        match f.call(data.clone()) {
             None => {
                 self.delete_gc_data(hash_id, family_id);
                 data
@@ -513,7 +513,7 @@ impl Index {
 
     fn update_family_gc_data(&mut self,
                              family_id_: i64,
-                             fs: mpsc::Receiver<Box<FnBox(GcData) -> Option<GcData> + Send>>) {
+                             fs: mpsc::Receiver<Box<FnBox<GcData, Option<GcData>>>>) {
         use self::schema::gc_metadata::dsl::*;
 
         let hash_ids_ = gc_metadata.filter(family_id.eq(family_id_))

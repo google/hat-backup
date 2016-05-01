@@ -34,6 +34,7 @@ use time;
 
 use blob;
 use gc;
+use gc::Gc;
 use gc_rc;
 use hash;
 use key;
@@ -82,7 +83,7 @@ error_type! {
 }
 
 
-struct GcBackend {
+pub struct GcBackend {
     hash_index: hash::IndexProcess,
 }
 
@@ -181,16 +182,18 @@ impl gc::GcBackend for GcBackend {
 }
 
 
-pub struct Hat<B> {
+pub struct Hat<B, G: gc::Gc> {
     repository_root: Option<PathBuf>,
     snapshot_index: snapshot::IndexProcess,
     blob_store: blob::StoreProcess,
     hash_index: hash::IndexProcess,
     blob_backend: B,
     hash_backend: key::HashStoreBackend,
-    gc: Box<gc::Gc<Err = HatError>>,
+    gc: G,
     max_blob_size: usize,
 }
+
+pub type HatRc<B> = Hat<B, gc_rc::GcRc<GcBackend>>;
 
 fn concat_filename(a: &PathBuf, b: String) -> String {
     let mut result = a.clone();
@@ -234,26 +237,26 @@ fn get_hash_id(index: &hash::IndexProcess, hash: hash::Hash) -> Result<i64, HatE
     }
 }
 
-impl<B: 'static + blob::StoreBackend + Clone + Send> Hat<B> {
+impl<B: 'static + blob::StoreBackend + Clone + Send> HatRc<B> {
     pub fn open_repository(repository_root: &PathBuf,
                            backend: B,
                            max_blob_size: usize)
-                           -> Result<Hat<B>, HatError> {
+                           -> Result<HatRc<B>, HatError> {
         let snapshot_index_path = snapshot_index_name(repository_root);
         let blob_index_path = blob_index_name(repository_root);
         let hash_index_path = hash_index_name(repository_root);
-        let si_p = try!(Process::new(Box::new(move || snapshot::Index::new(snapshot_index_path))));
-        let bi_p = try!(Process::new(Box::new(move || blob::Index::new(blob_index_path))));
-        let hi_p = try!(Process::new(Box::new(move || hash::Index::new(hash_index_path))));
+        let si_p = try!(Process::new(move || snapshot::Index::new(snapshot_index_path)));
+        let bi_p = try!(Process::new(move || blob::Index::new(blob_index_path)));
+        let hi_p = try!(Process::new(move || hash::Index::new(hash_index_path)));
 
         let local_blob_index = bi_p.clone();
         let local_backend = backend.clone();
-        let bs_p = try!(Process::new(Box::new(move || {
+        let bs_p = try!(Process::new(move || {
             blob::Store::new(local_blob_index, local_backend, max_blob_size)
-        })));
+        }));
 
         let gc_backend = GcBackend { hash_index: hi_p.clone() };
-        let gc = gc_rc::GcRc::new(Box::new(gc_backend));
+        let gc = gc::Gc::new(gc_backend);
 
         let mut hat = Hat {
             repository_root: Some(repository_root.clone()),
@@ -262,7 +265,7 @@ impl<B: 'static + blob::StoreBackend + Clone + Send> Hat<B> {
             blob_store: bs_p.clone(),
             blob_backend: backend.clone(),
             hash_backend: key::HashStoreBackend::new(hi_p, bs_p),
-            gc: Box::new(gc),
+            gc: gc,
             max_blob_size: max_blob_size,
         };
 
@@ -276,32 +279,32 @@ impl<B: 'static + blob::StoreBackend + Clone + Send> Hat<B> {
     pub fn new_for_testing(backend: B,
                            max_blob_size: usize,
                            shutdown_after: &[i64])
-                           -> Result<Hat<B>, HatError> {
+                           -> Result<HatRc<B>, HatError> {
         // If provided, we cycle the possible shutdown values to give every process one.
         let mut shutdown = shutdown_after.iter().cycle();
 
-        let si_p = Process::new_with_shutdown(Box::new(move || snapshot::Index::new_for_testing()),
+        let si_p = Process::new_with_shutdown(move || snapshot::Index::new_for_testing(),
                                               shutdown.next().cloned())
                        .unwrap();
-        let bi_p = Process::new_with_shutdown(Box::new(move || blob::Index::new_for_testing()),
+        let bi_p = Process::new_with_shutdown(move || blob::Index::new_for_testing(),
                                               shutdown.next().cloned())
                        .unwrap();
-        let hi_p = Process::new_with_shutdown(Box::new(move || hash::Index::new_for_testing()),
+        let hi_p = Process::new_with_shutdown(move || hash::Index::new_for_testing(),
                                               shutdown.next().cloned())
                        .unwrap();
 
         let local_blob_index = bi_p.clone();
         let local_backend = backend.clone();
-        let bs_p = Process::new_with_shutdown(Box::new(move || {
+        let bs_p = Process::new_with_shutdown(move || {
                                                   blob::Store::new(local_blob_index,
                                                                    local_backend,
                                                                    max_blob_size)
-                                              }),
+                                              },
                                               shutdown.next().cloned())
                        .unwrap();
 
         let gc_backend = GcBackend { hash_index: hi_p.clone() };
-        let gc = gc_rc::GcRc::new(Box::new(gc_backend));
+        let gc = gc::Gc::new(gc_backend);
 
         let mut hat = Hat {
             repository_root: None,
@@ -310,7 +313,7 @@ impl<B: 'static + blob::StoreBackend + Clone + Send> Hat<B> {
             blob_store: bs_p.clone(),
             blob_backend: backend.clone(),
             hash_backend: key::HashStoreBackend::new(hi_p, bs_p),
-            gc: Box::new(gc),
+            gc: gc,
             max_blob_size: max_blob_size,
         };
 
@@ -343,15 +346,13 @@ impl<B: 'static + blob::StoreBackend + Clone + Send> Hat<B> {
             None => ":memory:".to_string(),
         };
 
-        let ki_p = try!(Process::new_with_shutdown(Box::new(move || {
-                                                       key::Index::new(key_index_path)
-                                                   }),
+        let ki_p = try!(Process::new_with_shutdown(move || key::Index::new(key_index_path),
                                                    shutdown_after));
 
         let local_ks = key::Store::new(ki_p.clone(),
                                        self.hash_index.clone(),
                                        self.blob_store.clone());
-        let ks_p = try!(Process::new_with_shutdown(Box::new(move || local_ks), shutdown_after));
+        let ks_p = try!(Process::new_with_shutdown(move || local_ks, shutdown_after));
 
         let ks = try!(key::Store::new(ki_p, self.hash_index.clone(), self.blob_store.clone()));
 
@@ -900,7 +901,7 @@ impl<B: 'static + blob::StoreBackend + Clone + Send> Hat<B> {
         let local_hash_index = self.hash_index.clone();
         let local_hash_backend = self.hash_backend.clone();
         let local_dir_hash = dir_hash.clone();
-        let listing = Box::new(move || {
+        let listing = move || {
             let (sender, receiver) = mpsc::channel();
             list_snapshot(&local_hash_backend,
                           &sender,
@@ -921,7 +922,7 @@ impl<B: 'static + blob::StoreBackend + Clone + Send> Hat<B> {
                 _ => panic!("Unexpected reply from hash index."),
             }
             id_receiver
-        });
+        };
 
         let final_ref = get_hash_id(&self.hash_index, dir_hash)
                             .expect("Snapshot hash does not exist");
@@ -1195,7 +1196,7 @@ impl listdir::PathHandler<Option<u64>> for InsertPathHandler {
                     key::Msg::Insert(
                       file_entry.key_entry,
                       if is_directory { None }
-                      else { Some(Box::new(move|| {
+                      else { Some(Box::new(move|()| {
                               match local_file_entry.file_iterator() {
                                   Err(e) => {
                                       println!("Skipping '{}': {}",
@@ -1254,7 +1255,7 @@ impl Family {
         match try!(self.key_store_process.send_reply(
                 key::Msg::Insert(file,
                       if is_directory { None }
-                      else { Some(Box::new(move|| {
+                      else { Some(Box::new(move|()| {
                           contents.map(FileIterator::from_bytes)
                       }))}))) {
             key::Reply::Id(..) => return Ok(()),
@@ -1297,7 +1298,7 @@ impl Family {
                 Some(read_fn) => {
                     // This is a file, write it
                     let mut fd = fs::File::create(&path).unwrap();
-                    if let Some(tree) = read_fn() {
+                    if let Some(tree) = read_fn.init() {
                         self.write_file_chunks(&mut fd, tree);
                     }
                 }
@@ -1513,12 +1514,12 @@ mod tests {
 
     fn setup_hat<B: Clone + Send + StoreBackend + 'static>(backend: B,
                                                            shutdown_after: &[i64])
-                                                           -> Hat<B> {
+                                                           -> HatRc<B> {
         let max_blob_size = 1024 * 1024;
         Hat::new_for_testing(backend, max_blob_size, shutdown_after).unwrap()
     }
 
-    fn setup_family(shutdown_after: Option<Vec<i64>>) -> (MemoryBackend, Hat<MemoryBackend>, Family) {
+    fn setup_family(shutdown_after: Option<Vec<i64>>) -> (MemoryBackend, HatRc<MemoryBackend>, Family) {
         let shutdown = shutdown_after.unwrap_or(vec![]);
 
         let backend = MemoryBackend::new();

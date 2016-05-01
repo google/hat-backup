@@ -13,7 +13,6 @@
 // limitations under the License.
 
 
-use std::boxed::FnBox;
 use std::sync::mpsc;
 
 use hash::GcData;
@@ -28,20 +27,18 @@ const DATA_FAMILY: i64 = 0;
 
 
 pub struct GcRc<B> {
-    backend: Box<B>,
+    backend: B,
 }
 
-impl<B: gc::GcBackend> GcRc<B> {
-    pub fn new(backend: Box<B>) -> GcRc<B>
+impl<B: gc::GcBackend> gc::Gc for GcRc<B> {
+    type Err = B::Err;
+    type Backend = B;
+
+    fn new(backend: B) -> GcRc<B>
         where B: gc::GcBackend
     {
         GcRc { backend: backend }
     }
-}
-
-
-impl<B: gc::GcBackend> gc::Gc for GcRc<B> {
-    type Err = B::Err;
 
     fn register(&mut self,
                 _snapshot: snapshot::Info,
@@ -93,11 +90,13 @@ impl<B: gc::GcBackend> gc::Gc for GcRc<B> {
         Ok(())
     }
 
-    fn deregister(&mut self,
-                  _snapshot: snapshot::Info,
-                  ref_final: gc::Id,
-                  refs: Box<FnBox() -> mpsc::Receiver<gc::Id>>)
-                  -> Result<(), Self::Err> {
+    fn deregister<F>(&mut self,
+                     _snapshot: snapshot::Info,
+                     ref_final: gc::Id,
+                     refs: F)
+                     -> Result<(), Self::Err>
+        where F: FnOnce() -> mpsc::Receiver<gc::Id>
+    {
         // Start off with a commit to disable automatic commit.
         // This causes deregister to run as one transaction.
         try!(self.backend.manual_commit());
@@ -150,19 +149,18 @@ impl<B: gc::GcBackend> gc::Gc for GcRc<B> {
 
 #[test]
 fn gc_rc_test() {
-    gc::gc_test(vec![vec![1], vec![2], vec![1, 2, 3], vec![4, 5, 6]],
-                Box::new(move |backend| Box::new(GcRc::new(Box::new(backend)))),
-                gc::GcType::Exact);
+    gc::gc_test::<GcRc<_>, _>(vec![vec![1], vec![2], vec![1, 2, 3], vec![4, 5, 6]],
+                              move |backend| gc::Gc::new(backend),
+                              gc::GcType::Exact);
 }
 
 #[test]
 fn gc_rc_resume_register_test() {
-    gc::resume_register_test(Box::new(move |backend| Box::new(GcRc::new(Box::new(backend)))),
-                             gc::GcType::Exact);
+    gc::resume_register_test::<GcRc<_>, _>(move |backend| gc::Gc::new(backend), gc::GcType::Exact);
 }
 
 #[test]
 fn gc_rc_resume_deregister_test() {
-    gc::resume_deregister_test(Box::new(move |backend| Box::new(GcRc::new(Box::new(backend)))),
-                               gc::GcType::Exact);
+    gc::resume_deregister_test::<GcRc<_>, _>(move |backend| gc::Gc::new(backend),
+                                             gc::GcType::Exact);
 }

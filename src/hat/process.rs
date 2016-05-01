@@ -50,7 +50,6 @@
 /// A handler is allowed to call `reply()` **exactly** once. Not calling it or calling it multiple
 /// times will likely cause runtime panicure when using `send_reply()`.
 
-use std::boxed::FnBox;
 use std::fmt;
 use std::thread;
 use std::sync::mpsc;
@@ -80,19 +79,20 @@ pub trait MsgHandler<Msg, Reply> {
 
 impl<Msg: 'static + Send, Reply: 'static + Send> Process<Msg, Reply> {
     /// Create and start a new process using `handler`.
-    pub fn new<H>(handler_proc: Box<FnBox() -> Result<H, H::Err>>)
-                  -> Result<Process<Msg, Reply>, H::Err>
+    pub fn new<H, F>(handler_proc: F) -> Result<Process<Msg, Reply>, H::Err>
         where H: 'static + MsgHandler<Msg, Reply> + Send,
-              H::Err: From<mpsc::RecvError> + fmt::Debug
+              H::Err: From<mpsc::RecvError> + fmt::Debug,
+              F: FnOnce() -> Result<H, H::Err>
     {
         Process::new_with_shutdown(handler_proc, None)
     }
 
-    pub fn new_with_shutdown<H>(handler_proc: Box<FnBox() -> Result<H, H::Err>>,
-                                shutdown_after: Option<i64>)
-                                -> Result<Process<Msg, Reply>, H::Err>
+    pub fn new_with_shutdown<H, F>(handler_proc: F,
+                                   shutdown_after: Option<i64>)
+                                   -> Result<Process<Msg, Reply>, H::Err>
         where H: 'static + MsgHandler<Msg, Reply> + Send,
-              H::Err: From<mpsc::RecvError> + fmt::Debug
+              H::Err: From<mpsc::RecvError> + fmt::Debug,
+              F: FnOnce() -> Result<H, H::Err>
     {
         let (sender, receiver) = mpsc::sync_channel(10);
         let p = Process {
@@ -106,12 +106,13 @@ impl<Msg: 'static + Send, Reply: 'static + Send> Process<Msg, Reply> {
     }
 
 
-    fn start<H>(&self,
-                receiver: mpsc::Receiver<(Msg, mpsc::Sender<Reply>)>,
-                handler_proc: Box<FnBox() -> Result<H, H::Err>>)
-                -> Result<(), H::Err>
+    fn start<H, F>(&self,
+                   receiver: mpsc::Receiver<(Msg, mpsc::Sender<Reply>)>,
+                   handler_proc: F)
+                   -> Result<(), H::Err>
         where H: 'static + MsgHandler<Msg, Reply> + Send,
-              H::Err: From<mpsc::RecvError> + fmt::Debug
+              H::Err: From<mpsc::RecvError> + fmt::Debug,
+              F: FnOnce() -> Result<H, H::Err>
     {
         let shutdown_after = self.shutdown_after;
         let mut my_handler = try!(handler_proc());

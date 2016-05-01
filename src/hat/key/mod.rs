@@ -15,7 +15,6 @@
 //! External API for creating and manipulating snapshots.
 
 use std::borrow::Cow;
-use std::boxed::FnBox;
 use std::sync::mpsc;
 
 use blob;
@@ -23,6 +22,7 @@ use hash;
 use hash::tree::{HashTreeBackend, SimpleHashTreeWriter, SimpleHashTreeReader, ReaderResult};
 
 use process::{Process, MsgHandler};
+use util::FnBox;
 
 
 mod schema;
@@ -58,16 +58,28 @@ error_type! {
 
 pub type StoreProcess<IT> = Process<Msg<IT>, Result<Reply, MsgError>>;
 
-pub type DirElem = (Entry,
-                    Option<blob::ChunkRef>,
-                    Option<Box<FnBox() -> Option<ReaderResult<HashStoreBackend>> + Send>>);
+pub type DirElem = (Entry, Option<blob::ChunkRef>, Option<HashTreeReaderInitializer>);
+
+pub struct HashTreeReaderInitializer {
+    hash: hash::Hash,
+    persistent_ref: Option<blob::ChunkRef>,
+    hash_index: hash::IndexProcess,
+    blob_store: blob::StoreProcess,
+}
+
+impl HashTreeReaderInitializer {
+    pub fn init(self) -> Option<ReaderResult<HashStoreBackend>> {
+        let backend = HashStoreBackend::new(self.hash_index, self.blob_store);
+        SimpleHashTreeReader::open(backend, self.hash, self.persistent_ref)
+    }
+}
 
 // Public structs
 pub enum Msg<IT> {
     /// Insert a key into the index. If this key has associated data a "chunk-iterator creator"
     /// can be passed along with it. If the data turns out to be unreadable, this iterator proc
     /// can return `None`. Returns `Id` with the new entry ID.
-    Insert(Entry, Option<Box<FnBox() -> Option<IT> + Send>>),
+    Insert(Entry, Option<Box<FnBox<(), Option<IT>>>>),
 
     /// List a "directory" (aka. a `level`) in the index.
     /// Returns `ListResult` with all the entries under the given parent.
@@ -108,11 +120,9 @@ impl Store {
     pub fn new_for_testing<B: 'static + blob::StoreBackend + Send + Clone>
         (backend: B)
          -> Result<Store, MsgError> {
-        let ki_p = try!(Process::new(Box::new(move || index::Index::new_for_testing())));
-        let hi_p = try!(Process::new(Box::new(move || hash::Index::new_for_testing())));
-        let bs_p = try!(Process::new(Box::new(move || {
-            blob::Store::new_for_testing(backend, 1024)
-        })));
+        let ki_p = try!(Process::new(move || index::Index::new_for_testing()));
+        let hi_p = try!(Process::new(move || hash::Index::new_for_testing()));
+        let bs_p = try!(Process::new(move || blob::Store::new_for_testing(backend, 1024)));
         Ok(Store {
             index: ki_p,
             hash_index: hi_p,
@@ -301,16 +311,12 @@ impl<IT: Iterator<Item = Vec<u8>>> MsgHandler<Msg<IT>, Result<Reply, MsgError>> 
                         let mut my_entries: Vec<DirElem> = Vec::with_capacity(entries.len());
                         for (entry, persistent_ref) in entries.into_iter() {
                             let open_fn = entry.data_hash.as_ref().map(|bytes| {
-                                let local_hash = hash::Hash { bytes: bytes.clone() };
-                                let local_ref = persistent_ref.clone();
-                                let local_hash_index = self.hash_index.clone();
-                                let local_blob_store = self.blob_store.clone();
-                                Box::new(move || {
-                                    SimpleHashTreeReader::open(
-                                        HashStoreBackend::new(local_hash_index.clone(),
-                                                              local_blob_store.clone()),
-                                        local_hash, local_ref) })
-                                    as Box<FnBox() -> Option<ReaderResult<HashStoreBackend>> + Send>
+                                HashTreeReaderInitializer {
+                                    hash: hash::Hash { bytes: bytes.clone() },
+                                    persistent_ref: persistent_ref.clone(),
+                                    hash_index: self.hash_index.clone(),
+                                    blob_store: self.blob_store.clone(),
+                                }
                             });
 
                             my_entries.push((entry, persistent_ref, open_fn));
@@ -364,7 +370,7 @@ impl<IT: Iterator<Item = Vec<u8>>> MsgHandler<Msg<IT>, Result<Reply, MsgError>> 
                 let mut tree = self.hash_tree_writer();
 
                 // Check if we have an data source:
-                let it_opt = chunk_it_opt.and_then(|open| open());
+                let it_opt = chunk_it_opt.and_then(|open| open.call(()));
                 if it_opt.is_none() {
                     // No data is associated with this entry.
                     try!(self.index.send_reply(index::Msg::UpdateDataHash(entry, None, None)));
@@ -534,7 +540,7 @@ mod tests {
         let local_file = fs.file.clone();
         let id = match ks_p.send_reply(Msg::Insert(fs.file.key_entry.clone(),
                                                    if fs.file.data.is_some() {
-                                                       Some(Box::new(move || Some(local_file)))
+                                                       Some(Box::new(move |()| Some(local_file)))
                                                    } else {
                                                        None
                                                    }))
@@ -573,7 +579,7 @@ mod tests {
 
                     match dir.file.data {
                         Some(ref original) => {
-                            let it = match tree_data.expect("has data")() {
+                            let it = match tree_data.expect("has data").init() {
                                 None => panic!("No data."),
                                 Some(it) => it,
                             };
@@ -608,7 +614,7 @@ mod tests {
     fn identity() {
         fn prop(size: u8) -> bool {
             let backend = MemoryBackend::new();
-            let ks_p = Process::new(Box::new(move || Store::new_for_testing(backend))).unwrap();
+            let ks_p = Process::new(move || Store::new_for_testing(backend)).unwrap();
 
             let mut fs = rng_filesystem(size as usize);
             insert_and_update_fs(&mut fs, ks_p.clone());
@@ -628,9 +634,7 @@ mod tests {
     #[bench]
     fn insert_1_key_x_128000_zeros(bench: &mut Bencher) {
         let backend = DevNullBackend;
-        let ks_p: StoreProcess<EntryStub> = Process::new(Box::new(move || {
-                                                Store::new_for_testing(backend)
-                                            }))
+        let ks_p: StoreProcess<EntryStub> = Process::new(move || Store::new_for_testing(backend))
                                                 .unwrap();
 
         let bytes = vec![0u8; 128*1024];
@@ -657,7 +661,7 @@ mod tests {
             };
 
             ks_p.send_reply(Msg::Insert(entry.key_entry.clone(),
-                                        Some(Box::new(move || Some(entry)))))
+                                        Some(Box::new(move |()| Some(entry)))))
                 .unwrap();
         });
 
@@ -668,9 +672,7 @@ mod tests {
     #[bench]
     fn insert_1_key_x_128000_unique(bench: &mut Bencher) {
         let backend = DevNullBackend;
-        let ks_p: StoreProcess<EntryStub> = Process::new(Box::new(move || {
-                                                Store::new_for_testing(backend)
-                                            }))
+        let ks_p: StoreProcess<EntryStub> = Process::new(move || Store::new_for_testing(backend))
                                                 .unwrap();
 
         let bytes = vec![0u8; 128*1024];
@@ -702,7 +704,7 @@ mod tests {
             };
 
             ks_p.send_reply(Msg::Insert(entry.key_entry.clone(),
-                                        Some(Box::new(move || Some(entry)))))
+                                        Some(Box::new(move |()| Some(entry)))))
                 .unwrap();
         });
 
@@ -713,9 +715,7 @@ mod tests {
     #[bench]
     fn insert_1_key_x_16_x_128000_zeros(bench: &mut Bencher) {
         let backend = DevNullBackend;
-        let ks_p: StoreProcess<EntryStub> = Process::new(Box::new(move || {
-                                                Store::new_for_testing(backend)
-                                            }))
+        let ks_p: StoreProcess<EntryStub> = Process::new(move || Store::new_for_testing(backend))
                                                 .unwrap();
 
         bench.iter(|| {
@@ -738,7 +738,7 @@ mod tests {
                 },
             };
             ks_p.send_reply(Msg::Insert(entry.key_entry.clone(),
-                                        Some(Box::new(move || Some(entry)))))
+                                        Some(Box::new(move |()| Some(entry)))))
                 .unwrap();
 
             match ks_p.send_reply(Msg::Flush).unwrap() {
@@ -753,9 +753,7 @@ mod tests {
     #[bench]
     fn insert_1_key_x_16_x_128000_unique(bench: &mut Bencher) {
         let backend = DevNullBackend;
-        let ks_p: StoreProcess<EntryStub> = Process::new(Box::new(move || {
-                                                Store::new_for_testing(backend)
-                                            }))
+        let ks_p: StoreProcess<EntryStub> = Process::new(move || Store::new_for_testing(backend))
                                                 .unwrap();
 
         let bytes = vec![0u8; 128*1024];
@@ -794,7 +792,7 @@ mod tests {
             };
 
             ks_p.send_reply(Msg::Insert(entry.key_entry.clone(),
-                                        Some(Box::new(move || Some(entry)))))
+                                        Some(Box::new(move |()| Some(entry)))))
                 .unwrap();
 
             match ks_p.send_reply(Msg::Flush).unwrap() {
@@ -809,9 +807,7 @@ mod tests {
     #[bench]
     fn insert_1_key_unchanged_empty(bench: &mut Bencher) {
         let backend = DevNullBackend;
-        let ks_p: StoreProcess<EntryStub> = Process::new(Box::new(move || {
-                                                Store::new_for_testing(backend)
-                                            }))
+        let ks_p: StoreProcess<EntryStub> = Process::new(move || Store::new_for_testing(backend))
                                                 .unwrap();
 
         bench.iter(|| {
@@ -838,9 +834,7 @@ mod tests {
     #[bench]
     fn insert_1_key_updated_empty(bench: &mut Bencher) {
         let backend = DevNullBackend;
-        let ks_p: StoreProcess<EntryStub> = Process::new(Box::new(move || {
-                                                Store::new_for_testing(backend)
-                                            }))
+        let ks_p: StoreProcess<EntryStub> = Process::new(move || Store::new_for_testing(backend))
                                                 .unwrap();
 
         let mut i = 0;
@@ -869,9 +863,7 @@ mod tests {
     #[bench]
     fn insert_1_key_unique_empty(bench: &mut Bencher) {
         let backend = DevNullBackend;
-        let ks_p: StoreProcess<EntryStub> = Process::new(Box::new(move || {
-                                                Store::new_for_testing(backend)
-                                            }))
+        let ks_p: StoreProcess<EntryStub> = Process::new(move || Store::new_for_testing(backend))
                                                 .unwrap();
 
         let mut i = 0;
