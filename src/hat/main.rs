@@ -20,12 +20,13 @@
 #![warn(non_camel_case_types)]
 
 // Unstable APIs:
-#![feature(test)]
+#![cfg_attr(feature = "benchmarks", feature(test))]
 
 // Standard Rust imports.
 #[macro_use]
 extern crate log;
 extern crate rand;
+#[cfg(feature = "benchmarks")]
 extern crate test;
 extern crate time;
 

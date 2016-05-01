@@ -36,12 +36,10 @@ default-features = false
 features = ["with-syntex", "sqlite"]
 version = "0.6.*"
 
-[profile]
+[features]
+default = []
 
-[profile.dev]
-debug = true
-opt-level = 0
-
-[profile.release]
-debug = false
-opt-level = 2
+# Running our benchmarks currently requires
+# running on nightly. Use this feature to enable
+# the code for this.
+benchmarks = []

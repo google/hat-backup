@@ -450,7 +450,6 @@ impl<B: HashTreeBackend + Clone> Iterator for ReaderResult<B> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use test::Bencher;
 
     use std::sync::{Arc, Mutex};
 
@@ -460,19 +459,19 @@ mod tests {
     use quickcheck;
 
     #[derive(Clone)]
-    struct MemoryBackend {
+    pub struct MemoryBackend {
         chunks: Arc<Mutex<BTreeMap<Vec<u8>, (i64, Option<Vec<u8>>, Vec<u8>)>>>,
         seen_chunks: Arc<Mutex<BTreeSet<Vec<u8>>>>,
     }
 
     impl MemoryBackend {
-        fn new() -> MemoryBackend {
+        pub fn new() -> MemoryBackend {
             MemoryBackend {
                 chunks: Arc::new(Mutex::new(BTreeMap::new())),
                 seen_chunks: Arc::new(Mutex::new(BTreeSet::new())),
             }
         }
-        fn saw_chunk(&self, chunk: &Vec<u8>) -> bool {
+        pub fn saw_chunk(&self, chunk: &Vec<u8>) -> bool {
             let guarded_seen = self.seen_chunks.lock().unwrap();
             guarded_seen.contains(chunk)
         }
@@ -689,7 +688,13 @@ mod tests {
             assert_eq!(bytes, chunk);
         }
     }
+}
 
+#[cfg(all(test, feature = "benchmarks"))]
+mod bench {
+    use super::*;
+    use test::Bencher;
+    use super::tests::*;
 
     #[bench]
     fn append_unknown_16x128_kb(bench: &mut Bencher) {
