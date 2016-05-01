@@ -366,7 +366,7 @@ impl Index {
                     level: level,
                     payload: payload.clone(),
                     persistent_ref: persistent_ref.clone(),
-                    ..qe.clone()
+                    ..qe
                 }
             });
         }
@@ -540,9 +540,9 @@ impl Index {
         // Update persistent reference for ready hash
         let queue_entry = self.locate(hash).expect("hash was committed");
         self.queue.update_value(&hash.bytes, |old_qe| {
-            QueueEntry { persistent_ref: Some(chunk_ref.clone()), ..old_qe.clone() }
+            QueueEntry { persistent_ref: Some(chunk_ref.clone()), ..old_qe }
         });
-        self.queue.set_ready(queue_entry.id);
+        self.queue.set_ready(&queue_entry.id);
 
         self.insert_completed_in_order();
 
