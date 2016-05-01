@@ -140,7 +140,8 @@ impl<B: gc::GcBackend> gc::Gc for GcRc<B> {
 
     fn status(&mut self, final_ref: gc::Id) -> Result<Option<gc::Status>, Self::Err> {
         Ok(match try!(self.backend.get_tag(final_ref)) {
-            Some(tags::Tag::Complete) | Some(tags::Tag::ReadyDelete) => Some(gc::Status::Complete),
+            Some(tags::Tag::Complete) |
+            Some(tags::Tag::ReadyDelete) => Some(gc::Status::Complete),
             Some(tags::Tag::InProgress) => Some(gc::Status::InProgress),
             _ => None,
         })

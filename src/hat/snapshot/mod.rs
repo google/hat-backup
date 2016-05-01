@@ -146,7 +146,8 @@ fn tag_to_work_status(tag: tags::Tag) -> WorkStatus {
         tags::Tag::Reserved | tags::Tag::InProgress => WorkStatus::CommitInProgress,
         tags::Tag::Complete | tags::Tag::Done => WorkStatus::CommitComplete,
         tags::Tag::WillDelete => WorkStatus::DeleteInProgress,
-        tags::Tag::ReadyDelete | tags::Tag::DeleteComplete => WorkStatus::DeleteComplete,
+        tags::Tag::ReadyDelete |
+        tags::Tag::DeleteComplete => WorkStatus::DeleteComplete,
         tags::Tag::RecoverInProgress => WorkStatus::RecoverInProgress,
     }
 }
