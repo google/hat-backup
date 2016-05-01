@@ -521,9 +521,8 @@ impl<B: 'static + blob::StoreBackend + Clone + Send> Hat<B> {
                                                                 out: mpsc::Sender<hash::Entry>)
                                                                 -> (Option<Vec<u8>>, i64) {
             match hash::tree::SimpleHashTreeReader::open(backend, hash, Some(pref)).unwrap() {
-                hash::tree::ReaderResult::Empty | hash::tree::ReaderResult::SingleBlock(..) => {
-                    (None, 0)
-                }
+                hash::tree::ReaderResult::Empty |
+                hash::tree::ReaderResult::SingleBlock(..) => (None, 0),
                 hash::tree::ReaderResult::Tree(mut reader) => {
                     let (payload, level) = reader.list_entries(out);
                     (Some(payload), level)
@@ -584,9 +583,8 @@ impl<B: 'static + blob::StoreBackend + Clone + Send> Hat<B> {
                             };
                             match status_opt {
                                 None => None,  // We did not fully commit.
-                                Some(gc::Status::InProgress) | Some(gc::Status::Complete) => {
-                                    Some(h)
-                                }
+                                Some(gc::Status::InProgress) |
+                                Some(gc::Status::Complete) => Some(h),
                             }
                         }
                     };
@@ -647,7 +645,8 @@ impl<B: 'static + blob::StoreBackend + Clone + Send> Hat<B> {
                                       .expect("Snapshot hash not recognized");
                     let status = try!(self.gc.status(hash_id));
                     match status {
-                        None | Some(gc::Status::InProgress) => {
+                        None |
+                        Some(gc::Status::InProgress) => {
                             println!("Resuming delete of: {} #{:?}",
                                      snapshot.family_name,
                                      snapshot.info.snapshot_id);

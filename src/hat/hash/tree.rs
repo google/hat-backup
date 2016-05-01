@@ -270,8 +270,7 @@ impl<B: HashTreeBackend + Clone> SimpleHashTreeWriter<B> {
         assert_eq!(self.levels.last().map(|x| x.len()), Some(1));
         let hashref = self.levels.last().and_then(|x| x.last()).expect("asserted");
 
-        (Hash { bytes: hashref.hash.clone() },
-         hashref.persistent_ref.clone())
+        (Hash { bytes: hashref.hash.clone() }, hashref.persistent_ref.clone())
     }
 }
 

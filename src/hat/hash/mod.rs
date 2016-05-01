@@ -336,7 +336,7 @@ impl Index {
     fn reserve(&mut self, hash_entry: Entry) -> i64 {
         self.maybe_flush();
 
-        let Entry{hash, level, payload, persistent_ref} = hash_entry;
+        let Entry { hash, level, payload, persistent_ref } = hash_entry;
         assert!(!hash.bytes.is_empty());
 
         let my_id = self.next_id();
@@ -353,7 +353,7 @@ impl Index {
     }
 
     fn update_reserved(&mut self, hash_entry: Entry) {
-        let Entry{hash, level, payload, persistent_ref} = hash_entry;
+        let Entry { hash, level, payload, persistent_ref } = hash_entry;
         assert!(!hash.bytes.is_empty());
         let old_entry = self.locate(&hash).expect("hash was reserved");
 
