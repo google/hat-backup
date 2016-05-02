@@ -42,6 +42,7 @@ use listdir;
 use process::Process;
 use snapshot;
 use tags;
+use util::FnBox;
 
 
 error_type! {
@@ -1252,12 +1253,12 @@ impl Family {
                            is_directory: bool,
                            contents: Option<Vec<u8>>)
                            -> Result<(), HatError> {
-        match try!(self.key_store_process.send_reply(
-                key::Msg::Insert(file,
-                      if is_directory { None }
-                      else { Some(Box::new(move|()| {
-                          contents.map(FileIterator::from_bytes)
-                      }))}))) {
+        let f = if is_directory {
+            None
+        } else {
+            Some(Box::new(move |()| contents.map(FileIterator::from_bytes)) as Box<FnBox<(), _>>)
+        };
+        match try!(self.key_store_process.send_reply(key::Msg::Insert(file, f))) {
             key::Reply::Id(..) => return Ok(()),
             _ => Err(From::from("Unexpected reply from key store")),
         }
@@ -1519,7 +1520,8 @@ mod tests {
         Hat::new_for_testing(backend, max_blob_size, shutdown_after).unwrap()
     }
 
-    fn setup_family(shutdown_after: Option<Vec<i64>>) -> (MemoryBackend, HatRc<MemoryBackend>, Family) {
+    fn setup_family(shutdown_after: Option<Vec<i64>>)
+                    -> (MemoryBackend, HatRc<MemoryBackend>, Family) {
         let shutdown = shutdown_after.unwrap_or(vec![]);
 
         let backend = MemoryBackend::new();

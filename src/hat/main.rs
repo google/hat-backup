@@ -96,7 +96,6 @@ fn blob_dir() -> PathBuf {
     PathBuf::from("blobs")
 }
 
-#[cfg(not(test))]
 fn license() {
     println!(include_str!("../../LICENSE"));
     println!("clap (Command Line Argument Parser) License:");
@@ -104,7 +103,6 @@ fn license() {
 }
 
 
-#[cfg(not(test))]
 fn main() {
     env_logger::init().unwrap();
 
