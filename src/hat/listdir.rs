@@ -19,7 +19,7 @@ use std::io;
 use std::iter;
 use std::path::PathBuf;
 use std::sync::mpsc;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use threadpool;
 
@@ -43,12 +43,6 @@ pub trait PathHandler<D: Send + 'static>: Send + Clone + 'static {
 }
 
 
-pub fn iterate_recursively<P: 'static + Send + Clone,
-                           W: 'static + PathHandler<P> + Send + Clone>
-    (first: (PathBuf, P),
-     worker: &mut W)
-{
-
 pub fn iterate_recursively<P: 'static + Send, W: PathHandler<P>>(first: (PathBuf, P), worker: &W) {
     let threads = 10;
     let (push_ch, work_ch) = mpsc::sync_channel(threads);
@@ -62,7 +56,7 @@ pub fn iterate_recursively<P: 'static + Send, W: PathHandler<P>>(first: (PathBuf
     // Insert the first task into the queue:
     let (root, payload) = first;
     push_ch.send(Work::More(root, payload)).unwrap();
-    let idle_workers = Arc::new(Mutex::new(vec![worker.clone(); threads]));
+    let worker = Arc::new(worker);
     let mut active_workers = 0;
 
     // Master thread:
@@ -81,13 +75,9 @@ pub fn iterate_recursively<P: 'static + Send, W: PathHandler<P>>(first: (PathBuf
                 // Execute the task in a pool thread:
                 active_workers += 1;
 
-                let idle_workers_ = idle_workers.clone();
+                let worker = worker.clone();
                 let push_ch_ = push_ch.clone();
                 pool.execute(move || {
-                    let worker = {
-                        let mut lock = idle_workers_.lock().unwrap();
-                        lock.pop().expect("not enough workers")
-                    };
                     match worker.read_dir(&root) {
                         Ok(dir) => {
                             for entry_res in dir {
@@ -113,8 +103,6 @@ pub fn iterate_recursively<P: 'static + Send, W: PathHandler<P>>(first: (PathBuf
                             warn!("Skipping unreadable directory {:?}: {}", root, err);
                         }
                     }
-                    // Return our worker.
-                    idle_workers_.lock().unwrap().push(worker);
                     // Count this pool thread as idle:
                     push_ch_.send(Work::Done).unwrap();
                 });

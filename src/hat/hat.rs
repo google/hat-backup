@@ -1136,19 +1136,18 @@ impl Iterator for FileIterator {
 }
 
 
-#[derive(Clone)]
 struct InsertPathHandler {
-    count: sync::Arc<sync::atomic::AtomicIsize>,
-    last_print: sync::Arc<sync::Mutex<time::Timespec>>,
-    key_store: key::StoreProcess<FileIterator>,
+    count: sync::atomic::AtomicIsize,
+    last_print: sync::Mutex<time::Timespec>,
+    key_store: sync::Mutex<key::StoreProcess<FileIterator>>,
 }
 
 impl InsertPathHandler {
     pub fn new(key_store: key::StoreProcess<FileIterator>) -> InsertPathHandler {
         InsertPathHandler {
-            count: sync::Arc::new(sync::atomic::AtomicIsize::new(0)),
-            last_print: sync::Arc::new(sync::Mutex::new(time::now().to_timespec())),
-            key_store: key_store,
+            count: sync::atomic::AtomicIsize::new(0),
+            last_print: sync::Mutex::new(time::now().to_timespec()),
+            key_store: sync::Mutex::new(key_store),
         }
     }
 }
@@ -1186,7 +1185,7 @@ impl listdir::PathHandler<Option<u64>> for InsertPathHandler {
                 let local_root = path;
                 let local_file_entry = file_entry.clone();
 
-                match self.key_store.send_reply(
+                match self.key_store.lock().unwrap().send_reply(
                     key::Msg::Insert(
                       file_entry.key_entry,
                       if is_directory { None }
@@ -1237,8 +1236,8 @@ pub struct Family {
 
 impl Family {
     pub fn snapshot_dir(&self, dir: PathBuf) {
-        let mut handler = InsertPathHandler::new(self.key_store_process.clone());
-        listdir::iterate_recursively((PathBuf::from(&dir), None), &mut handler);
+        let handler = InsertPathHandler::new(self.key_store_process.clone());
+        listdir::iterate_recursively((PathBuf::from(&dir), None), handler);
     }
 
     pub fn snapshot_direct(&self,
