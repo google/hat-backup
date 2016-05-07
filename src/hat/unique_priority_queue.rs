@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use std::collections::BTreeMap;
-use std::fmt::Debug;
 use std::mem;
 
 use ordered_collection::OrderedCollection;
@@ -31,7 +30,7 @@ pub struct UniquePriorityQueue<P, K, V> {
     key_to_priority: BTreeMap<K, P>,
 }
 
-impl<P: Debug + Clone + Ord, K: Debug + Ord + Clone, V: Clone> UniquePriorityQueue<P, K, V> {
+impl<P: Clone + Ord, K: Ord + Clone, V: Clone> UniquePriorityQueue<P, K, V> {
     pub fn new() -> UniquePriorityQueue<P, K, V> {
         UniquePriorityQueue {
             priority: BTreeMap::new(),
@@ -53,11 +52,9 @@ impl<P: Debug + Clone + Ord, K: Debug + Ord + Clone, V: Clone> UniquePriorityQue
         self.key_to_priority.get(k)
     }
 
-    pub fn put_value(&mut self, k: K, v: V) {
-        let prio = self.key_to_priority.get(&k).expect("put_value: Key must exist.");
-        self.priority.update_value(prio, move |cur| {
-            cur.1 = Some(v);
-        });
+    pub fn put_value(&mut self, k: &K, v: V) {
+        let prio = self.key_to_priority.get(k).expect("put_value: Key must exist.");
+        self.priority.get_mut(prio).expect("put_value: Priority must exist.").1 = Some(v);
     }
 
     pub fn find_value_of_key(&self, k: &K) -> Option<V> {
@@ -66,24 +63,22 @@ impl<P: Debug + Clone + Ord, K: Debug + Ord + Clone, V: Clone> UniquePriorityQue
     }
 
     pub fn update_value<F>(&mut self, k: &K, f: F)
-        where F: Fn(V) -> V
+        where F: FnOnce(V) -> V
     {
         let prio = self.key_to_priority.get(k).expect("update_value: Key must exist.");
-        self.priority.update_value(prio, |cur| {
-            let v = mem::replace(&mut cur.1, None).unwrap();
-            cur.1 = Some(f(v));
-        });
+        let cur = self.priority.get_mut(prio).expect("update_value: Priority must exist.");
+        let v = mem::replace(&mut cur.1, None).unwrap();
+        cur.1 = Some(f(v));
     }
 
     pub fn set_ready(&mut self, p: &P) {
-        self.priority.update_value(p, |cur| {
-            let k = match cur.0 {
-                Status::Pending(ref k) => k.clone(),
-                _ => unreachable!(),
-            };
+        let cur = self.priority.get_mut(p).expect("set_ready: Priority must exist.");
+        let k = match cur.0 {
+            Status::Pending(ref k) => k.clone(),
+            _ => unreachable!(),
+        };
 
-            cur.0 = Status::Ready(k);
-        });
+        cur.0 = Status::Ready(k);
     }
 
     pub fn pop_min_if_complete(&mut self) -> Option<(P, K, V)> {
@@ -128,7 +123,7 @@ mod tests {
             let mut upq = UniquePriorityQueue::new();
             assert!(upq.reserve_priority(priority, key).is_ok());
             assert_eq!(upq.pop_min_if_complete(), None);
-            upq.put_value(key, value);
+            upq.put_value(&key, value);
             assert_eq!(upq.pop_min_if_complete(), None);
             upq.set_ready(&priority);
             assert_eq!(upq.pop_min_if_complete(), Some((priority, key, value)));
@@ -161,7 +156,7 @@ mod tests {
             let mut in_use1 = BTreeMap::new();
             for (p, &(ref k, ref v)) in in_use0.iter() {
                 in_use1.insert(*p, (*k, *v));
-                upq.put_value(*k, *v);
+                upq.put_value(k, *v);
                 assert_eq!(upq.find_value_of_key(k), Some(*v));
             }
             drop(in_use0);

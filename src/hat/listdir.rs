@@ -34,12 +34,12 @@ impl HasPath for fs::DirEntry {
     }
 }
 
-pub trait PathHandler<D> {
+pub trait PathHandler<D: Send + 'static>: Send + Clone + 'static {
     type DirItem: HasPath;
     type DirIter: iter::Iterator<Item = io::Result<Self::DirItem>>;
 
     fn read_dir(&self, &PathBuf) -> io::Result<Self::DirIter>;
-    fn handle_path(&self, D, PathBuf) -> Option<D>;
+    fn handle_path(&self, &D, PathBuf) -> Option<D>;
 }
 
 
@@ -48,6 +48,8 @@ pub fn iterate_recursively<P: 'static + Send + Clone,
     (first: (PathBuf, P),
      worker: &mut W)
 {
+
+pub fn iterate_recursively<P: 'static + Send, W: PathHandler<P>>(first: (PathBuf, P), worker: &W) {
     let threads = 10;
     let (push_ch, work_ch) = mpsc::sync_channel(threads);
     let pool = threadpool::ThreadPool::new(threads);
@@ -93,7 +95,7 @@ pub fn iterate_recursively<P: 'static + Send + Clone,
                                     Ok(entry) => {
                                         let file = entry.path();
                                         let path = PathBuf::from(file.to_str().unwrap());
-                                        let dir_opt = worker.handle_path(payload.clone(), path);
+                                        let dir_opt = worker.handle_path(&payload, path);
                                         if let Some(dir) = dir_opt {
                                             push_ch_.send(Work::More(file, dir)).unwrap();
                                         }
@@ -137,7 +139,7 @@ impl PathHandler<()> for PrintPathHandler {
         fs::read_dir(path)
     }
 
-    fn handle_path(&self, _: (), path: PathBuf) -> Option<()> {
+    fn handle_path(&self, _: &(), path: PathBuf) -> Option<()> {
         println!("{}", path.display());
         match fs::metadata(&path) {
             Ok(ref m) if m.is_dir() => Some(()),
