@@ -284,8 +284,8 @@ impl Index {
     }
 
     fn locate(&mut self, hash: &Hash) -> Option<QueueEntry> {
-        let result_opt = self.queue.find_value_of_key(&hash.bytes);
-        result_opt.map(|x| x).or_else(|| self.index_locate(hash))
+        let result_opt = self.queue.find_value_of_key(&hash.bytes).map(|x| x.clone());
+        result_opt.or_else(|| self.index_locate(hash))
     }
 
     fn locate_by_id(&mut self, id_: i64) -> Option<Entry> {

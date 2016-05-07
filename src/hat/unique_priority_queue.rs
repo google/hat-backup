@@ -18,19 +18,19 @@ use std::mem;
 use ordered_collection::OrderedCollection;
 
 
-#[derive(Clone)]
-enum Status<K> {
-    Pending(K),
-    Ready(K),
+#[derive(Debug, Clone, PartialEq)]
+enum Status {
+    Pending,
+    Ready,
 }
 
 
 pub struct UniquePriorityQueue<P, K, V> {
-    priority: BTreeMap<P, (Status<K>, Option<V>)>,
+    priority: BTreeMap<P, (Status, K, Option<V>)>,
     key_to_priority: BTreeMap<K, P>,
 }
 
-impl<P: Clone + Ord, K: Ord + Clone, V: Clone> UniquePriorityQueue<P, K, V> {
+impl<P: Clone + Ord, K: Clone + Ord, V> UniquePriorityQueue<P, K, V> {
     pub fn new() -> UniquePriorityQueue<P, K, V> {
         UniquePriorityQueue {
             priority: BTreeMap::new(),
@@ -42,7 +42,7 @@ impl<P: Clone + Ord, K: Ord + Clone, V: Clone> UniquePriorityQueue<P, K, V> {
         if self.priority.get(&p).is_some() || self.key_to_priority.contains_key(&k) {
             return Err(());
         }
-        self.priority.insert_unique(p.clone(), (Status::Pending(k.clone()), None));
+        self.priority.insert_unique(p.clone(), (Status::Pending, k.clone(), None));
         self.key_to_priority.insert(k, p);
 
         Ok(())
@@ -54,12 +54,14 @@ impl<P: Clone + Ord, K: Ord + Clone, V: Clone> UniquePriorityQueue<P, K, V> {
 
     pub fn put_value(&mut self, k: &K, v: V) {
         let prio = self.key_to_priority.get(k).expect("put_value: Key must exist.");
-        self.priority.get_mut(prio).expect("put_value: Priority must exist.").1 = Some(v);
+        self.priority.get_mut(prio).expect("put_value: Priority must exist.").2 = Some(v);
     }
 
-    pub fn find_value_of_key(&self, k: &K) -> Option<V> {
+    pub fn find_value_of_key(&self, k: &K) -> Option<&V> {
         let prio_opt = self.key_to_priority.get(k);
-        prio_opt.and_then(|prio| self.priority.get(prio).and_then(|&(_, ref v_opt)| v_opt.clone()))
+        prio_opt.and_then(|prio| {
+            self.priority.get(prio).and_then(|&(_, _, ref v_opt)| v_opt.as_ref())
+        })
     }
 
     pub fn update_value<F>(&mut self, k: &K, f: F)
@@ -67,36 +69,22 @@ impl<P: Clone + Ord, K: Ord + Clone, V: Clone> UniquePriorityQueue<P, K, V> {
     {
         let prio = self.key_to_priority.get(k).expect("update_value: Key must exist.");
         let cur = self.priority.get_mut(prio).expect("update_value: Priority must exist.");
-        let v = mem::replace(&mut cur.1, None).unwrap();
-        cur.1 = Some(f(v));
+        let v = mem::replace(&mut cur.2, None).unwrap();
+        cur.2 = Some(f(v));
     }
 
     pub fn set_ready(&mut self, p: &P) {
         let cur = self.priority.get_mut(p).expect("set_ready: Priority must exist.");
-        let k = match cur.0 {
-            Status::Pending(ref k) => k.clone(),
-            _ => unreachable!(),
-        };
-
-        cur.0 = Status::Ready(k);
+        cur.0 = Status::Ready;
     }
 
     pub fn pop_min_if_complete(&mut self) -> Option<(P, K, V)> {
-        let min_opt = self.priority.pop_min_when(|_k, min| {
-            match *min {
-                (Status::Ready(_), Some(_)) => true,  // We are ready and have a value
-                _ => false,
-            }
-        });
-        min_opt.map(|(p, (status, v_opt))| {
-            match status {
-                Status::Ready(k) => {
-                    let v = v_opt.unwrap();
-                    self.key_to_priority.remove(&k);
-                    (p, k, v)
-                }
-                _ => unreachable!(),
-            }
+        let min_opt = self.priority
+                          .pop_min_when(|_k, min| min.0 == Status::Ready && min.2.is_some());
+        min_opt.map(|(p, (_status, k, v_opt))| {
+            let v = v_opt.unwrap();
+            self.key_to_priority.remove(&k);
+            (p, k, v)
         })
     }
 
@@ -157,7 +145,7 @@ mod tests {
             for (p, &(ref k, ref v)) in in_use0.iter() {
                 in_use1.insert(*p, (*k, *v));
                 upq.put_value(k, *v);
-                assert_eq!(upq.find_value_of_key(k), Some(*v));
+                assert_eq!(upq.find_value_of_key(k), Some(v));
             }
             drop(in_use0);
             assert_eq!(upq.pop_min_if_complete(), None);
