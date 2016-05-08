@@ -15,6 +15,7 @@
 //! High level Hat API
 
 
+use std::cmp;
 use std::borrow::Cow;
 use std::error::Error;
 use std::fs;
@@ -1090,28 +1091,20 @@ impl Clone for FileEntry {
     }
 }
 
-struct FileIterator {
-    file: Option<fs::File>,
-    contents: Option<Vec<u8>>,
+enum FileIterator {
+    File(fs::File),
+    Buf(Vec<u8>, usize),
 }
 
 impl FileIterator {
     fn new(path: &PathBuf) -> io::Result<FileIterator> {
         match fs::File::open(path) {
-            Ok(f) => {
-                Ok(FileIterator {
-                    file: Some(f),
-                    contents: None,
-                })
-            }
+            Ok(f) => Ok(FileIterator::File(f)),
             Err(e) => Err(e),
         }
     }
     fn from_bytes(contents: Vec<u8>) -> FileIterator {
-        FileIterator {
-            file: None,
-            contents: Some(contents),
-        }
+        FileIterator::Buf(contents, 0)
     }
 }
 
@@ -1120,9 +1113,8 @@ impl Iterator for FileIterator {
 
     fn next(&mut self) -> Option<Vec<u8>> {
         let chunk_size = 128 * 1024;
-        let empty = vec![];
-        match self.file {
-            Some(ref mut f) => {
+        match self {
+            &mut FileIterator::File(ref mut f) => {
                 let mut buf = vec![0u8; chunk_size];
                 match f.read(&mut buf[..]) {
                     Err(_) => None,
@@ -1130,19 +1122,13 @@ impl Iterator for FileIterator {
                     Ok(size) => Some(buf[..size].to_vec()),
                 }
             }
-            None => {
-                match self.contents.to_owned() {
-                    Some(ref c) if c.is_empty() => None,
-                    Some(ref c) => {
-                        let (out, rest) = if c.len() <= chunk_size {
-                            (c.as_slice(), empty.as_slice())
-                        } else {
-                            c.split_at(chunk_size)
-                        };
-                        self.contents = Some(rest.to_owned());
-                        Some(out.to_owned())
-                    }
-                    None => None,
+            &mut FileIterator::Buf(ref vec, ref mut pos) => {
+                if *pos >= vec.len() {
+                    None
+                } else {
+                    let next = &vec[*pos..cmp::min(*pos + chunk_size, vec.len())];
+                    *pos += chunk_size;
+                    Some(next.to_owned())
                 }
             }
         }
