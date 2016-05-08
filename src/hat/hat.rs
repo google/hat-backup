@@ -1696,24 +1696,24 @@ mod bench {
         (hat, fam)
     }
 
-    /// Fill the buffer with 1KB unique blocks of data.
-    /// Each block is unique for the given id and among the other blocks.
-    fn fill_unique_bytes(id: u32, buf: &mut [u8]) -> u32 {
-        for (i, block) in buf.chunks_mut(1024).enumerate() {
-            if block.len() < 8 {
-                // Last block is too short to make unique.
-                break;
+    struct UniqueBlockFiller(u32);
+
+    impl UniqueBlockFiller {
+        /// Fill the buffer with 1KB unique blocks of data.
+        /// Each block is unique for the given id and among the other blocks.
+        fn fill_bytes(&mut self, buf: &mut [u8]) {
+            for block in buf.chunks_mut(1024) {
+                if block.len() < 4 {
+                    // Last block is too short to make unique.
+                    break;
+                }
+                block[0] = self.0 as u8;
+                block[1] = (self.0 >> 8) as u8;
+                block[2] = (self.0 >> 16) as u8;
+                block[3] = (self.0 >> 24) as u8;
+                self.0 += 1;
             }
-            block[0] = id as u8;
-            block[1] = (id >> 8) as u8;
-            block[2] = (id >> 16) as u8;
-            block[3] = (id >> 24) as u8;
-            block[4] = i as u8;
-            block[5] = (i >> 8) as u8;
-            block[6] = (i >> 16) as u8;
-            block[7] = (i >> 24) as u8;
         }
-        return id + 1;
     }
 
     fn insert_files(bench: &mut Bencher, filesize: usize, unique: bool) {
@@ -1722,11 +1722,11 @@ mod bench {
         let mut name = vec![0; 8];
         let mut data = vec![0; filesize];
 
-        let mut i = 0;
+        let mut filler = UniqueBlockFiller(0);
         bench.iter(|| {
-            i = fill_unique_bytes(i, &mut name);
+            filler.fill_bytes(&mut name);
             if unique {
-                i = fill_unique_bytes(i, &mut data);
+                filler.fill_bytes(&mut data);
             }
             family.snapshot_direct(entry(name.clone()), false, Some(data.clone())).unwrap();
         });
