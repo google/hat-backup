@@ -24,8 +24,8 @@ cache:
 
 
 install:
-  - ./install-libsodium.sh
-  - ./install-capnp.sh
+  - ./travis-install-libsodium.sh
+  - ./travis-install-capnp.sh
   - export PKG_CONFIG_PATH=$HOME/libsodium/lib/pkgconfig:$HOME/capnp:$PKG_CONFIG_PATH
   - export LD_LIBRARY_PATH=$HOME/libsodium/lib:$HOME/capnp:$LD_LIBRARY_PATH
   - export PATH=$HOME/capnp/bin:$PATH
