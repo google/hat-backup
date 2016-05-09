@@ -1154,6 +1154,7 @@ impl InsertPathHandler {
 }
 
 impl listdir::PathHandler<Option<u64>> for InsertPathHandler {
+    type DirItem = fs::DirEntry;
     type DirIter = fs::ReadDir;
 
     fn read_dir(&self, path: &PathBuf) -> io::Result<Self::DirIter> {

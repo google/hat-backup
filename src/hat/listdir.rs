@@ -35,7 +35,8 @@ impl HasPath for fs::DirEntry {
 }
 
 pub trait PathHandler<D> {
-    type DirIter;
+    type DirItem: HasPath;
+    type DirIter: iter::Iterator<Item = io::Result<Self::DirItem>>;
 
     fn read_dir(&self, &PathBuf) -> io::Result<Self::DirIter>;
     fn handle_path(&self, D, PathBuf) -> Option<D>;
@@ -43,11 +44,9 @@ pub trait PathHandler<D> {
 
 
 pub fn iterate_recursively<P: 'static + Send + Clone,
-                           W: 'static + PathHandler<P> + Send + Clone,
-                           I: 'static + HasPath>
+                           W: 'static + PathHandler<P> + Send + Clone>
     (first: (PathBuf, P),
      worker: &mut W)
-    where W::DirIter: iter::Iterator<Item = io::Result<I>>
 {
     let threads = 10;
     let (push_ch, work_ch) = mpsc::sync_channel(threads);
@@ -131,6 +130,7 @@ impl Clone for PrintPathHandler {
 }
 
 impl PathHandler<()> for PrintPathHandler {
+    type DirItem = fs::DirEntry;
     type DirIter = fs::ReadDir;
 
     fn read_dir(&self, path: &PathBuf) -> io::Result<Self::DirIter> {
@@ -210,7 +210,8 @@ mod tests {
     }
 
     impl PathHandler<ParentOpt> for StubPathHandler {
-        type DirIter = vec::IntoIter<io::Result<PathBuf>>;
+        type DirItem = PathBuf;
+        type DirIter = vec::IntoIter<io::Result<Self::DirItem>>;
 
         fn read_dir(&self, path: &PathBuf) -> io::Result<Self::DirIter> {
             Ok(self.list(path))
