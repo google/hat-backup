@@ -1499,9 +1499,9 @@ mod tests {
     use blob::tests::MemoryBackend;
     use key;
 
-    fn setup_hat<B: Clone + Send + StoreBackend + 'static>(backend: B,
-                                                           shutdown_after: &[i64])
-                                                           -> HatRc<B> {
+    pub fn setup_hat<B: Clone + Send + StoreBackend + 'static>(backend: B,
+                                                               shutdown_after: &[i64])
+                                                               -> HatRc<B> {
         let max_blob_size = 1024 * 1024;
         Hat::new_for_testing(backend, max_blob_size, shutdown_after).unwrap()
     }
@@ -1519,7 +1519,7 @@ mod tests {
         (backend, hat, fam)
     }
 
-    fn entry(name: Vec<u8>) -> key::Entry {
+    pub fn entry(name: Vec<u8>) -> key::Entry {
         key::Entry {
             name: name,
             id: None,
@@ -1673,5 +1673,94 @@ mod tests {
         fam.flush().unwrap();
         hat.commit(&fam, None).unwrap();
         hat.meta_commit();
+    }
+}
+
+#[cfg(all(test, feature = "benchmarks"))]
+mod bench {
+    use super::*;
+    use super::tests::*;
+
+    use test::Bencher;
+
+    use blob;
+
+    fn setup_family() -> (HatRc<blob::tests::DevNullBackend>, Family) {
+        let empty = vec![];
+        let backend = blob::tests::DevNullBackend {};
+        let hat = setup_hat(backend.clone(), &empty[..]);
+
+        let family = "familyname".to_string();
+        let fam = hat.open_family(family.clone()).unwrap();
+
+        (hat, fam)
+    }
+
+    struct UniqueBlockFiller(u32);
+
+    impl UniqueBlockFiller {
+        /// Fill the buffer with 1KB unique blocks of data.
+        /// Each block is unique for the given id and among the other blocks.
+        fn fill_bytes(&mut self, buf: &mut [u8]) {
+            for block in buf.chunks_mut(1024) {
+                if block.len() < 4 {
+                    // Last block is too short to make unique.
+                    break;
+                }
+                block[0] = self.0 as u8;
+                block[1] = (self.0 >> 8) as u8;
+                block[2] = (self.0 >> 16) as u8;
+                block[3] = (self.0 >> 24) as u8;
+                self.0 += 1;
+            }
+        }
+    }
+
+    fn insert_files(bench: &mut Bencher, filesize: usize, unique: bool) {
+        let (_, family) = setup_family();
+
+        let mut name = vec![0; 8];
+        let mut data = vec![0; filesize];
+
+        let mut filler = UniqueBlockFiller(0);
+        bench.iter(|| {
+            filler.fill_bytes(&mut name);
+            if unique {
+                filler.fill_bytes(&mut data);
+            }
+            family.snapshot_direct(entry(name.clone()), false, Some(data.clone())).unwrap();
+        });
+
+        bench.bytes = filesize as u64;
+    }
+
+    #[bench]
+    fn insert_small_unique_files(mut bench: &mut Bencher) {
+        insert_files(&mut bench, 8, true);
+    }
+
+    #[bench]
+    fn insert_small_identical_files(mut bench: &mut Bencher) {
+        insert_files(&mut bench, 8, false);
+    }
+
+    #[bench]
+    fn insert_medium_unique_files(mut bench: &mut Bencher) {
+        insert_files(&mut bench, 1024 * 1024, true);
+    }
+
+    #[bench]
+    fn insert_medium_identical_files(mut bench: &mut Bencher) {
+        insert_files(&mut bench, 1024 * 1024, false);
+    }
+
+    #[bench]
+    fn insert_large_unique_files(mut bench: &mut Bencher) {
+        insert_files(&mut bench, 8 * 1024 * 1024, true);
+    }
+
+    #[bench]
+    fn insert_large_identical_files(mut bench: &mut Bencher) {
+        insert_files(&mut bench, 8 * 1024 * 1024, false);
     }
 }
