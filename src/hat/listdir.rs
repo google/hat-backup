@@ -34,7 +34,7 @@ impl HasPath for fs::DirEntry {
     }
 }
 
-pub trait PathHandler<D: Send + 'static>: Send + Clone + 'static {
+pub trait PathHandler<D>: Send + Sync + 'static {
     type DirItem: HasPath;
     type DirIter: iter::Iterator<Item = io::Result<Self::DirItem>>;
 
@@ -43,7 +43,8 @@ pub trait PathHandler<D: Send + 'static>: Send + Clone + 'static {
 }
 
 
-pub fn iterate_recursively<P: 'static + Send, W: PathHandler<P>>(first: (PathBuf, P), worker: &W) {
+pub fn iterate_recursively<P: Send + 'static, W: PathHandler<P>>(first: (PathBuf, P),
+                                                                 worker: Arc<W>) {
     let threads = 10;
     let (push_ch, work_ch) = mpsc::sync_channel(threads);
     let pool = threadpool::ThreadPool::new(threads);
@@ -207,11 +208,11 @@ mod tests {
             Ok(self.list(path))
         }
 
-        fn handle_path(&self, p_opt: ParentOpt, path: PathBuf) -> Option<ParentOpt> {
+        fn handle_path(&self, p_opt: &ParentOpt, path: PathBuf) -> Option<ParentOpt> {
             assert_eq!(self.visit(path.clone()), Some(false));
 
-            if let Some(p) = p_opt {
-                assert!(path.parent() == Some(&p));
+            if let &Some(ref p) = p_opt {
+                assert!(path.parent() == Some(p));
             }
 
             self.list(&path).next().map(|_| Some(path))
@@ -239,11 +240,11 @@ mod tests {
                                  "/empty/6/",
                                  "/empty/7/",
                                  "/empty/8/",
-                                 "/empty/9/",
-                                 ];
+                                 "/empty/9/"];
 
-        let mut handler = StubPathHandler::new(paths.iter().map(PathBuf::from).collect());
-        iterate_recursively((PathBuf::from("/"), None), &mut handler);
+        let handler = StubPathHandler::new(paths.iter().map(PathBuf::from).collect());
+        let handler = Arc::new(handler);
+        iterate_recursively((PathBuf::from("/"), None), handler.clone());
 
         assert_eq!(handler.not_visited(), vec![PathBuf::from("/")]);
     }

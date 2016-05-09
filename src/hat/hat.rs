@@ -1237,7 +1237,7 @@ pub struct Family {
 impl Family {
     pub fn snapshot_dir(&self, dir: PathBuf) {
         let handler = InsertPathHandler::new(self.key_store_process.clone());
-        listdir::iterate_recursively((PathBuf::from(&dir), None), handler);
+        listdir::iterate_recursively((PathBuf::from(&dir), None), sync::Arc::new(handler));
     }
 
     pub fn snapshot_direct(&self,
