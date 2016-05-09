@@ -15,6 +15,8 @@
 //! Helpers for reading directory structures from the local filesystem.
 
 use std::fs;
+use std::io;
+use std::iter;
 use std::path::PathBuf;
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
@@ -22,14 +24,31 @@ use std::sync::{Arc, Mutex};
 use threadpool;
 
 
+pub trait HasPath {
+    fn path(&self) -> PathBuf;
+}
+
+impl HasPath for fs::DirEntry {
+    fn path(&self) -> PathBuf {
+        fs::DirEntry::path(self)
+    }
+}
+
 pub trait PathHandler<D> {
+    type DirIter;
+
+    fn read_dir(&self, &PathBuf) -> io::Result<Self::DirIter>;
     fn handle_path(&self, D, PathBuf) -> Option<D>;
 }
 
 
-pub fn iterate_recursively<P: 'static + Send + Clone, W: 'static + PathHandler<P> + Send + Clone>
+pub fn iterate_recursively<P: 'static + Send + Clone,
+                           W: 'static + PathHandler<P> + Send + Clone,
+                           I: 'static + HasPath>
     (first: (PathBuf, P),
-     worker: &mut W) {
+     worker: &mut W)
+    where W::DirIter: iter::Iterator<Item = io::Result<I>>
+{
     let threads = 10;
     let (push_ch, work_ch) = mpsc::sync_channel(threads);
     let pool = threadpool::ThreadPool::new(threads);
@@ -68,7 +87,7 @@ pub fn iterate_recursively<P: 'static + Send + Clone, W: 'static + PathHandler<P
                         let mut lock = idle_workers_.lock().unwrap();
                         lock.pop().expect("not enough workers")
                     };
-                    match fs::read_dir(&root) {
+                    match worker.read_dir(&root) {
                         Ok(dir) => {
                             for entry_res in dir {
                                 match entry_res {
@@ -112,6 +131,12 @@ impl Clone for PrintPathHandler {
 }
 
 impl PathHandler<()> for PrintPathHandler {
+    type DirIter = fs::ReadDir;
+
+    fn read_dir(&self, path: &PathBuf) -> io::Result<Self::DirIter> {
+        fs::read_dir(path)
+    }
+
     fn handle_path(&self, _: (), path: PathBuf) -> Option<()> {
         println!("{}", path.display());
         match fs::metadata(&path) {

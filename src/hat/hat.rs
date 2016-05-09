@@ -1154,6 +1154,12 @@ impl InsertPathHandler {
 }
 
 impl listdir::PathHandler<Option<u64>> for InsertPathHandler {
+    type DirIter = fs::ReadDir;
+
+    fn read_dir(&self, path: &PathBuf) -> io::Result<Self::DirIter> {
+        fs::read_dir(path)
+    }
+
     fn handle_path(&self, parent: Option<u64>, path: PathBuf) -> Option<Option<u64>> {
         let count = self.count.fetch_add(1, atomic::Ordering::SeqCst) + 1;
 
