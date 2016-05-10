@@ -1610,6 +1610,54 @@ mod tests {
     }
 
     #[test]
+    fn snapshot_reuse_index() {
+        let (_, mut hat, fam) = setup_family(None);
+
+        let files = vec![("file1", "block1".bytes().collect()),
+                         ("file2", "block2".bytes().collect()),
+                         ("file3", "block3".bytes().collect()),
+                         ("file4", "block1".bytes().collect()),
+                         ("file5", "block2".bytes().collect())];
+
+        // Insert hashes.
+        snapshot_files(&fam, files.clone());
+        fam.flush().unwrap();
+
+        // Reuse hashes.
+        snapshot_files(&fam, files.clone());
+        snapshot_files(&fam, files.clone());
+        fam.flush().unwrap();
+
+        // No commit, so GC removes all the new hashes.
+        let (deleted, live) = hat.gc().unwrap();
+        assert!(deleted > 0);
+        assert_eq!(live, 0);
+
+        // Update index and reinsert hashes.
+        snapshot_files(&fam, files.clone());
+        fam.flush().unwrap();
+
+        // Commit.
+        hat.commit(&fam, None).unwrap();
+        let (deleted, live) = hat.gc().unwrap();
+        assert_eq!(deleted, 0);
+        assert!(live > 0);
+
+        // Inserting again does not increase number of hashes.
+        snapshot_files(&fam, files.clone());
+        fam.flush().unwrap();
+        let (deleted2, live2) = hat.gc().unwrap();
+        assert_eq!(live2, live);
+        assert_eq!(deleted2, 0);
+
+        // Cleanup: only 1 snapshot was committed.
+        hat.deregister(&fam, 1).unwrap();
+        let (deleted, live) = hat.gc().unwrap();
+        assert!(deleted > 0);
+        assert_eq!(live, 0);
+    }
+
+    #[test]
     fn snapshot_gc() {
         let (_, mut hat, fam) = setup_family(None);
 
