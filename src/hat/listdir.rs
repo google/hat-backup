@@ -44,7 +44,7 @@ pub trait PathHandler<D>: Send + Sync + 'static {
 
 
 pub fn iterate_recursively<P: Send + 'static, W: PathHandler<P>>(first: (PathBuf, P),
-                                                                 worker: Arc<W>) {
+                                                                 worker: &Arc<W>) {
     let threads = 10;
     let (push_ch, work_ch) = mpsc::sync_channel(threads);
     let pool = threadpool::ThreadPool::new(threads);
@@ -57,7 +57,6 @@ pub fn iterate_recursively<P: Send + 'static, W: PathHandler<P>>(first: (PathBuf
     // Insert the first task into the queue:
     let (root, payload) = first;
     push_ch.send(Work::More(root, payload)).unwrap();
-    let worker = Arc::new(worker);
     let mut active_workers = 0;
 
     // Master thread:
@@ -158,9 +157,8 @@ mod tests {
         }
     }
 
-    #[derive(Clone)]
     struct StubPathHandler {
-        paths: Arc<Mutex<VisitedPaths>>,
+        paths: Mutex<VisitedPaths>,
     }
 
     impl StubPathHandler {
@@ -169,7 +167,7 @@ mod tests {
             for path in paths {
                 tree.insert(path, false);
             }
-            StubPathHandler { paths: Arc::new(Mutex::new(tree)) }
+            StubPathHandler { paths: Mutex::new(tree) }
         }
 
         fn visit(&self, path: PathBuf) -> Option<bool> {
@@ -244,7 +242,7 @@ mod tests {
 
         let handler = StubPathHandler::new(paths.iter().map(PathBuf::from).collect());
         let handler = Arc::new(handler);
-        iterate_recursively((PathBuf::from("/"), None), handler.clone());
+        iterate_recursively((PathBuf::from("/"), None), &handler);
 
         assert_eq!(handler.not_visited(), vec![PathBuf::from("/")]);
     }
