@@ -425,9 +425,8 @@ impl<B: 'static + blob::StoreBackend + Clone + Send> HatRc<B> {
             }
             // Now insert the hash information if needed.
             match hashes.reserve(entry) {
-                hash::Reply::HashKnown => return Ok(get_hash_id(hashes, &hash).unwrap()),
-                hash::Reply::ReserveOk => (),
-                _ => return Err(From::from("Unexpected reply from hash index")),
+                hash::ReserveResult::HashKnown => return Ok(get_hash_id(hashes, &hash).unwrap()),
+                hash::ReserveResult::ReserveOk => (),
             }
             // Commit hash.
             hashes.commit(&hash, pref.clone());

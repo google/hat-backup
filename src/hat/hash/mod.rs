@@ -119,30 +119,8 @@ pub struct Entry {
     pub persistent_ref: Option<blob::ChunkRef>,
 }
 
-pub enum Reply {
-    HashID(i64),
-    HashKnown,
-    HashNotKnown,
-    Entry(Entry),
-
-    Payload(Option<Vec<u8>>),
-    PersistentRef(blob::ChunkRef),
-
-    ReserveOk,
-    CommitOk,
-    CallbackRegistered,
-
-    Listing(mpsc::Receiver<Entry>),
-
-    HashTag(Option<tags::Tag>),
-    HashIDs(Vec<i64>),
-
-    CurrentGcData(GcData),
-
-    Ok,
-    Retry,
-}
-
+pub struct RetryError;
+pub enum ReserveResult { HashKnown, ReserveOk }
 
 #[derive(Clone)]
 struct QueueEntry {
@@ -597,30 +575,30 @@ impl IndexProcess {
     }
 
     /// Locate the persistent reference (external blob reference) for this `Hash`.
-    pub fn fetch_persistent_ref(&self, hash: &Hash) -> Reply {
+    pub fn fetch_persistent_ref(&self, hash: &Hash) -> Result<Option<blob::ChunkRef>, RetryError> {
         assert!(!hash.bytes.is_empty());
         match self.lock().0.locate(hash) {
-            Some(ref queue_entry) if queue_entry.persistent_ref.is_none() => Reply::Retry,
+            Some(ref queue_entry) if queue_entry.persistent_ref.is_none() => Err(RetryError),
             Some(queue_entry) => {
-                Reply::PersistentRef(queue_entry.persistent_ref.expect("persistent_ref"))
+                Ok(Some(queue_entry.persistent_ref.expect("persistent_ref")))
             }
-            None => Reply::HashNotKnown,
+            None => Ok(None),
         }
     }
 
     /// Reserve a `Hash` in the index, while sending its content to external storage.
     /// This is used to ensure that each `Hash` is stored only once.
-    pub fn reserve(&self, hash_entry: Entry) -> Reply {
+    pub fn reserve(&self, hash_entry: Entry) -> ReserveResult {
         assert!(!hash_entry.hash.bytes.is_empty());
         // To avoid unused IO, we store entries in-memory until committed to persistent
         // storage. This allows us to continue after a crash without needing to scan
         // through and delete uncommitted entries.
         let mut guard = self.lock();
         match guard.0.locate(&hash_entry.hash) {
-            Some(_) => Reply::HashKnown,
+            Some(_) => ReserveResult::HashKnown,
             None => {
                 guard.0.reserve(hash_entry);
-                Reply::ReserveOk
+                ReserveResult::ReserveOk
             }
         }
     }

@@ -161,7 +161,7 @@ impl HashStoreBackend {
     fn fetch_chunk_from_hash(&mut self, hash: hash::Hash) -> Option<Vec<u8>> {
         assert!(!hash.bytes.is_empty());
         match self.hash_index.fetch_persistent_ref(&hash) {
-            hash::Reply::PersistentRef(chunk_ref) => {
+            Ok(Some(chunk_ref)) => {
                 self.fetch_chunk_from_persistent_ref(chunk_ref)
             }
             _ => None,  // TODO: Do we need to distinguish `missing` from `unknown ref`?
@@ -206,10 +206,9 @@ impl HashTreeBackend for HashStoreBackend {
         assert!(!hash.bytes.is_empty());
         loop {
             match self.hash_index.fetch_persistent_ref(hash) {
-                hash::Reply::PersistentRef(r) => return Some(r), // done
-                hash::Reply::HashNotKnown => return None, // done
-                hash::Reply::Retry => (),  // continue loop
-                _ => panic!("Unexpected reply from hash index."),
+                Ok(Some(r)) => return Some(r), // done
+                Ok(None) => return None, // done
+                Err(hash::RetryError) => (),  // continue loop
             }
         }
     }
@@ -237,12 +236,12 @@ impl HashTreeBackend for HashStoreBackend {
         };
 
         match self.hash_index.reserve(hash_entry.clone()) {
-            hash::Reply::HashKnown => {
+            hash::ReserveResult::HashKnown => {
                 // Someone came before us: piggyback on their result.
                 return self.fetch_persistent_ref(&hash)
                            .expect("Could not find persistent_ref for known chunk.");
             }
-            hash::Reply::ReserveOk => {
+            hash::ReserveResult::ReserveOk => {
                 // We came first: this data-chunk is ours to process.
                 let local_hash_index = self.hash_index.clone();
 
@@ -263,7 +262,6 @@ impl HashTreeBackend for HashStoreBackend {
                     _ => panic!("Unexpected reply from BlobStore."),
                 };
             }
-            _ => panic!("Unexpected HashIndex reply."),
         };
     }
 }
