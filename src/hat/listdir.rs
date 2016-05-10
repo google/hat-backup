@@ -158,9 +158,8 @@ mod tests {
         }
     }
 
-    #[derive(Clone)]
     struct StubPathHandler {
-        paths: Arc<Mutex<VisitedPaths>>,
+        paths: Mutex<VisitedPaths>,
     }
 
     impl StubPathHandler {
@@ -169,7 +168,7 @@ mod tests {
             for path in paths {
                 tree.insert(path, false);
             }
-            StubPathHandler { paths: Arc::new(Mutex::new(tree)) }
+            StubPathHandler { paths: Mutex::new(tree) }
         }
 
         fn visit(&self, path: PathBuf) -> Option<bool> {
