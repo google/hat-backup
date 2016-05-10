@@ -15,7 +15,7 @@
 //! Local state for known hashes and their external location (blob reference).
 
 use std::borrow::Cow;
-use std::sync::mpsc;
+use std::sync::{mpsc, Arc, Mutex};
 use time::Duration;
 
 use diesel;
@@ -28,7 +28,6 @@ use sodiumoxide::crypto::hash::sha512;
 use blob;
 use cumulative_counter::CumulativeCounter;
 use periodic_timer::PeriodicTimer;
-use process::{Process, MsgHandler};
 use tags;
 use unique_priority_queue::UniquePriorityQueue;
 use util;
@@ -67,7 +66,8 @@ error_type! {
 
 pub static HASHBYTES: usize = sha512::DIGESTBYTES;
 
-pub type IndexProcess = Process<Msg, Result<Reply, MsgError>>;
+#[derive(Clone)]
+pub struct IndexProcess(Arc<Mutex<(Index, Option<i64>)>>);
 
 
 /// A wrapper around Hash digests.
@@ -610,13 +610,12 @@ impl Index {
     }
 }
 
-impl MsgHandler<Msg, Result<Reply, MsgError>> for Index {
-    type Err = MsgError;
-
-    fn handle(&mut self,
-              msg: Msg,
-              reply: Box<Fn(Result<Reply, Self::Err>)>)
-              -> Result<(), Self::Err> {
+impl Index {
+    fn handle<F>(&mut self,
+                 msg: Msg,
+                 reply: F)
+                 -> Result<(), MsgError>
+        where F: Fn(Result<Reply, MsgError>) {
         let reply_ok = |x| {
             reply(Ok(x));
             Ok(())
@@ -718,5 +717,37 @@ impl MsgHandler<Msg, Result<Reply, MsgError>> for Index {
                 reply_ok(Reply::CommitOk)
             }
         }
+    }
+}
+
+impl IndexProcess {
+    pub fn new(index: Index) -> IndexProcess {
+        IndexProcess::new_with_shutdown(index, None)
+    }
+
+    pub fn new_with_shutdown(index: Index, shutdown: Option<i64>) -> IndexProcess {
+        IndexProcess(Arc::new(Mutex::new((index, shutdown))))
+    }
+
+    pub fn send_reply(&self, msg: Msg) -> Result<Reply, MsgError> {
+        let mut guard = self.0.lock().expect("index-process has failed");
+
+        match &mut guard.1 {
+            &mut None => (),
+            &mut Some(0) =>
+                panic!("No more requests for this index process"),
+            &mut Some(ref mut n) => {
+                *n -= 1;
+            }
+        }
+
+        let res = Mutex::new(None);
+        guard.0.handle(msg, |r| {
+            let mut inner_guard = res.lock().unwrap();
+            assert!(inner_guard.is_none());
+            *inner_guard = Some(r);
+        }).expect("Process encountered unrecoverable error");
+
+        res.into_inner().expect("Lock should not be poisened").expect("The closure must be called")
     }
 }
