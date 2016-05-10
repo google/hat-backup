@@ -160,7 +160,7 @@ impl HashStoreBackend {
 
     fn fetch_chunk_from_hash(&mut self, hash: hash::Hash) -> Option<Vec<u8>> {
         assert!(!hash.bytes.is_empty());
-        match self.hash_index.fetch_persistent_ref(hash) {
+        match self.hash_index.fetch_persistent_ref(&hash) {
             hash::Reply::PersistentRef(chunk_ref) => {
                 self.fetch_chunk_from_persistent_ref(chunk_ref)
             }
@@ -205,7 +205,7 @@ impl HashTreeBackend for HashStoreBackend {
     fn fetch_persistent_ref(&mut self, hash: &hash::Hash) -> Option<blob::ChunkRef> {
         assert!(!hash.bytes.is_empty());
         loop {
-            match self.hash_index.fetch_persistent_ref(hash.clone()) {
+            match self.hash_index.fetch_persistent_ref(hash) {
                 hash::Reply::PersistentRef(r) => return Some(r), // done
                 hash::Reply::HashNotKnown => return None, // done
                 hash::Reply::Retry => (),  // continue loop
@@ -214,11 +214,10 @@ impl HashTreeBackend for HashStoreBackend {
         }
     }
 
-    fn fetch_payload(&mut self, hash: hash::Hash) -> Option<Vec<u8>> {
+    fn fetch_payload(&mut self, hash: &hash::Hash) -> Option<Vec<u8>> {
         match self.hash_index.fetch_payload(hash) {
-            hash::Reply::Payload(p) => p, // done
-            hash::Reply::HashNotKnown => None, // done
-            _ => panic!("Unexpected reply from hash index."),
+            Some(p) => p, // done
+            None => None, // done
         }
     }
 
@@ -248,7 +247,7 @@ impl HashTreeBackend for HashStoreBackend {
                 let local_hash_index = self.hash_index.clone();
 
                 let callback = Box::new(move |chunk_ref: blob::ChunkRef| {
-                    local_hash_index.commit(hash, chunk_ref);
+                    local_hash_index.commit(&hash, chunk_ref);
                 });
                 let kind = if level == 0 {
                     blob::Kind::TreeLeaf
@@ -338,8 +337,7 @@ impl<IT: Iterator<Item = Vec<u8>>> MsgHandler<Msg<IT>, Result<Reply, MsgError>> 
                                                       org_entry.created == entry.created => {
                         if chunk_it_opt.is_some() && entry.data_hash.is_some() {
                             let hash = hash::Hash { bytes: entry.data_hash.clone().unwrap() };
-                            if let hash::Reply::HashKnown =
-                                   self.hash_index.hash_exists(hash) {
+                            if self.hash_index.hash_exists(&hash) {
                                 // Short-circuit: We have the data.
                                 return reply_ok(Reply::Id(entry.id.unwrap()));
                             }

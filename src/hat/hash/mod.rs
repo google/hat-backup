@@ -548,118 +548,6 @@ impl Index {
         self.conn.commit_transaction().unwrap();
         self.conn.begin_transaction().unwrap();
     }
-
-    fn handle_get_id(&mut self, hash: &Hash) -> Option<i64> {
-        assert!(!hash.bytes.is_empty());
-        match self.locate(&hash) {
-            Some(entry) => Some(entry.id),
-            None => None,
-        }
-    }
-
-    fn handle_hash_exists(&mut self, hash: Hash) -> Reply {
-        assert!(!hash.bytes.is_empty());
-        match self.locate(&hash) {
-            Some(_) => Reply::HashKnown,
-            None => Reply::HashNotKnown,
-        }
-    }
-
-    fn handle_fetch_payload(&mut self, hash: Hash) -> Reply {
-        assert!(!hash.bytes.is_empty());
-        match self.locate(&hash) {
-            Some(ref queue_entry) => Reply::Payload(queue_entry.payload.clone()),
-            None => Reply::HashNotKnown,
-        }
-    }
-
-    fn handle_fetch_persistent_ref(&mut self, hash: Hash) -> Reply {
-        assert!(!hash.bytes.is_empty());
-        match self.locate(&hash) {
-            Some(ref queue_entry) if queue_entry.persistent_ref.is_none() => Reply::Retry,
-            Some(queue_entry) => {
-                Reply::PersistentRef(queue_entry.persistent_ref.expect("persistent_ref"))
-            }
-            None => Reply::HashNotKnown,
-        }
-    }
-
-    fn handle_reserve(&mut self, hash_entry: Entry) -> Reply {
-        assert!(!hash_entry.hash.bytes.is_empty());
-        // To avoid unused IO, we store entries in-memory until committed to persistent
-        // storage. This allows us to continue after a crash without needing to scan
-        // through and delete uncommitted entries.
-        match self.locate(&hash_entry.hash) {
-            Some(_) => Reply::HashKnown,
-            None => {
-                self.reserve(hash_entry);
-                Reply::ReserveOk
-            }
-        }
-    }
-
-    fn handle_update_reserved(&mut self, hash_entry: Entry) -> Reply {
-        assert!(!hash_entry.hash.bytes.is_empty());
-        self.update_reserved(hash_entry);
-        Reply::ReserveOk
-    }
-
-    fn handle_commit(&mut self, hash: Hash, persistent_ref: blob::ChunkRef) -> Reply {
-        assert!(!hash.bytes.is_empty());
-        self.commit(&hash, persistent_ref);
-        Reply::CommitOk
-    }
-
-    fn handle_list(&mut self) -> Reply {
-        Reply::Listing(self.list())
-    }
-
-    fn handle_delete(&mut self, id: i64) -> Reply {
-        self.delete(id);
-        Reply::Ok
-    }
-
-    fn handle_set_tag(&mut self, id: i64, tag: tags::Tag) -> Reply {
-        self.set_tag(Some(id), tag);
-        Reply::Ok
-    }
-
-    fn handle_set_all_tags(&mut self, tag: tags::Tag) -> Reply {
-        self.set_tag(None, tag);
-        Reply::Ok
-    }
-
-    fn handle_get_tag(&mut self, id: i64) -> Reply {
-        Reply::HashTag(self.get_tag(id))
-    }
-
-    fn handle_get_ids_by_tag(&mut self, tag: i64) -> Reply {
-        Reply::HashIDs(self.list_ids_by_tag(tag))
-    }
-
-    fn handle_read_gc_data(&mut self, hash_id: i64, family_id: i64) -> Reply {
-        Reply::CurrentGcData(self.read_gc_data(hash_id, family_id))
-    }
-
-    fn handle_update_gc_data(&mut self, hash_id: i64, family_id: i64, update_fn: Box<FnBox<GcData, Option<GcData>>>) -> Reply {
-        Reply::CurrentGcData(self.update_gc_data(hash_id, family_id, update_fn))
-    }
-
-    fn handle_update_family_gc_data(&mut self, family_id: i64, update_fns: mpsc::Receiver<Box<FnBox<GcData, Option<GcData>>>>) -> Reply {
-        self.update_family_gc_data(family_id, update_fns);
-        Reply::Ok
-    }
-
-    fn handle_manual_commit(&mut self) -> Reply {
-        self.flush();
-        self.flush_periodically = false;
-        Reply::CommitOk
-    }
-
-    fn handle_flush(&mut self) -> Reply {
-        self.flush();
-        Reply::CommitOk
-    }
 }
 
 impl IndexProcess {
@@ -676,8 +564,7 @@ impl IndexProcess {
 
         match &mut guard.1 {
             &mut None => (),
-            &mut Some(0) =>
-                panic!("No more requests for this index process"),
+            &mut Some(0) => panic!("No more requests for this index process"),
             &mut Some(ref mut n) => {
                 *n -= 1;
             }
@@ -688,7 +575,8 @@ impl IndexProcess {
 
     /// Locate the local ID of this hash.
     pub fn get_id(&self, hash: &Hash) -> Option<i64> {
-        self.lock().0.handle_get_id(hash)
+        assert!(!hash.bytes.is_empty());
+        self.lock().0.locate(&hash).map(|entry| entry.id)
     }
 
     /// Locate hash entry from its ID.
@@ -697,95 +585,125 @@ impl IndexProcess {
     }
 
     /// Check whether this `Hash` already exists in the system.
-    pub fn hash_exists(&self, hash: Hash) -> Reply {
-        self.lock().0.handle_hash_exists(hash)
+    pub fn hash_exists(&self, hash: &Hash) -> bool {
+        assert!(!hash.bytes.is_empty());
+        self.lock().0.locate(hash).is_some()
     }
 
     /// Locate the local payload of the `Hash`.
-    pub fn fetch_payload(&self, hash: Hash) -> Reply {
-        self.lock().0.handle_fetch_payload(hash)
+    pub fn fetch_payload(&self, hash: &Hash) -> Option<Option<Vec<u8>>> {
+        assert!(!hash.bytes.is_empty());
+        self.lock().0.locate(hash).map(|queue_entry| queue_entry.payload)
     }
 
     /// Locate the persistent reference (external blob reference) for this `Hash`.
-    pub fn fetch_persistent_ref(&self, hash: Hash) -> Reply {
-        self.lock().0.handle_fetch_persistent_ref(hash)
+    pub fn fetch_persistent_ref(&self, hash: &Hash) -> Reply {
+        assert!(!hash.bytes.is_empty());
+        match self.lock().0.locate(hash) {
+            Some(ref queue_entry) if queue_entry.persistent_ref.is_none() => Reply::Retry,
+            Some(queue_entry) => {
+                Reply::PersistentRef(queue_entry.persistent_ref.expect("persistent_ref"))
+            }
+            None => Reply::HashNotKnown,
+        }
     }
 
     /// Reserve a `Hash` in the index, while sending its content to external storage.
     /// This is used to ensure that each `Hash` is stored only once.
     pub fn reserve(&self, hash_entry: Entry) -> Reply {
-        self.lock().0.handle_reserve(hash_entry)
+        assert!(!hash_entry.hash.bytes.is_empty());
+        // To avoid unused IO, we store entries in-memory until committed to persistent
+        // storage. This allows us to continue after a crash without needing to scan
+        // through and delete uncommitted entries.
+        let mut guard = self.lock();
+        match guard.0.locate(&hash_entry.hash) {
+            Some(_) => Reply::HashKnown,
+            None => {
+                guard.0.reserve(hash_entry);
+                Reply::ReserveOk
+            }
+        }
     }
 
     /// Update the info for a reserved `Hash`. The `Hash` remains reserved. This is used to update
     /// the persistent reference (external blob reference) as soon as it is available (to allow new
     /// references to the `Hash` to be created before it is committed).
-    pub fn update_reserved(&self, hash_entry: Entry) -> Reply {
-        self.lock().0.handle_update_reserved(hash_entry)
+    pub fn update_reserved(&self, hash_entry: Entry) {
+        assert!(!hash_entry.hash.bytes.is_empty());
+        self.lock().0.update_reserved(hash_entry);
     }
 
     /// A `Hash` is committed when it has been `finalized` in the external storage. `Commit`
     /// includes the persistent reference that the content is available at.
-    pub fn commit(&self, hash: Hash, persistent_ref: blob::ChunkRef) -> Reply {
-        self.lock().0.handle_commit(hash, persistent_ref)
+    pub fn commit(&self, hash: &Hash, persistent_ref: blob::ChunkRef) {
+        assert!(!hash.bytes.is_empty());
+        self.lock().0.commit(hash, persistent_ref);
     }
 
     /// List all hash entries.
-    pub fn list(&self) -> Reply {
-        self.lock().0.handle_list()
+    pub fn list(&self) -> mpsc::Receiver<Entry> {
+        self.lock().0.list()
     }
 
     /// Permanently delete hash by its ID.
-    pub fn delete(&self, id: i64) -> Reply {
-        self.lock().0.handle_delete(id)
+    pub fn delete(&self, id: i64) {
+        self.lock().0.delete(id);
     }
 
     /// API related to tagging, which is useful to indicate state during operation stages.
     /// It operates directly on the underlying IDs.
-    pub fn set_tag(&self, id: i64, tag: tags::Tag) -> Reply {
-        self.lock().0.handle_set_tag(id, tag)
+    pub fn set_tag(&self, id: i64, tag: tags::Tag) {
+        self.lock().0.set_tag(Some(id), tag);
     }
 
     /// API related to tagging, which is useful to indicate state during operation stages.
     /// It operates directly on the underlying IDs.
-    pub fn set_all_tags(&self, tag: tags::Tag) -> Reply {
-        self.lock().0.handle_set_all_tags(tag)
+    pub fn set_all_tags(&self, tag: tags::Tag) {
+        self.lock().0.set_tag(None, tag);
     }
 
     /// API related to tagging, which is useful to indicate state during operation stages.
     /// It operates directly on the underlying IDs.
-    pub fn get_tag(&self, id: i64) -> Reply {
-        self.lock().0.handle_get_tag(id)
+    pub fn get_tag(&self, id: i64) -> Option<tags::Tag> {
+        self.lock().0.get_tag(id)
     }
 
     /// API related to tagging, which is useful to indicate state during operation stages.
     /// It operates directly on the underlying IDs.
-    pub fn get_ids_by_tag(&self, tag: i64) -> Reply {
-        self.lock().0.handle_get_ids_by_tag(tag)
+    pub fn get_ids_by_tag(&self, tag: i64) -> Vec<i64> {
+        self.lock().0.list_ids_by_tag(tag)
     }
 
     /// API related to garbage collector metadata tied to (hash id, family id) pairs.
-    pub fn read_gc_data(&self, hash_id: i64, family_id: i64) -> Reply {
-        self.lock().0.handle_read_gc_data(hash_id, family_id)
+    pub fn read_gc_data(&self, hash_id: i64, family_id: i64) -> GcData {
+        self.lock().0.read_gc_data(hash_id, family_id)
     }
 
     /// API related to garbage collector metadata tied to (hash id, family id) pairs.
-    pub fn update_gc_data(&self, hash_id: i64, family_id: i64, update_fn: Box<FnBox<GcData, Option<GcData>>>) -> Reply {
-        self.lock().0.handle_update_gc_data(hash_id, family_id, update_fn)
+    pub fn update_gc_data(&self,
+                          hash_id: i64,
+                          family_id: i64,
+                          update_fn: Box<FnBox<GcData, Option<GcData>>>)
+                          -> GcData {
+        self.lock().0.update_gc_data(hash_id, family_id, update_fn)
     }
 
     /// API related to garbage collector metadata tied to (hash id, family id) pairs.
-    pub fn update_family_gc_data(&self, family_id: i64, update_fns: mpsc::Receiver<Box<FnBox<GcData, Option<GcData>>>>) -> Reply {
-        self.lock().0.handle_update_family_gc_data(family_id, update_fns)
+    pub fn update_family_gc_data(&self,
+                                 family_id: i64,
+                                 update_fns: mpsc::Receiver<Box<FnBox<GcData, Option<GcData>>>>) {
+        self.lock().0.update_family_gc_data(family_id, update_fns)
     }
 
     /// Manual commit. This also disables automatic periodic commit.
-    pub fn manual_commit(&self) -> Reply {
-        self.lock().0.handle_manual_commit()
+    pub fn manual_commit(&self) {
+        let mut guard = self.lock();
+        guard.0.flush();
+        guard.0.flush_periodically = false;
     }
 
     /// Flush the hash index to clear internal buffers and commit the underlying database.
-    pub fn flush(&self) -> Reply {
-        self.lock().0.handle_flush()
+    pub fn flush(&self) {
+        self.lock().0.flush()
     }
 }
