@@ -609,11 +609,11 @@ impl Index {
         self.conn.begin_transaction().unwrap();
     }
 
-    fn handle_get_id(&mut self, hash: Hash) -> Reply {
+    fn handle_get_id(&mut self, hash: &Hash) -> Option<i64> {
         assert!(!hash.bytes.is_empty());
         match self.locate(&hash) {
-            Some(entry) => Reply::HashID(entry.id),
-            None => Reply::HashNotKnown,
+            Some(entry) => Some(entry.id),
+            None => None,
         }
     }
 
@@ -753,7 +753,7 @@ impl IndexProcess {
         guard
     }
 
-    pub fn get_id(&self, hash: Hash) -> Reply {
+    pub fn get_id(&self, hash: &Hash) -> Option<i64> {
         self.lock().0.handle_get_id(hash)
     }
 
