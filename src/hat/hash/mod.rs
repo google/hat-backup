@@ -15,7 +15,7 @@
 //! Local state for known hashes and their external location (blob reference).
 
 use std::borrow::Cow;
-use std::sync::{mpsc, Arc, Mutex};
+use std::sync::{mpsc, Arc, Mutex, MutexGuard};
 use time::Duration;
 
 use diesel;
@@ -609,102 +609,146 @@ impl Index {
         self.conn.begin_transaction().unwrap();
     }
 
-    fn handle(&mut self, msg: Msg) -> Reply {
-        match msg {
-            Msg::GetID(hash) => {
-                assert!(!hash.bytes.is_empty());
-                match self.locate(&hash) {
-                    Some(entry) => Reply::HashID(entry.id),
-                    None => Reply::HashNotKnown,
-                }
+    fn handle_get_id(&mut self, hash: Hash) -> Reply {
+        assert!(!hash.bytes.is_empty());
+        match self.locate(&hash) {
+            Some(entry) => Reply::HashID(entry.id),
+            None => Reply::HashNotKnown,
+        }
+    }
+
+    fn handle_get_hash(&mut self, id: i64) -> Reply {
+        match self.locate_by_id(id) {
+            Some(hash) => Reply::Entry(hash),
+            None => Reply::HashNotKnown,
+        }
+    }
+
+    fn handle_hash_exists(&mut self, hash: Hash) -> Reply {
+        assert!(!hash.bytes.is_empty());
+        match self.locate(&hash) {
+            Some(_) => Reply::HashKnown,
+            None => Reply::HashNotKnown,
+        }
+    }
+
+    fn handle_fetch_payload(&mut self, hash: Hash) -> Reply {
+        assert!(!hash.bytes.is_empty());
+        match self.locate(&hash) {
+            Some(ref queue_entry) => Reply::Payload(queue_entry.payload.clone()),
+            None => Reply::HashNotKnown,
+        }
+    }
+
+    fn handle_fetch_persistent_ref(&mut self, hash: Hash) -> Reply {
+        assert!(!hash.bytes.is_empty());
+        match self.locate(&hash) {
+            Some(ref queue_entry) if queue_entry.persistent_ref.is_none() => Reply::Retry,
+            Some(queue_entry) => {
+                Reply::PersistentRef(queue_entry.persistent_ref.expect("persistent_ref"))
             }
-            Msg::GetHash(id) => {
-                match self.locate_by_id(id) {
-                    Some(hash) => Reply::Entry(hash),
-                    None => Reply::HashNotKnown,
-                }
-            }
-            Msg::HashExists(hash) => {
-                assert!(!hash.bytes.is_empty());
-                match self.locate(&hash) {
-                    Some(_) => Reply::HashKnown,
-                    None => Reply::HashNotKnown,
-                }
-            }
-            Msg::FetchPayload(hash) => {
-                assert!(!hash.bytes.is_empty());
-                match self.locate(&hash) {
-                    Some(ref queue_entry) => Reply::Payload(queue_entry.payload.clone()),
-                    None => Reply::HashNotKnown,
-                }
-            }
-            Msg::FetchPersistentRef(hash) => {
-                assert!(!hash.bytes.is_empty());
-                match self.locate(&hash) {
-                    Some(ref queue_entry) if queue_entry.persistent_ref.is_none() => Reply::Retry,
-                    Some(queue_entry) => {
-                        Reply::PersistentRef(queue_entry.persistent_ref.expect("persistent_ref"))
-                    }
-                    None => Reply::HashNotKnown,
-                }
-            }
-            Msg::Reserve(hash_entry) => {
-                assert!(!hash_entry.hash.bytes.is_empty());
-                // To avoid unused IO, we store entries in-memory until committed to persistent
-                // storage. This allows us to continue after a crash without needing to scan
-                // through and delete uncommitted entries.
-                match self.locate(&hash_entry.hash) {
-                    Some(_) => Reply::HashKnown,
-                    None => {
-                        self.reserve(hash_entry);
-                        Reply::ReserveOk
-                    }
-                }
-            }
-            Msg::UpdateReserved(hash_entry) => {
-                assert!(!hash_entry.hash.bytes.is_empty());
-                self.update_reserved(hash_entry);
+            None => Reply::HashNotKnown,
+        }
+    }
+
+    fn handle_reserve(&mut self, hash_entry: Entry) -> Reply {
+        assert!(!hash_entry.hash.bytes.is_empty());
+        // To avoid unused IO, we store entries in-memory until committed to persistent
+        // storage. This allows us to continue after a crash without needing to scan
+        // through and delete uncommitted entries.
+        match self.locate(&hash_entry.hash) {
+            Some(_) => Reply::HashKnown,
+            None => {
+                self.reserve(hash_entry);
                 Reply::ReserveOk
             }
-            Msg::Commit(hash, persistent_ref) => {
-                assert!(!hash.bytes.is_empty());
-                self.commit(&hash, persistent_ref);
-                Reply::CommitOk
-            }
-            Msg::List => Reply::Listing(self.list()),
-            Msg::Delete(id) => {
-                self.delete(id);
-                Reply::Ok
-            }
-            Msg::SetTag(id, tag) => {
-                self.set_tag(Some(id), tag);
-                Reply::Ok
-            }
-            Msg::SetAllTags(tag) => {
-                self.set_tag(None, tag);
-                Reply::Ok
-            }
-            Msg::GetTag(id) => Reply::HashTag(self.get_tag(id)),
-            Msg::GetIDsByTag(tag) => Reply::HashIDs(self.list_ids_by_tag(tag)),
-            Msg::ReadGcData(hash_id, family_id) => {
-                Reply::CurrentGcData(self.read_gc_data(hash_id, family_id))
-            }
-            Msg::UpdateGcData(hash_id, family_id, update_fn) => {
-                Reply::CurrentGcData(self.update_gc_data(hash_id, family_id, update_fn))
-            }
-            Msg::UpdateFamilyGcData(family_id, update_fs) => {
-                self.update_family_gc_data(family_id, update_fs);
-                Reply::Ok
-            }
-            Msg::ManualCommit => {
-                self.flush();
-                self.flush_periodically = false;
-                Reply::CommitOk
-            }
-            Msg::Flush => {
-                self.flush();
-                Reply::CommitOk
-            }
+        }
+    }
+
+    fn handle_update_reserved(&mut self, hash_entry: Entry) -> Reply {
+        assert!(!hash_entry.hash.bytes.is_empty());
+        self.update_reserved(hash_entry);
+        Reply::ReserveOk
+    }
+
+    fn handle_commit(&mut self, hash: Hash, persistent_ref: blob::ChunkRef) -> Reply {
+        assert!(!hash.bytes.is_empty());
+        self.commit(&hash, persistent_ref);
+        Reply::CommitOk
+    }
+
+    fn handle_list(&mut self) -> Reply {
+        Reply::Listing(self.list())
+    }
+
+    fn handle_delete(&mut self, id: i64) -> Reply {
+        self.delete(id);
+        Reply::Ok
+    }
+
+    fn handle_set_tag(&mut self, id: i64, tag: tags::Tag) -> Reply {
+        self.set_tag(Some(id), tag);
+        Reply::Ok
+    }
+
+    fn handle_set_all_tags(&mut self, tag: tags::Tag) -> Reply {
+        self.set_tag(None, tag);
+        Reply::Ok
+    }
+
+    fn handle_get_tag(&mut self, id: i64) -> Reply {
+        Reply::HashTag(self.get_tag(id))
+    }
+
+    fn handle_get_ids_by_tag(&mut self, tag: i64) -> Reply {
+        Reply::HashIDs(self.list_ids_by_tag(tag))
+    }
+
+    fn handle_read_gc_data(&mut self, hash_id: i64, family_id: i64) -> Reply {
+        Reply::CurrentGcData(self.read_gc_data(hash_id, family_id))
+    }
+
+    fn handle_update_gc_data(&mut self, hash_id: i64, family_id: i64, update_fn: Box<FnBox<GcData, Option<GcData>>>) -> Reply {
+        Reply::CurrentGcData(self.update_gc_data(hash_id, family_id, update_fn))
+    }
+
+    fn handle_update_family_gc_data(&mut self, family_id: i64, update_fns: mpsc::Receiver<Box<FnBox<GcData, Option<GcData>>>>) -> Reply {
+        self.update_family_gc_data(family_id, update_fns);
+        Reply::Ok
+    }
+
+    fn handle_manual_commit(&mut self) -> Reply {
+        self.flush();
+        self.flush_periodically = false;
+        Reply::CommitOk
+    }
+
+    fn handle_flush(&mut self) -> Reply {
+        self.flush();
+        Reply::CommitOk
+    }
+
+    fn handle(&mut self, msg: Msg) -> Reply {
+        match msg {
+            Msg::GetID(hash) => self.handle_get_id(hash),
+            Msg::GetHash(id) => self.handle_get_hash(id),
+            Msg::HashExists(hash) => self.handle_hash_exists(hash),
+            Msg::FetchPayload(hash) => self.handle_fetch_payload(hash),
+            Msg::FetchPersistentRef(hash) => self.handle_fetch_persistent_ref(hash),
+            Msg::Reserve(hash_entry) => self.handle_reserve(hash_entry),
+            Msg::UpdateReserved(hash_entry) => self.handle_update_reserved(hash_entry),
+            Msg::Commit(hash, persistent_ref) => self.handle_commit(hash, persistent_ref),
+            Msg::List => self.handle_list(),
+            Msg::Delete(id) => self.handle_delete(id),
+            Msg::SetTag(id, tag) => self.handle_set_tag(id, tag),
+            Msg::SetAllTags(tag) => self.handle_set_all_tags(tag),
+            Msg::GetTag(id) => self.handle_get_tag(id),
+            Msg::GetIDsByTag(tag) => self.handle_get_ids_by_tag(tag),
+            Msg::ReadGcData(hash_id, family_id) => self.handle_read_gc_data(hash_id, family_id),
+            Msg::UpdateGcData(hash_id, family_id, update_fn) => self.handle_update_gc_data(hash_id, family_id, update_fn),
+            Msg::UpdateFamilyGcData(family_id, update_fns) => self.handle_update_family_gc_data(family_id, update_fns),
+            Msg::ManualCommit => self.handle_manual_commit(),
+            Msg::Flush => self.handle_flush(),
         }
     }
 }
@@ -718,7 +762,7 @@ impl IndexProcess {
         IndexProcess(Arc::new(Mutex::new((index, shutdown))))
     }
 
-    pub fn send_reply(&self, msg: Msg) -> Reply {
+    fn lock(&self) -> MutexGuard<(Index, Option<i64>)> {
         let mut guard = self.0.lock().expect("index-process has failed");
 
         match &mut guard.1 {
@@ -730,6 +774,86 @@ impl IndexProcess {
             }
         }
 
-        guard.0.handle(msg)
+        guard
+    }
+
+    pub fn send_reply(&self, msg: Msg) -> Reply {
+        self.lock().0.handle(msg)
+    }
+
+    pub fn get_id(&mut self, hash: Hash) -> Reply {
+        self.lock().0.handle_get_id(hash)
+    }
+
+    pub fn get_hash(&mut self, id: i64) -> Reply {
+        self.lock().0.handle_get_hash(id)
+    }
+
+    pub fn hash_exists(&mut self, hash: Hash) -> Reply {
+        self.lock().0.handle_hash_exists(hash)
+    }
+
+    pub fn fetch_payload(&mut self, hash: Hash) -> Reply {
+        self.lock().0.handle_fetch_payload(hash)
+    }
+
+    pub fn fetch_persistent_ref(&mut self, hash: Hash) -> Reply {
+        self.lock().0.handle_fetch_persistent_ref(hash)
+    }
+
+    pub fn reserve(&mut self, hash_entry: Entry) -> Reply {
+        self.lock().0.handle_reserve(hash_entry)
+    }
+
+    pub fn update_reserved(&mut self, hash_entry: Entry) -> Reply {
+        self.lock().0.handle_update_reserved(hash_entry)
+    }
+
+    pub fn commit(&mut self, hash: Hash, persistent_ref: blob::ChunkRef) -> Reply {
+        self.lock().0.handle_commit(hash, persistent_ref)
+    }
+
+    pub fn list(&mut self) -> Reply {
+        self.lock().0.handle_list()
+    }
+
+    pub fn delete(&mut self, id: i64) -> Reply {
+        self.lock().0.handle_delete(id)
+    }
+
+    pub fn set_tag(&mut self, id: i64, tag: tags::Tag) -> Reply {
+        self.lock().0.handle_set_tag(id, tag)
+    }
+
+    pub fn set_all_tags(&mut self, tag: tags::Tag) -> Reply {
+        self.lock().0.handle_set_all_tags(tag)
+    }
+
+    pub fn get_tag(&mut self, id: i64) -> Reply {
+        self.lock().0.handle_get_tag(id)
+    }
+
+    pub fn get_ids_by_tag(&mut self, tag: i64) -> Reply {
+        self.lock().0.handle_get_ids_by_tag(tag)
+    }
+
+    pub fn read_gc_data(&mut self, hash_id: i64, family_id: i64) -> Reply {
+        self.lock().0.handle_read_gc_data(hash_id, family_id)
+    }
+
+    pub fn update_gc_data(&mut self, hash_id: i64, family_id: i64, update_fn: Box<FnBox<GcData, Option<GcData>>>) -> Reply {
+        self.lock().0.handle_update_gc_data(hash_id, family_id, update_fn)
+    }
+
+    pub fn update_family_gc_data(&mut self, family_id: i64, update_fns: mpsc::Receiver<Box<FnBox<GcData, Option<GcData>>>>) -> Reply {
+        self.lock().0.handle_update_family_gc_data(family_id, update_fns)
+    }
+
+    pub fn manual_commit(&mut self) -> Reply {
+        self.lock().0.handle_manual_commit()
+    }
+
+    pub fn flush(&mut self) -> Reply {
+        self.lock().0.handle_flush()
     }
 }
