@@ -336,14 +336,14 @@ impl<IT: Iterator<Item = Vec<u8>>> MsgHandler<Msg<IT>, Result<Reply, MsgError>> 
                     index::Reply::Entry(ref entry) if org_entry.accessed == entry.accessed &&
                                                       org_entry.modified == entry.modified &&
                                                       org_entry.created == entry.created => {
-                        if org_entry.data_hash.is_some() && entry.data_hash.is_some() {
+                        if chunk_it_opt.is_some() && entry.data_hash.is_some() {
                             let hash = hash::Hash { bytes: entry.data_hash.clone().unwrap() };
                             if let hash::Reply::HashKnown =
                                    try!(self.hash_index.send_reply(hash::Msg::HashExists(hash))) {
                                 // Short-circuit: We have the data.
                                 return reply_ok(Reply::Id(entry.id.unwrap()));
                             }
-                        } else if org_entry.data_hash.is_none() && org_entry.data_hash.is_none() {
+                        } else if chunk_it_opt.is_none() && entry.data_hash.is_none() {
                             // Short-circuit: No data needed.
                             return reply_ok(Reply::Id(entry.id.unwrap()));
                         }
