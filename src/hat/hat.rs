@@ -93,7 +93,7 @@ impl gc::GcBackend for GcBackend {
     type Err = HatError;
 
     fn get_data(&self, hash_id: i64, family_id: i64) -> Result<hash::GcData, Self::Err> {
-        match self.hash_index.send_reply(hash::Msg::ReadGcData(hash_id, family_id)) {
+        match self.hash_index.read_gc_data(hash_id, family_id) {
             hash::Reply::CurrentGcData(data) => Ok(data),
             _ => panic!("Unexpected reply from hash index."),
         }
@@ -103,44 +103,44 @@ impl gc::GcBackend for GcBackend {
                    family_id: i64,
                    f: gc::UpdateFn)
                    -> Result<hash::GcData, Self::Err> {
-        match self.hash_index.send_reply(hash::Msg::UpdateGcData(hash_id, family_id, f)) {
+        match self.hash_index.update_gc_data(hash_id, family_id, f) {
             hash::Reply::CurrentGcData(data) => Ok(data),
             _ => panic!("Unexpected reply from hash index."),
         }
     }
     fn update_all_data_by_family(&mut self,
                                  family_id: i64,
-                                 fs: mpsc::Receiver<gc::UpdateFn>)
+                                 fns: mpsc::Receiver<gc::UpdateFn>)
                                  -> Result<(), Self::Err> {
-        match self.hash_index.send_reply(hash::Msg::UpdateFamilyGcData(family_id, fs)) {
+        match self.hash_index.update_family_gc_data(family_id, fns) {
             hash::Reply::Ok => Ok(()),
             _ => panic!("Unexpected reply from hash index."),
         }
     }
 
     fn get_tag(&self, hash_id: i64) -> Result<Option<tags::Tag>, Self::Err> {
-        match self.hash_index.send_reply(hash::Msg::GetTag(hash_id)) {
+        match self.hash_index.get_tag(hash_id) {
             hash::Reply::HashTag(tag) => Ok(tag),
             _ => panic!("Unexpected reply from hash index."),
         }
     }
 
     fn set_tag(&mut self, hash_id: i64, tag: tags::Tag) -> Result<(), Self::Err> {
-        match self.hash_index.send_reply(hash::Msg::SetTag(hash_id, tag)) {
+        match self.hash_index.set_tag(hash_id, tag) {
             hash::Reply::Ok => Ok(()),
             _ => panic!("Unexpected reply from hash index."),
         }
     }
 
     fn set_all_tags(&mut self, tag: tags::Tag) -> Result<(), Self::Err> {
-        match self.hash_index.send_reply(hash::Msg::SetAllTags(tag)) {
+        match self.hash_index.set_all_tags(tag) {
             hash::Reply::Ok => Ok(()),
             _ => panic!("Unexpected reply from hash index."),
         }
     }
 
     fn reverse_refs(&self, hash_id: i64) -> Result<Vec<i64>, Self::Err> {
-        let entry = match self.hash_index.send_reply(hash::Msg::GetHash(hash_id)) {
+        let entry = match self.hash_index.get_hash(hash_id) {
             hash::Reply::Entry(entry) => entry,
             hash::Reply::HashNotKnown => panic!("HashNotKnown in hash index."),
             _ => panic!("Unexpected reply from hash index."),
@@ -152,8 +152,7 @@ impl gc::GcBackend for GcBackend {
         Ok(hash::tree::decode_metadata_refs(&entry.payload.unwrap())
                .into_iter()
                .map(|bytes| {
-                   match self.hash_index
-                             .send_reply(hash::Msg::GetID(hash::Hash { bytes: bytes })) {
+                   match self.hash_index.get_id(hash::Hash { bytes: bytes }) {
                        hash::Reply::HashID(id) => id,
                        hash::Reply::HashNotKnown => panic!("HashNotKnown in hash index."),
                        _ => panic!("Unexpected result from hash index."),
@@ -164,7 +163,7 @@ impl gc::GcBackend for GcBackend {
 
     fn list_ids_by_tag(&self, tag: tags::Tag) -> Result<mpsc::Receiver<i64>, Self::Err> {
         let (sender, receiver) = mpsc::channel();
-        match self.hash_index.send_reply(hash::Msg::GetIDsByTag(tag as i64)) {
+        match self.hash_index.get_ids_by_tag(tag as i64) {
             hash::Reply::HashIDs(ids) => {
                 ids.iter().map(|i| sender.send(*i)).last();
             }
@@ -175,7 +174,7 @@ impl gc::GcBackend for GcBackend {
     }
 
     fn manual_commit(&mut self) -> Result<(), Self::Err> {
-        match self.hash_index.send_reply(hash::Msg::ManualCommit) {
+        match self.hash_index.manual_commit() {
             hash::Reply::CommitOk => Ok(()),
             _ => panic!("Unexpected reply from hash index."),
         }
@@ -232,7 +231,7 @@ fn list_snapshot(backend: &key::HashStoreBackend,
 }
 
 fn get_hash_id(index: &hash::IndexProcess, hash: hash::Hash) -> Result<i64, HatError> {
-    match index.send_reply(hash::Msg::GetID(hash)) {
+    match index.get_id(hash) {
         hash::Reply::HashID(id) => Ok(id),
         _ => Err(From::from("Tried to register an unknown hash")),
     }
@@ -449,13 +448,13 @@ impl<B: 'static + blob::StoreBackend + Clone + Send> HatRc<B> {
                 _ => return Err(From::from("Failed to add recovered blob")),
             }
             // Now insert the hash information if needed.
-            match hashes.send_reply(hash::Msg::Reserve(entry)) {
+            match hashes.reserve(entry) {
                 hash::Reply::HashKnown => return Ok(get_hash_id(hashes, hash).unwrap()),
                 hash::Reply::ReserveOk => (),
                 _ => return Err(From::from("Unexpected reply from hash index")),
             }
             // Commit hash.
-            match hashes.send_reply(hash::Msg::Commit(hash.clone(), pref.clone())) {
+            match hashes.commit(hash.clone(), pref.clone()) {
                 hash::Reply::CommitOk => (),
                 _ => return Err(From::from("Unexpected reply from hash index")),
             }
@@ -912,12 +911,12 @@ impl<B: 'static + blob::StoreBackend + Clone + Send> HatRc<B> {
 
             let (id_sender, id_receiver) = mpsc::channel();
             for hash in receiver.iter() {
-                match local_hash_index.send_reply(hash::Msg::GetID(hash)) {
+                match local_hash_index.get_id(hash) {
                     hash::Reply::HashID(id) => id_sender.send(id).unwrap(),
                     _ => panic!("Unexpected reply from hash index."),
                 }
             }
-            match local_hash_index.send_reply(hash::Msg::GetID(local_dir_hash)) {
+            match local_hash_index.get_id(local_dir_hash) {
                 hash::Reply::HashID(id) => id_sender.send(id).unwrap(),
                 _ => panic!("Unexpected reply from hash index."),
             }
@@ -978,17 +977,17 @@ impl<B: 'static + blob::StoreBackend + Clone + Send> HatRc<B> {
         try!(self.gc.list_unused_ids(sender));
         for id in receiver.iter() {
             deleted_hashes += 1;
-            match self.hash_index.send_reply(hash::Msg::Delete(id)) {
+            match self.hash_index.delete(id) {
                 hash::Reply::Ok => (),
                 _ => panic!("Unexpected reply from hash index."),
             }
         }
-        match self.hash_index.send_reply(hash::Msg::Flush) {
+        match self.hash_index.flush() {
             hash::Reply::CommitOk => (),
             _ => panic!("Unexpected reply from hash index."),
         }
         // Mark used blobs.
-        let entries = match self.hash_index.send_reply(hash::Msg::List) {
+        let entries = match self.hash_index.list() {
             hash::Reply::Listing(ch) => ch,
             _ => panic!("Unexpected reply from hash index."),
         };

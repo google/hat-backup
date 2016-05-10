@@ -777,83 +777,79 @@ impl IndexProcess {
         guard
     }
 
-    pub fn send_reply(&self, msg: Msg) -> Reply {
-        self.lock().0.handle(msg)
-    }
-
-    pub fn get_id(&mut self, hash: Hash) -> Reply {
+    pub fn get_id(&self, hash: Hash) -> Reply {
         self.lock().0.handle_get_id(hash)
     }
 
-    pub fn get_hash(&mut self, id: i64) -> Reply {
+    pub fn get_hash(&self, id: i64) -> Reply {
         self.lock().0.handle_get_hash(id)
     }
 
-    pub fn hash_exists(&mut self, hash: Hash) -> Reply {
+    pub fn hash_exists(&self, hash: Hash) -> Reply {
         self.lock().0.handle_hash_exists(hash)
     }
 
-    pub fn fetch_payload(&mut self, hash: Hash) -> Reply {
+    pub fn fetch_payload(&self, hash: Hash) -> Reply {
         self.lock().0.handle_fetch_payload(hash)
     }
 
-    pub fn fetch_persistent_ref(&mut self, hash: Hash) -> Reply {
+    pub fn fetch_persistent_ref(&self, hash: Hash) -> Reply {
         self.lock().0.handle_fetch_persistent_ref(hash)
     }
 
-    pub fn reserve(&mut self, hash_entry: Entry) -> Reply {
+    pub fn reserve(&self, hash_entry: Entry) -> Reply {
         self.lock().0.handle_reserve(hash_entry)
     }
 
-    pub fn update_reserved(&mut self, hash_entry: Entry) -> Reply {
+    pub fn update_reserved(&self, hash_entry: Entry) -> Reply {
         self.lock().0.handle_update_reserved(hash_entry)
     }
 
-    pub fn commit(&mut self, hash: Hash, persistent_ref: blob::ChunkRef) -> Reply {
+    pub fn commit(&self, hash: Hash, persistent_ref: blob::ChunkRef) -> Reply {
         self.lock().0.handle_commit(hash, persistent_ref)
     }
 
-    pub fn list(&mut self) -> Reply {
+    pub fn list(&self) -> Reply {
         self.lock().0.handle_list()
     }
 
-    pub fn delete(&mut self, id: i64) -> Reply {
+    pub fn delete(&self, id: i64) -> Reply {
         self.lock().0.handle_delete(id)
     }
 
-    pub fn set_tag(&mut self, id: i64, tag: tags::Tag) -> Reply {
+    pub fn set_tag(&self, id: i64, tag: tags::Tag) -> Reply {
         self.lock().0.handle_set_tag(id, tag)
     }
 
-    pub fn set_all_tags(&mut self, tag: tags::Tag) -> Reply {
+    pub fn set_all_tags(&self, tag: tags::Tag) -> Reply {
         self.lock().0.handle_set_all_tags(tag)
     }
 
-    pub fn get_tag(&mut self, id: i64) -> Reply {
+    pub fn get_tag(&self, id: i64) -> Reply {
         self.lock().0.handle_get_tag(id)
     }
 
-    pub fn get_ids_by_tag(&mut self, tag: i64) -> Reply {
+    pub fn get_ids_by_tag(&self, tag: i64) -> Reply {
         self.lock().0.handle_get_ids_by_tag(tag)
     }
 
-    pub fn read_gc_data(&mut self, hash_id: i64, family_id: i64) -> Reply {
+    pub fn read_gc_data(&self, hash_id: i64, family_id: i64) -> Reply {
         self.lock().0.handle_read_gc_data(hash_id, family_id)
     }
 
-    pub fn update_gc_data(&mut self, hash_id: i64, family_id: i64, update_fn: Box<FnBox<GcData, Option<GcData>>>) -> Reply {
+    pub fn update_gc_data(&self, hash_id: i64, family_id: i64, update_fn: Box<FnBox<GcData, Option<GcData>>>) -> Reply {
         self.lock().0.handle_update_gc_data(hash_id, family_id, update_fn)
     }
 
-    pub fn update_family_gc_data(&mut self, family_id: i64, update_fns: mpsc::Receiver<Box<FnBox<GcData, Option<GcData>>>>) -> Reply {
+    pub fn update_family_gc_data(&self, family_id: i64, update_fns: mpsc::Receiver<Box<FnBox<GcData, Option<GcData>>>>) -> Reply {
         self.lock().0.handle_update_family_gc_data(family_id, update_fns)
     }
 
-    pub fn manual_commit(&mut self) -> Reply {
+    pub fn manual_commit(&self) -> Reply {
         self.lock().0.handle_manual_commit()
     }
 
-    pub fn flush(&mut self) -> Reply {
+    pub fn flush(&self) -> Reply {
         self.lock().0.handle_flush()
     }
 }
