@@ -718,7 +718,7 @@ impl IndexProcess {
         IndexProcess(Arc::new(Mutex::new((index, shutdown))))
     }
 
-    pub fn send_reply(&self, msg: Msg) -> Result<Reply, MsgError> {
+    pub fn send_reply(&self, msg: Msg) -> Reply {
         let mut guard = self.0.lock().expect("index-process has failed");
 
         match &mut guard.1 {
@@ -730,6 +730,6 @@ impl IndexProcess {
             }
         }
 
-        Ok(guard.0.handle(msg))
+        guard.0.handle(msg)
     }
 }
