@@ -19,7 +19,7 @@ use std::io;
 use std::iter;
 use std::path::PathBuf;
 use std::sync::mpsc;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use threadpool;
 
@@ -34,20 +34,17 @@ impl HasPath for fs::DirEntry {
     }
 }
 
-pub trait PathHandler<D> {
+pub trait PathHandler<D>: Send + Sync + 'static {
     type DirItem: HasPath;
     type DirIter: iter::Iterator<Item = io::Result<Self::DirItem>>;
 
     fn read_dir(&self, &PathBuf) -> io::Result<Self::DirIter>;
-    fn handle_path(&self, D, PathBuf) -> Option<D>;
+    fn handle_path(&self, &D, PathBuf) -> Option<D>;
 }
 
 
-pub fn iterate_recursively<P: 'static + Send + Clone,
-                           W: 'static + PathHandler<P> + Send + Clone>
-    (first: (PathBuf, P),
-     worker: &mut W)
-{
+pub fn iterate_recursively<P: Send + 'static, W: PathHandler<P>>(first: (PathBuf, P),
+                                                                 worker: Arc<W>) {
     let threads = 10;
     let (push_ch, work_ch) = mpsc::sync_channel(threads);
     let pool = threadpool::ThreadPool::new(threads);
@@ -60,7 +57,7 @@ pub fn iterate_recursively<P: 'static + Send + Clone,
     // Insert the first task into the queue:
     let (root, payload) = first;
     push_ch.send(Work::More(root, payload)).unwrap();
-    let idle_workers = Arc::new(Mutex::new(vec![worker.clone(); threads]));
+    let worker = Arc::new(worker);
     let mut active_workers = 0;
 
     // Master thread:
@@ -79,13 +76,9 @@ pub fn iterate_recursively<P: 'static + Send + Clone,
                 // Execute the task in a pool thread:
                 active_workers += 1;
 
-                let idle_workers_ = idle_workers.clone();
+                let worker = worker.clone();
                 let push_ch_ = push_ch.clone();
                 pool.execute(move || {
-                    let worker = {
-                        let mut lock = idle_workers_.lock().unwrap();
-                        lock.pop().expect("not enough workers")
-                    };
                     match worker.read_dir(&root) {
                         Ok(dir) => {
                             for entry_res in dir {
@@ -93,7 +86,7 @@ pub fn iterate_recursively<P: 'static + Send + Clone,
                                     Ok(entry) => {
                                         let file = entry.path();
                                         let path = PathBuf::from(file.to_str().unwrap());
-                                        let dir_opt = worker.handle_path(payload.clone(), path);
+                                        let dir_opt = worker.handle_path(&payload, path);
                                         if let Some(dir) = dir_opt {
                                             push_ch_.send(Work::More(file, dir)).unwrap();
                                         }
@@ -111,8 +104,6 @@ pub fn iterate_recursively<P: 'static + Send + Clone,
                             warn!("Skipping unreadable directory {:?}: {}", root, err);
                         }
                     }
-                    // Return our worker.
-                    idle_workers_.lock().unwrap().push(worker);
                     // Count this pool thread as idle:
                     push_ch_.send(Work::Done).unwrap();
                 });
@@ -137,7 +128,7 @@ impl PathHandler<()> for PrintPathHandler {
         fs::read_dir(path)
     }
 
-    fn handle_path(&self, _: (), path: PathBuf) -> Option<()> {
+    fn handle_path(&self, _: &(), path: PathBuf) -> Option<()> {
         println!("{}", path.display());
         match fs::metadata(&path) {
             Ok(ref m) if m.is_dir() => Some(()),
@@ -217,11 +208,11 @@ mod tests {
             Ok(self.list(path))
         }
 
-        fn handle_path(&self, p_opt: ParentOpt, path: PathBuf) -> Option<ParentOpt> {
+        fn handle_path(&self, p_opt: &ParentOpt, path: PathBuf) -> Option<ParentOpt> {
             assert_eq!(self.visit(path.clone()), Some(false));
 
-            if let Some(p) = p_opt {
-                assert!(path.parent() == Some(&p));
+            if let &Some(ref p) = p_opt {
+                assert!(path.parent() == Some(p));
             }
 
             self.list(&path).next().map(|_| Some(path))
@@ -249,11 +240,11 @@ mod tests {
                                  "/empty/6/",
                                  "/empty/7/",
                                  "/empty/8/",
-                                 "/empty/9/",
-                                 ];
+                                 "/empty/9/"];
 
-        let mut handler = StubPathHandler::new(paths.iter().map(PathBuf::from).collect());
-        iterate_recursively((PathBuf::from("/"), None), &mut handler);
+        let handler = StubPathHandler::new(paths.iter().map(PathBuf::from).collect());
+        let handler = Arc::new(handler);
+        iterate_recursively((PathBuf::from("/"), None), handler.clone());
 
         assert_eq!(handler.not_visited(), vec![PathBuf::from("/")]);
     }

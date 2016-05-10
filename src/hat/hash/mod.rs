@@ -284,8 +284,8 @@ impl Index {
     }
 
     fn locate(&mut self, hash: &Hash) -> Option<QueueEntry> {
-        let result_opt = self.queue.find_value_of_key(&hash.bytes);
-        result_opt.map(|x| x).or_else(|| self.index_locate(hash))
+        let result_opt = self.queue.find_value_of_key(&hash.bytes).map(|x| x.clone());
+        result_opt.or_else(|| self.index_locate(hash))
     }
 
     fn locate_by_id(&mut self, id_: i64) -> Option<Entry> {
@@ -342,7 +342,7 @@ impl Index {
         let my_id = self.next_id();
 
         assert!(self.queue.reserve_priority(my_id, hash.bytes.clone()).is_ok());
-        self.queue.put_value(hash.bytes,
+        self.queue.put_value(&hash.bytes,
                              QueueEntry {
                                  id: my_id,
                                  level: level,
@@ -364,8 +364,8 @@ impl Index {
             self.queue.update_value(&hash.bytes, |qe| {
                 QueueEntry {
                     level: level,
-                    payload: payload.clone(),
-                    persistent_ref: persistent_ref.clone(),
+                    payload: payload,
+                    persistent_ref: persistent_ref,
                     ..qe
                 }
             });
@@ -539,9 +539,8 @@ impl Index {
     fn commit(&mut self, hash: &Hash, chunk_ref: blob::ChunkRef) {
         // Update persistent reference for ready hash
         let queue_entry = self.locate(hash).expect("hash was committed");
-        self.queue.update_value(&hash.bytes, |old_qe| {
-            QueueEntry { persistent_ref: Some(chunk_ref.clone()), ..old_qe }
-        });
+        self.queue.update_value(&hash.bytes,
+                                |old_qe| QueueEntry { persistent_ref: Some(chunk_ref), ..old_qe });
         self.queue.set_ready(&queue_entry.id);
 
         self.insert_completed_in_order();

@@ -218,7 +218,7 @@ fn hash_index_name(root: &PathBuf) -> String {
 fn list_snapshot(backend: &key::HashStoreBackend,
                  out: &mpsc::Sender<hash::Hash>,
                  family: &Family,
-                 dir_hash: hash::Hash,
+                 dir_hash: &hash::Hash,
                  dir_ref: blob::ChunkRef) {
     for (entry, hash, pref) in family.fetch_dir_data(dir_hash, dir_ref, backend.clone()) {
         if entry.data_hash.is_some() {
@@ -227,7 +227,7 @@ fn list_snapshot(backend: &key::HashStoreBackend,
         } else {
             // Directory.
             out.send(hash.clone()).unwrap();
-            list_snapshot(backend, out, family, hash, pref);
+            list_snapshot(backend, out, family, &hash, pref);
         }
     }
 }
@@ -470,7 +470,7 @@ impl<B: 'static + blob::StoreBackend + Clone + Send> HatRc<B> {
         let (register_sender, register_receiver) = mpsc::channel();
         let (recover_sender, recover_receiver) = mpsc::channel();
         let (final_payload, final_level) = self.recover_dir_ref(&family,
-                                                                hash.clone(),
+                                                                &hash,
                                                                 dir_ref.clone(),
                                                                 register_sender,
                                                                 recover_sender);
@@ -513,17 +513,17 @@ impl<B: 'static + blob::StoreBackend + Clone + Send> HatRc<B> {
 
     fn recover_dir_ref(&mut self,
                        family: &Family,
-                       dir_hash: hash::Hash,
+                       dir_hash: &hash::Hash,
                        dir_ref: blob::ChunkRef,
                        register_out: mpsc::Sender<hash::Entry>,
                        recover_out: mpsc::Sender<hash::Entry>)
                        -> (Option<Vec<u8>>, i64) {
         fn recover_tree<B: hash::tree::HashTreeBackend + Clone>(backend: B,
-                                                                hash: hash::Hash,
+                                                                hash: &hash::Hash,
                                                                 pref: blob::ChunkRef,
                                                                 out: mpsc::Sender<hash::Entry>)
                                                                 -> (Option<Vec<u8>>, i64) {
-            match hash::tree::SimpleHashTreeReader::open(backend, hash, Some(pref)).unwrap() {
+            match hash::tree::SimpleHashTreeReader::open(backend, &hash, Some(pref)).unwrap() {
                 hash::tree::ReaderResult::Empty |
                 hash::tree::ReaderResult::SingleBlock(..) => (None, 0),
                 hash::tree::ReaderResult::Tree(mut reader) => {
@@ -532,20 +532,20 @@ impl<B: 'static + blob::StoreBackend + Clone + Send> HatRc<B> {
                 }
             }
         }
-        for (file, hash, pref) in family.fetch_dir_data(dir_hash.clone(),
+        for (file, hash, pref) in family.fetch_dir_data(dir_hash,
                                                         dir_ref.clone(),
                                                         self.hash_backend.clone()) {
             let (payload, level) = match file.data_hash {
                 Some(..) => {
                     // Entry is a data leaf. Read the hash tree.
                     recover_tree(self.hash_backend.clone(),
-                                 hash.clone(),
+                                 &hash,
                                  pref.clone(),
                                  recover_out.clone())
                 }
                 None => {
                     self.recover_dir_ref(&family,
-                                         hash.clone(),
+                                         &hash,
                                          pref.clone(),
                                          register_out.clone(),
                                          recover_out.clone())
@@ -644,7 +644,7 @@ impl<B: 'static + blob::StoreBackend + Clone + Send> HatRc<B> {
                 }
                 snapshot::WorkStatus::DeleteInProgress => {
                     let hash = snapshot.hash.expect("Snapshot has no hash");
-                    let hash_id = get_hash_id(&self.hash_index, hash.clone())
+                    let hash_id = get_hash_id(&self.hash_index, hash)
                                       .expect("Snapshot hash not recognized");
                     let status = try!(self.gc.status(hash_id));
                     match status {
@@ -665,7 +665,7 @@ impl<B: 'static + blob::StoreBackend + Clone + Send> HatRc<B> {
                 }
                 snapshot::WorkStatus::DeleteComplete => {
                     let hash = snapshot.hash.expect("Snapshot has no hash");
-                    let hash_id = get_hash_id(&self.hash_index, hash.clone())
+                    let hash_id = get_hash_id(&self.hash_index, hash)
                                       .expect("Snapshot hash not recognized");
                     try!(self.deregister_finalize_by_name(snapshot.family_name,
                                                           snapshot.info,
@@ -832,13 +832,13 @@ impl<B: 'static + blob::StoreBackend + Clone + Send> HatRc<B> {
                          .expect(&format!("Could not open family '{}'", family_name));
 
         let mut output_dir = output_dir;
-        self.checkout_dir_ref(&family, &mut output_dir, dir_hash, dir_ref);
+        self.checkout_dir_ref(&family, &mut output_dir, &dir_hash, dir_ref);
     }
 
     fn checkout_dir_ref(&self,
                         family: &Family,
                         output: &mut PathBuf,
-                        dir_hash: hash::Hash,
+                        dir_hash: &hash::Hash,
                         dir_ref: blob::ChunkRef) {
         fs::create_dir_all(&output).unwrap();
         for (entry, hash, pref) in family.fetch_dir_data(dir_hash,
@@ -852,13 +852,13 @@ impl<B: 'static + blob::StoreBackend + Clone + Send> HatRc<B> {
             if entry.data_hash.is_some() {
                 let mut fd = fs::File::create(&output).unwrap();
                 let tree_opt = hash::tree::SimpleHashTreeReader::open(self.hash_backend.clone(),
-                                                                      hash,
+                                                                      &hash,
                                                                       Some(pref));
                 if let Some(tree) = tree_opt {
                     family.write_file_chunks(&mut fd, tree);
                 }
             } else {
-                self.checkout_dir_ref(family, output, hash, pref);
+                self.checkout_dir_ref(family, output, &hash, pref);
             }
             output.pop();
         }
@@ -908,7 +908,7 @@ impl<B: 'static + blob::StoreBackend + Clone + Send> HatRc<B> {
             list_snapshot(&local_hash_backend,
                           &sender,
                           &local_family,
-                          local_dir_hash.clone(),
+                          &local_dir_hash,
                           dir_ref);
             drop(sender);
 
@@ -1136,19 +1136,18 @@ impl Iterator for FileIterator {
 }
 
 
-#[derive(Clone)]
 struct InsertPathHandler {
-    count: sync::Arc<sync::atomic::AtomicIsize>,
-    last_print: sync::Arc<sync::Mutex<time::Timespec>>,
-    key_store: key::StoreProcess<FileIterator>,
+    count: sync::atomic::AtomicIsize,
+    last_print: sync::Mutex<time::Timespec>,
+    key_store: sync::Mutex<key::StoreProcess<FileIterator>>,
 }
 
 impl InsertPathHandler {
     pub fn new(key_store: key::StoreProcess<FileIterator>) -> InsertPathHandler {
         InsertPathHandler {
-            count: sync::Arc::new(sync::atomic::AtomicIsize::new(0)),
-            last_print: sync::Arc::new(sync::Mutex::new(time::now().to_timespec())),
-            key_store: key_store,
+            count: sync::atomic::AtomicIsize::new(0),
+            last_print: sync::Mutex::new(time::now().to_timespec()),
+            key_store: sync::Mutex::new(key_store),
         }
     }
 }
@@ -1161,7 +1160,7 @@ impl listdir::PathHandler<Option<u64>> for InsertPathHandler {
         fs::read_dir(path)
     }
 
-    fn handle_path(&self, parent: Option<u64>, path: PathBuf) -> Option<Option<u64>> {
+    fn handle_path(&self, parent: &Option<u64>, path: PathBuf) -> Option<Option<u64>> {
         let count = self.count.fetch_add(1, atomic::Ordering::SeqCst) + 1;
 
         if count % 16 == 0 {
@@ -1174,7 +1173,7 @@ impl listdir::PathHandler<Option<u64>> for InsertPathHandler {
             }
         }
 
-        match FileEntry::new(path.clone(), parent) {
+        match FileEntry::new(path.clone(), parent.clone()) {
             Err(e) => {
                 println!("Skipping '{}': {}", path.display(), e);
             }
@@ -1186,7 +1185,7 @@ impl listdir::PathHandler<Option<u64>> for InsertPathHandler {
                 let local_root = path;
                 let local_file_entry = file_entry.clone();
 
-                match self.key_store.send_reply(
+                match self.key_store.lock().unwrap().send_reply(
                     key::Msg::Insert(
                       file_entry.key_entry,
                       if is_directory { None }
@@ -1237,8 +1236,8 @@ pub struct Family {
 
 impl Family {
     pub fn snapshot_dir(&self, dir: PathBuf) {
-        let mut handler = InsertPathHandler::new(self.key_store_process.clone());
-        listdir::iterate_recursively((PathBuf::from(&dir), None), &mut handler);
+        let handler = InsertPathHandler::new(self.key_store_process.clone());
+        listdir::iterate_recursively((PathBuf::from(&dir), None), sync::Arc::new(handler));
     }
 
     pub fn snapshot_direct(&self,
@@ -1314,7 +1313,7 @@ impl Family {
 
     pub fn fetch_dir_data<HTB: hash::tree::HashTreeBackend + Clone>
         (&self,
-         dir_hash: hash::Hash,
+         dir_hash: &hash::Hash,
          dir_ref: blob::ChunkRef,
          backend: HTB)
          -> Vec<(key::Entry, hash::Hash, blob::ChunkRef)> {

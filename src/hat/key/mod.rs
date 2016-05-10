@@ -70,7 +70,7 @@ pub struct HashTreeReaderInitializer {
 impl HashTreeReaderInitializer {
     pub fn init(self) -> Option<ReaderResult<HashStoreBackend>> {
         let backend = HashStoreBackend::new(self.hash_index, self.blob_store);
-        SimpleHashTreeReader::open(backend, self.hash, self.persistent_ref)
+        SimpleHashTreeReader::open(backend, &self.hash, self.persistent_ref)
     }
 }
 
@@ -178,7 +178,7 @@ impl HashStoreBackend {
 
 impl HashTreeBackend for HashStoreBackend {
     fn fetch_chunk(&mut self,
-                   hash: hash::Hash,
+                   hash: &hash::Hash,
                    persistent_ref: Option<blob::ChunkRef>)
                    -> Option<Vec<u8>> {
         assert!(!hash.bytes.is_empty());
@@ -191,7 +191,7 @@ impl HashTreeBackend for HashStoreBackend {
 
         data_opt.and_then(|data| {
             let actual_hash = hash::Hash::new(&data[..]);
-            if hash == actual_hash {
+            if *hash == actual_hash {
                 Some(data)
             } else {
                 error!("Data hash does not match expectation: {:?} instead of {:?}",
@@ -202,7 +202,7 @@ impl HashTreeBackend for HashStoreBackend {
         })
     }
 
-    fn fetch_persistent_ref(&mut self, hash: hash::Hash) -> Option<blob::ChunkRef> {
+    fn fetch_persistent_ref(&mut self, hash: &hash::Hash) -> Option<blob::ChunkRef> {
         assert!(!hash.bytes.is_empty());
         loop {
             match self.hash_index.send_reply(hash::Msg::FetchPersistentRef(hash.clone())).unwrap() {
@@ -240,7 +240,7 @@ impl HashTreeBackend for HashStoreBackend {
         match self.hash_index.send_reply(hash::Msg::Reserve(hash_entry.clone())).unwrap() {
             hash::Reply::HashKnown => {
                 // Someone came before us: piggyback on their result.
-                return self.fetch_persistent_ref(hash)
+                return self.fetch_persistent_ref(&hash)
                            .expect("Could not find persistent_ref for known chunk.");
             }
             hash::Reply::ReserveOk => {
