@@ -727,30 +727,6 @@ impl Index {
         self.flush();
         Reply::CommitOk
     }
-
-    fn handle(&mut self, msg: Msg) -> Reply {
-        match msg {
-            Msg::GetID(hash) => self.handle_get_id(hash),
-            Msg::GetHash(id) => self.handle_get_hash(id),
-            Msg::HashExists(hash) => self.handle_hash_exists(hash),
-            Msg::FetchPayload(hash) => self.handle_fetch_payload(hash),
-            Msg::FetchPersistentRef(hash) => self.handle_fetch_persistent_ref(hash),
-            Msg::Reserve(hash_entry) => self.handle_reserve(hash_entry),
-            Msg::UpdateReserved(hash_entry) => self.handle_update_reserved(hash_entry),
-            Msg::Commit(hash, persistent_ref) => self.handle_commit(hash, persistent_ref),
-            Msg::List => self.handle_list(),
-            Msg::Delete(id) => self.handle_delete(id),
-            Msg::SetTag(id, tag) => self.handle_set_tag(id, tag),
-            Msg::SetAllTags(tag) => self.handle_set_all_tags(tag),
-            Msg::GetTag(id) => self.handle_get_tag(id),
-            Msg::GetIDsByTag(tag) => self.handle_get_ids_by_tag(tag),
-            Msg::ReadGcData(hash_id, family_id) => self.handle_read_gc_data(hash_id, family_id),
-            Msg::UpdateGcData(hash_id, family_id, update_fn) => self.handle_update_gc_data(hash_id, family_id, update_fn),
-            Msg::UpdateFamilyGcData(family_id, update_fns) => self.handle_update_family_gc_data(family_id, update_fns),
-            Msg::ManualCommit => self.handle_manual_commit(),
-            Msg::Flush => self.handle_flush(),
-        }
-    }
 }
 
 impl IndexProcess {
