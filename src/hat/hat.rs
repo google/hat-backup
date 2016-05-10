@@ -141,9 +141,8 @@ impl gc::GcBackend for GcBackend {
 
     fn reverse_refs(&self, hash_id: i64) -> Result<Vec<i64>, Self::Err> {
         let entry = match self.hash_index.get_hash(hash_id) {
-            hash::Reply::Entry(entry) => entry,
-            hash::Reply::HashNotKnown => panic!("HashNotKnown in hash index."),
-            _ => panic!("Unexpected reply from hash index."),
+            Some(entry) => entry,
+            None => panic!("HashNotKnown in hash index."),
         };
         if entry.payload.is_none() {
             return Ok(Vec::new());

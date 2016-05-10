@@ -119,66 +119,6 @@ pub struct Entry {
     pub persistent_ref: Option<blob::ChunkRef>,
 }
 
-pub enum Msg {
-    /// Check whether this `Hash` already exists in the system.
-    /// Returns `HashKnown` or `HashNotKnown`.
-    HashExists(Hash),
-
-    /// Locate the local payload of the `Hash`.
-    /// Returns `Payload` or `HashNotKnown`.
-    FetchPayload(Hash),
-
-    /// Locate the local ID of this hash.
-    GetID(Hash),
-
-    /// Locate hash entry from its ID.
-    GetHash(i64),
-
-    /// Locate the persistent reference (external blob reference) for this `Hash`.
-    /// Returns `PersistentRef` or `HashNotKnown`.
-    FetchPersistentRef(Hash),
-
-    /// Reserve a `Hash` in the index, while sending its content to external storage.
-    /// This is used to ensure that each `Hash` is stored only once.
-    /// Returns `ReserveOk` or `HashKnown`.
-    Reserve(Entry),
-
-    /// Update the info for a reserved `Hash`. The `Hash` remains reserved. This is used to update
-    /// the persistent reference (external blob reference) as soon as it is available (to allow new
-    /// references to the `Hash` to be created before it is committed).
-    /// Returns ReserveOk.
-    UpdateReserved(Entry),
-
-    /// A `Hash` is committed when it has been `finalized` in the external storage. `Commit`
-    /// includes the persistent reference that the content is available at.
-    /// Returns CommitOk.
-    Commit(Hash, blob::ChunkRef),
-
-    /// List all hash entries.
-    List,
-
-    /// APIs related to tagging, which is useful to indicate state during operation stages.
-    /// These operate directly on the underlying IDs.
-    SetTag(i64, tags::Tag),
-    SetAllTags(tags::Tag),
-    GetTag(i64),
-    GetIDsByTag(i64),
-
-    /// Permanently delete hash by its ID.
-    Delete(i64),
-
-    /// APIs related to garbage collector metadata tied to (hash id, family id) pairs.
-    ReadGcData(i64, i64),
-    UpdateGcData(i64, i64, Box<FnBox<GcData, Option<GcData>>>),
-    UpdateFamilyGcData(i64, mpsc::Receiver<Box<FnBox<GcData, Option<GcData>>>>),
-
-    /// Manual commit. This also disables automatic periodic commit.
-    ManualCommit,
-
-    /// Flush the hash index to clear internal buffers and commit the underlying database.
-    Flush,
-}
-
 pub enum Reply {
     HashID(i64),
     HashKnown,
@@ -617,13 +557,6 @@ impl Index {
         }
     }
 
-    fn handle_get_hash(&mut self, id: i64) -> Reply {
-        match self.locate_by_id(id) {
-            Some(hash) => Reply::Entry(hash),
-            None => Reply::HashNotKnown,
-        }
-    }
-
     fn handle_hash_exists(&mut self, hash: Hash) -> Reply {
         assert!(!hash.bytes.is_empty());
         match self.locate(&hash) {
@@ -753,78 +686,105 @@ impl IndexProcess {
         guard
     }
 
+    /// Locate the local ID of this hash.
     pub fn get_id(&self, hash: &Hash) -> Option<i64> {
         self.lock().0.handle_get_id(hash)
     }
 
-    pub fn get_hash(&self, id: i64) -> Reply {
-        self.lock().0.handle_get_hash(id)
+    /// Locate hash entry from its ID.
+    pub fn get_hash(&self, id: i64) -> Option<Entry> {
+        self.lock().0.locate_by_id(id)
     }
 
+    /// Check whether this `Hash` already exists in the system.
     pub fn hash_exists(&self, hash: Hash) -> Reply {
         self.lock().0.handle_hash_exists(hash)
     }
 
+    /// Locate the local payload of the `Hash`.
     pub fn fetch_payload(&self, hash: Hash) -> Reply {
         self.lock().0.handle_fetch_payload(hash)
     }
 
+    /// Locate the persistent reference (external blob reference) for this `Hash`.
     pub fn fetch_persistent_ref(&self, hash: Hash) -> Reply {
         self.lock().0.handle_fetch_persistent_ref(hash)
     }
 
+    /// Reserve a `Hash` in the index, while sending its content to external storage.
+    /// This is used to ensure that each `Hash` is stored only once.
     pub fn reserve(&self, hash_entry: Entry) -> Reply {
         self.lock().0.handle_reserve(hash_entry)
     }
 
+    /// Update the info for a reserved `Hash`. The `Hash` remains reserved. This is used to update
+    /// the persistent reference (external blob reference) as soon as it is available (to allow new
+    /// references to the `Hash` to be created before it is committed).
     pub fn update_reserved(&self, hash_entry: Entry) -> Reply {
         self.lock().0.handle_update_reserved(hash_entry)
     }
 
+    /// A `Hash` is committed when it has been `finalized` in the external storage. `Commit`
+    /// includes the persistent reference that the content is available at.
     pub fn commit(&self, hash: Hash, persistent_ref: blob::ChunkRef) -> Reply {
         self.lock().0.handle_commit(hash, persistent_ref)
     }
 
+    /// List all hash entries.
     pub fn list(&self) -> Reply {
         self.lock().0.handle_list()
     }
 
+    /// Permanently delete hash by its ID.
     pub fn delete(&self, id: i64) -> Reply {
         self.lock().0.handle_delete(id)
     }
 
+    /// API related to tagging, which is useful to indicate state during operation stages.
+    /// It operates directly on the underlying IDs.
     pub fn set_tag(&self, id: i64, tag: tags::Tag) -> Reply {
         self.lock().0.handle_set_tag(id, tag)
     }
 
+    /// API related to tagging, which is useful to indicate state during operation stages.
+    /// It operates directly on the underlying IDs.
     pub fn set_all_tags(&self, tag: tags::Tag) -> Reply {
         self.lock().0.handle_set_all_tags(tag)
     }
 
+    /// API related to tagging, which is useful to indicate state during operation stages.
+    /// It operates directly on the underlying IDs.
     pub fn get_tag(&self, id: i64) -> Reply {
         self.lock().0.handle_get_tag(id)
     }
 
+    /// API related to tagging, which is useful to indicate state during operation stages.
+    /// It operates directly on the underlying IDs.
     pub fn get_ids_by_tag(&self, tag: i64) -> Reply {
         self.lock().0.handle_get_ids_by_tag(tag)
     }
 
+    /// API related to garbage collector metadata tied to (hash id, family id) pairs.
     pub fn read_gc_data(&self, hash_id: i64, family_id: i64) -> Reply {
         self.lock().0.handle_read_gc_data(hash_id, family_id)
     }
 
+    /// API related to garbage collector metadata tied to (hash id, family id) pairs.
     pub fn update_gc_data(&self, hash_id: i64, family_id: i64, update_fn: Box<FnBox<GcData, Option<GcData>>>) -> Reply {
         self.lock().0.handle_update_gc_data(hash_id, family_id, update_fn)
     }
 
+    /// API related to garbage collector metadata tied to (hash id, family id) pairs.
     pub fn update_family_gc_data(&self, family_id: i64, update_fns: mpsc::Receiver<Box<FnBox<GcData, Option<GcData>>>>) -> Reply {
         self.lock().0.handle_update_family_gc_data(family_id, update_fns)
     }
 
+    /// Manual commit. This also disables automatic periodic commit.
     pub fn manual_commit(&self) -> Reply {
         self.lock().0.handle_manual_commit()
     }
 
+    /// Flush the hash index to clear internal buffers and commit the underlying database.
     pub fn flush(&self) -> Reply {
         self.lock().0.handle_flush()
     }
