@@ -608,113 +608,102 @@ impl Index {
         self.conn.commit_transaction().unwrap();
         self.conn.begin_transaction().unwrap();
     }
-}
 
-impl Index {
-    fn handle<F>(&mut self,
-                 msg: Msg,
-                 reply: F)
-                 -> Result<(), MsgError>
-        where F: Fn(Result<Reply, MsgError>) {
-        let reply_ok = |x| {
-            reply(Ok(x));
-            Ok(())
-        };
-
+    fn handle(&mut self, msg: Msg) -> Reply {
         match msg {
             Msg::GetID(hash) => {
                 assert!(!hash.bytes.is_empty());
-                reply_ok(match self.locate(&hash) {
+                match self.locate(&hash) {
                     Some(entry) => Reply::HashID(entry.id),
                     None => Reply::HashNotKnown,
-                })
+                }
             }
             Msg::GetHash(id) => {
-                reply_ok(match self.locate_by_id(id) {
+                match self.locate_by_id(id) {
                     Some(hash) => Reply::Entry(hash),
                     None => Reply::HashNotKnown,
-                })
+                }
             }
             Msg::HashExists(hash) => {
                 assert!(!hash.bytes.is_empty());
-                reply_ok(match self.locate(&hash) {
+                match self.locate(&hash) {
                     Some(_) => Reply::HashKnown,
                     None => Reply::HashNotKnown,
-                })
+                }
             }
             Msg::FetchPayload(hash) => {
                 assert!(!hash.bytes.is_empty());
-                reply_ok(match self.locate(&hash) {
+                match self.locate(&hash) {
                     Some(ref queue_entry) => Reply::Payload(queue_entry.payload.clone()),
                     None => Reply::HashNotKnown,
-                })
+                }
             }
             Msg::FetchPersistentRef(hash) => {
                 assert!(!hash.bytes.is_empty());
-                reply_ok(match self.locate(&hash) {
+                match self.locate(&hash) {
                     Some(ref queue_entry) if queue_entry.persistent_ref.is_none() => Reply::Retry,
                     Some(queue_entry) => {
                         Reply::PersistentRef(queue_entry.persistent_ref.expect("persistent_ref"))
                     }
                     None => Reply::HashNotKnown,
-                })
+                }
             }
             Msg::Reserve(hash_entry) => {
                 assert!(!hash_entry.hash.bytes.is_empty());
                 // To avoid unused IO, we store entries in-memory until committed to persistent
                 // storage. This allows us to continue after a crash without needing to scan
                 // through and delete uncommitted entries.
-                reply_ok(match self.locate(&hash_entry.hash) {
+                match self.locate(&hash_entry.hash) {
                     Some(_) => Reply::HashKnown,
                     None => {
                         self.reserve(hash_entry);
                         Reply::ReserveOk
                     }
-                })
+                }
             }
             Msg::UpdateReserved(hash_entry) => {
                 assert!(!hash_entry.hash.bytes.is_empty());
                 self.update_reserved(hash_entry);
-                reply_ok(Reply::ReserveOk)
+                Reply::ReserveOk
             }
             Msg::Commit(hash, persistent_ref) => {
                 assert!(!hash.bytes.is_empty());
                 self.commit(&hash, persistent_ref);
-                reply_ok(Reply::CommitOk)
+                Reply::CommitOk
             }
-            Msg::List => reply_ok(Reply::Listing(self.list())),
+            Msg::List => Reply::Listing(self.list()),
             Msg::Delete(id) => {
                 self.delete(id);
-                reply_ok(Reply::Ok)
+                Reply::Ok
             }
             Msg::SetTag(id, tag) => {
                 self.set_tag(Some(id), tag);
-                reply_ok(Reply::Ok)
+                Reply::Ok
             }
             Msg::SetAllTags(tag) => {
                 self.set_tag(None, tag);
-                reply_ok(Reply::Ok)
+                Reply::Ok
             }
-            Msg::GetTag(id) => reply_ok(Reply::HashTag(self.get_tag(id))),
-            Msg::GetIDsByTag(tag) => reply_ok(Reply::HashIDs(self.list_ids_by_tag(tag))),
+            Msg::GetTag(id) => Reply::HashTag(self.get_tag(id)),
+            Msg::GetIDsByTag(tag) => Reply::HashIDs(self.list_ids_by_tag(tag)),
             Msg::ReadGcData(hash_id, family_id) => {
-                reply_ok(Reply::CurrentGcData(self.read_gc_data(hash_id, family_id)))
+                Reply::CurrentGcData(self.read_gc_data(hash_id, family_id))
             }
             Msg::UpdateGcData(hash_id, family_id, update_fn) => {
-                reply_ok(Reply::CurrentGcData(self.update_gc_data(hash_id, family_id, update_fn)))
+                Reply::CurrentGcData(self.update_gc_data(hash_id, family_id, update_fn))
             }
             Msg::UpdateFamilyGcData(family_id, update_fs) => {
                 self.update_family_gc_data(family_id, update_fs);
-                reply_ok(Reply::Ok)
+                Reply::Ok
             }
             Msg::ManualCommit => {
                 self.flush();
                 self.flush_periodically = false;
-                reply_ok(Reply::CommitOk)
+                Reply::CommitOk
             }
             Msg::Flush => {
                 self.flush();
-                reply_ok(Reply::CommitOk)
+                Reply::CommitOk
             }
         }
     }
@@ -741,13 +730,6 @@ impl IndexProcess {
             }
         }
 
-        let res = Mutex::new(None);
-        guard.0.handle(msg, |r| {
-            let mut inner_guard = res.lock().unwrap();
-            assert!(inner_guard.is_none());
-            *inner_guard = Some(r);
-        }).expect("Process encountered unrecoverable error");
-
-        res.into_inner().expect("Lock should not be poisened").expect("The closure must be called")
+        Ok(guard.0.handle(msg))
     }
 }
