@@ -15,7 +15,7 @@
 //! Local state for known hashes and their external location (blob reference).
 
 use std::borrow::Cow;
-use std::sync::mpsc;
+use std::sync::{mpsc, Arc, Mutex, MutexGuard};
 use time::Duration;
 
 use diesel;
@@ -28,7 +28,6 @@ use sodiumoxide::crypto::hash::sha512;
 use blob;
 use cumulative_counter::CumulativeCounter;
 use periodic_timer::PeriodicTimer;
-use process::{Process, MsgHandler};
 use tags;
 use unique_priority_queue::UniquePriorityQueue;
 use util;
@@ -67,7 +66,8 @@ error_type! {
 
 pub static HASHBYTES: usize = sha512::DIGESTBYTES;
 
-pub type IndexProcess = Process<Msg, Result<Reply, MsgError>>;
+#[derive(Clone)]
+pub struct IndexProcess(Arc<Mutex<(Index, Option<i64>)>>);
 
 
 /// A wrapper around Hash digests.
@@ -119,90 +119,8 @@ pub struct Entry {
     pub persistent_ref: Option<blob::ChunkRef>,
 }
 
-pub enum Msg {
-    /// Check whether this `Hash` already exists in the system.
-    /// Returns `HashKnown` or `HashNotKnown`.
-    HashExists(Hash),
-
-    /// Locate the local payload of the `Hash`.
-    /// Returns `Payload` or `HashNotKnown`.
-    FetchPayload(Hash),
-
-    /// Locate the local ID of this hash.
-    GetID(Hash),
-
-    /// Locate hash entry from its ID.
-    GetHash(i64),
-
-    /// Locate the persistent reference (external blob reference) for this `Hash`.
-    /// Returns `PersistentRef` or `HashNotKnown`.
-    FetchPersistentRef(Hash),
-
-    /// Reserve a `Hash` in the index, while sending its content to external storage.
-    /// This is used to ensure that each `Hash` is stored only once.
-    /// Returns `ReserveOk` or `HashKnown`.
-    Reserve(Entry),
-
-    /// Update the info for a reserved `Hash`. The `Hash` remains reserved. This is used to update
-    /// the persistent reference (external blob reference) as soon as it is available (to allow new
-    /// references to the `Hash` to be created before it is committed).
-    /// Returns ReserveOk.
-    UpdateReserved(Entry),
-
-    /// A `Hash` is committed when it has been `finalized` in the external storage. `Commit`
-    /// includes the persistent reference that the content is available at.
-    /// Returns CommitOk.
-    Commit(Hash, blob::ChunkRef),
-
-    /// List all hash entries.
-    List,
-
-    /// APIs related to tagging, which is useful to indicate state during operation stages.
-    /// These operate directly on the underlying IDs.
-    SetTag(i64, tags::Tag),
-    SetAllTags(tags::Tag),
-    GetTag(i64),
-    GetIDsByTag(i64),
-
-    /// Permanently delete hash by its ID.
-    Delete(i64),
-
-    /// APIs related to garbage collector metadata tied to (hash id, family id) pairs.
-    ReadGcData(i64, i64),
-    UpdateGcData(i64, i64, Box<FnBox<GcData, Option<GcData>>>),
-    UpdateFamilyGcData(i64, mpsc::Receiver<Box<FnBox<GcData, Option<GcData>>>>),
-
-    /// Manual commit. This also disables automatic periodic commit.
-    ManualCommit,
-
-    /// Flush the hash index to clear internal buffers and commit the underlying database.
-    Flush,
-}
-
-pub enum Reply {
-    HashID(i64),
-    HashKnown,
-    HashNotKnown,
-    Entry(Entry),
-
-    Payload(Option<Vec<u8>>),
-    PersistentRef(blob::ChunkRef),
-
-    ReserveOk,
-    CommitOk,
-    CallbackRegistered,
-
-    Listing(mpsc::Receiver<Entry>),
-
-    HashTag(Option<tags::Tag>),
-    HashIDs(Vec<i64>),
-
-    CurrentGcData(GcData),
-
-    Ok,
-    Retry,
-}
-
+pub struct RetryError;
+pub enum ReserveResult { HashKnown, ReserveOk }
 
 #[derive(Clone)]
 struct QueueEntry {
@@ -610,113 +528,160 @@ impl Index {
     }
 }
 
-impl MsgHandler<Msg, Result<Reply, MsgError>> for Index {
-    type Err = MsgError;
+impl IndexProcess {
+    pub fn new(index: Index) -> IndexProcess {
+        IndexProcess::new_with_shutdown(index, None)
+    }
 
-    fn handle(&mut self,
-              msg: Msg,
-              reply: Box<Fn(Result<Reply, Self::Err>)>)
-              -> Result<(), Self::Err> {
-        let reply_ok = |x| {
-            reply(Ok(x));
-            Ok(())
-        };
+    pub fn new_with_shutdown(index: Index, shutdown: Option<i64>) -> IndexProcess {
+        IndexProcess(Arc::new(Mutex::new((index, shutdown))))
+    }
 
-        match msg {
-            Msg::GetID(hash) => {
-                assert!(!hash.bytes.is_empty());
-                reply_ok(match self.locate(&hash) {
-                    Some(entry) => Reply::HashID(entry.id),
-                    None => Reply::HashNotKnown,
-                })
-            }
-            Msg::GetHash(id) => {
-                reply_ok(match self.locate_by_id(id) {
-                    Some(hash) => Reply::Entry(hash),
-                    None => Reply::HashNotKnown,
-                })
-            }
-            Msg::HashExists(hash) => {
-                assert!(!hash.bytes.is_empty());
-                reply_ok(match self.locate(&hash) {
-                    Some(_) => Reply::HashKnown,
-                    None => Reply::HashNotKnown,
-                })
-            }
-            Msg::FetchPayload(hash) => {
-                assert!(!hash.bytes.is_empty());
-                reply_ok(match self.locate(&hash) {
-                    Some(ref queue_entry) => Reply::Payload(queue_entry.payload.clone()),
-                    None => Reply::HashNotKnown,
-                })
-            }
-            Msg::FetchPersistentRef(hash) => {
-                assert!(!hash.bytes.is_empty());
-                reply_ok(match self.locate(&hash) {
-                    Some(ref queue_entry) if queue_entry.persistent_ref.is_none() => Reply::Retry,
-                    Some(queue_entry) => {
-                        Reply::PersistentRef(queue_entry.persistent_ref.expect("persistent_ref"))
-                    }
-                    None => Reply::HashNotKnown,
-                })
-            }
-            Msg::Reserve(hash_entry) => {
-                assert!(!hash_entry.hash.bytes.is_empty());
-                // To avoid unused IO, we store entries in-memory until committed to persistent
-                // storage. This allows us to continue after a crash without needing to scan
-                // through and delete uncommitted entries.
-                reply_ok(match self.locate(&hash_entry.hash) {
-                    Some(_) => Reply::HashKnown,
-                    None => {
-                        self.reserve(hash_entry);
-                        Reply::ReserveOk
-                    }
-                })
-            }
-            Msg::UpdateReserved(hash_entry) => {
-                assert!(!hash_entry.hash.bytes.is_empty());
-                self.update_reserved(hash_entry);
-                reply_ok(Reply::ReserveOk)
-            }
-            Msg::Commit(hash, persistent_ref) => {
-                assert!(!hash.bytes.is_empty());
-                self.commit(&hash, persistent_ref);
-                reply_ok(Reply::CommitOk)
-            }
-            Msg::List => reply_ok(Reply::Listing(self.list())),
-            Msg::Delete(id) => {
-                self.delete(id);
-                reply_ok(Reply::Ok)
-            }
-            Msg::SetTag(id, tag) => {
-                self.set_tag(Some(id), tag);
-                reply_ok(Reply::Ok)
-            }
-            Msg::SetAllTags(tag) => {
-                self.set_tag(None, tag);
-                reply_ok(Reply::Ok)
-            }
-            Msg::GetTag(id) => reply_ok(Reply::HashTag(self.get_tag(id))),
-            Msg::GetIDsByTag(tag) => reply_ok(Reply::HashIDs(self.list_ids_by_tag(tag))),
-            Msg::ReadGcData(hash_id, family_id) => {
-                reply_ok(Reply::CurrentGcData(self.read_gc_data(hash_id, family_id)))
-            }
-            Msg::UpdateGcData(hash_id, family_id, update_fn) => {
-                reply_ok(Reply::CurrentGcData(self.update_gc_data(hash_id, family_id, update_fn)))
-            }
-            Msg::UpdateFamilyGcData(family_id, update_fs) => {
-                self.update_family_gc_data(family_id, update_fs);
-                reply_ok(Reply::Ok)
-            }
-            Msg::ManualCommit => {
-                self.flush();
-                self.flush_periodically = false;
-                reply_ok(Reply::CommitOk)
-            }
-            Msg::Flush => {
-                self.flush();
-                reply_ok(Reply::CommitOk)
+    fn lock(&self) -> MutexGuard<(Index, Option<i64>)> {
+        let mut guard = self.0.lock().expect("index-process has failed");
+
+        match &mut guard.1 {
+            &mut None => (),
+            &mut Some(0) => panic!("No more requests for this index process"),
+            &mut Some(ref mut n) => {
+                *n -= 1;
             }
         }
+
+        guard
+    }
+
+    /// Locate the local ID of this hash.
+    pub fn get_id(&self, hash: &Hash) -> Option<i64> {
+        assert!(!hash.bytes.is_empty());
+        self.lock().0.locate(&hash).map(|entry| entry.id)
+    }
+
+    /// Locate hash entry from its ID.
+    pub fn get_hash(&self, id: i64) -> Option<Entry> {
+        self.lock().0.locate_by_id(id)
+    }
+
+    /// Check whether this `Hash` already exists in the system.
+    pub fn hash_exists(&self, hash: &Hash) -> bool {
+        assert!(!hash.bytes.is_empty());
+        self.lock().0.locate(hash).is_some()
+    }
+
+    /// Locate the local payload of the `Hash`.
+    pub fn fetch_payload(&self, hash: &Hash) -> Option<Option<Vec<u8>>> {
+        assert!(!hash.bytes.is_empty());
+        self.lock().0.locate(hash).map(|queue_entry| queue_entry.payload)
+    }
+
+    /// Locate the persistent reference (external blob reference) for this `Hash`.
+    pub fn fetch_persistent_ref(&self, hash: &Hash) -> Result<Option<blob::ChunkRef>, RetryError> {
+        assert!(!hash.bytes.is_empty());
+        match self.lock().0.locate(hash) {
+            Some(ref queue_entry) if queue_entry.persistent_ref.is_none() => Err(RetryError),
+            Some(queue_entry) => {
+                Ok(Some(queue_entry.persistent_ref.expect("persistent_ref")))
+            }
+            None => Ok(None),
+        }
+    }
+
+    /// Reserve a `Hash` in the index, while sending its content to external storage.
+    /// This is used to ensure that each `Hash` is stored only once.
+    pub fn reserve(&self, hash_entry: Entry) -> ReserveResult {
+        assert!(!hash_entry.hash.bytes.is_empty());
+        // To avoid unused IO, we store entries in-memory until committed to persistent
+        // storage. This allows us to continue after a crash without needing to scan
+        // through and delete uncommitted entries.
+        let mut guard = self.lock();
+        match guard.0.locate(&hash_entry.hash) {
+            Some(_) => ReserveResult::HashKnown,
+            None => {
+                guard.0.reserve(hash_entry);
+                ReserveResult::ReserveOk
+            }
+        }
+    }
+
+    /// Update the info for a reserved `Hash`. The `Hash` remains reserved. This is used to update
+    /// the persistent reference (external blob reference) as soon as it is available (to allow new
+    /// references to the `Hash` to be created before it is committed).
+    pub fn update_reserved(&self, hash_entry: Entry) {
+        assert!(!hash_entry.hash.bytes.is_empty());
+        self.lock().0.update_reserved(hash_entry);
+    }
+
+    /// A `Hash` is committed when it has been `finalized` in the external storage. `Commit`
+    /// includes the persistent reference that the content is available at.
+    pub fn commit(&self, hash: &Hash, persistent_ref: blob::ChunkRef) {
+        assert!(!hash.bytes.is_empty());
+        self.lock().0.commit(hash, persistent_ref);
+    }
+
+    /// List all hash entries.
+    pub fn list(&self) -> mpsc::Receiver<Entry> {
+        self.lock().0.list()
+    }
+
+    /// Permanently delete hash by its ID.
+    pub fn delete(&self, id: i64) {
+        self.lock().0.delete(id);
+    }
+
+    /// API related to tagging, which is useful to indicate state during operation stages.
+    /// It operates directly on the underlying IDs.
+    pub fn set_tag(&self, id: i64, tag: tags::Tag) {
+        self.lock().0.set_tag(Some(id), tag);
+    }
+
+    /// API related to tagging, which is useful to indicate state during operation stages.
+    /// It operates directly on the underlying IDs.
+    pub fn set_all_tags(&self, tag: tags::Tag) {
+        self.lock().0.set_tag(None, tag);
+    }
+
+    /// API related to tagging, which is useful to indicate state during operation stages.
+    /// It operates directly on the underlying IDs.
+    pub fn get_tag(&self, id: i64) -> Option<tags::Tag> {
+        self.lock().0.get_tag(id)
+    }
+
+    /// API related to tagging, which is useful to indicate state during operation stages.
+    /// It operates directly on the underlying IDs.
+    pub fn get_ids_by_tag(&self, tag: i64) -> Vec<i64> {
+        self.lock().0.list_ids_by_tag(tag)
+    }
+
+    /// API related to garbage collector metadata tied to (hash id, family id) pairs.
+    pub fn read_gc_data(&self, hash_id: i64, family_id: i64) -> GcData {
+        self.lock().0.read_gc_data(hash_id, family_id)
+    }
+
+    /// API related to garbage collector metadata tied to (hash id, family id) pairs.
+    pub fn update_gc_data(&self,
+                          hash_id: i64,
+                          family_id: i64,
+                          update_fn: Box<FnBox<GcData, Option<GcData>>>)
+                          -> GcData {
+        self.lock().0.update_gc_data(hash_id, family_id, update_fn)
+    }
+
+    /// API related to garbage collector metadata tied to (hash id, family id) pairs.
+    pub fn update_family_gc_data(&self,
+                                 family_id: i64,
+                                 update_fns: mpsc::Receiver<Box<FnBox<GcData, Option<GcData>>>>) {
+        self.lock().0.update_family_gc_data(family_id, update_fns)
+    }
+
+    /// Manual commit. This also disables automatic periodic commit.
+    pub fn manual_commit(&self) {
+        let mut guard = self.lock();
+        guard.0.flush();
+        guard.0.flush_periodically = false;
+    }
+
+    /// Flush the hash index to clear internal buffers and commit the underlying database.
+    pub fn flush(&self) {
+        self.lock().0.flush()
     }
 }

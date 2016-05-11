@@ -75,7 +75,7 @@ impl HashRef {
 
 pub trait HashTreeBackend {
     fn fetch_chunk(&mut self, &Hash, Option<ChunkRef>) -> Option<Vec<u8>>;
-    fn fetch_payload(&mut self, Hash) -> Option<Vec<u8>>;
+    fn fetch_payload(&mut self, &Hash) -> Option<Vec<u8>>;
     fn fetch_persistent_ref(&mut self, &Hash) -> Option<ChunkRef>;
     fn insert_chunk(&mut self, Hash, i64, Option<Vec<u8>>, Vec<u8>) -> ChunkRef;
 }
@@ -488,7 +488,7 @@ mod tests {
             guarded_chunks.get(&hash.bytes).map(|&(_, _, ref chunk)| chunk.clone())
         }
 
-        fn fetch_payload(&mut self, hash: Hash) -> Option<Vec<u8>> {
+        fn fetch_payload(&mut self, hash: &Hash) -> Option<Vec<u8>> {
             let guarded_chunks = self.chunks.lock().unwrap();
             guarded_chunks.get(&hash.bytes).and_then(|&(_, ref payload, _)| payload.clone())
         }
