@@ -161,9 +161,7 @@ impl HashStoreBackend {
     fn fetch_chunk_from_hash(&mut self, hash: hash::Hash) -> Option<Vec<u8>> {
         assert!(!hash.bytes.is_empty());
         match self.hash_index.fetch_persistent_ref(&hash) {
-            Ok(Some(chunk_ref)) => {
-                self.fetch_chunk_from_persistent_ref(chunk_ref)
-            }
+            Ok(Some(chunk_ref)) => self.fetch_chunk_from_persistent_ref(chunk_ref),
             _ => None,  // TODO: Do we need to distinguish `missing` from `unknown ref`?
         }
     }
