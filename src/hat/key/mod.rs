@@ -133,7 +133,7 @@ impl Store {
     pub fn flush(&mut self) -> Result<(), MsgError> {
         self.blob_store.send_reply(blob::Msg::Flush);
         self.hash_index.flush();
-        try!(self.index.send_reply(index::Msg::Flush));
+        try!(self.index.flush());
 
         Ok(())
     }
@@ -301,7 +301,7 @@ impl<IT: Iterator<Item = Vec<u8>>> MsgHandler<Msg<IT>, Result<Reply, MsgError>> 
             }
 
             Msg::ListDir(parent) => {
-                match self.index.send_reply(index::Msg::ListDir(parent)) {
+                match self.index.list_dir(parent) {
                     Ok(index::Reply::ListResult(entries)) => {
                         let mut my_entries: Vec<DirElem> = Vec::with_capacity(entries.len());
                         for (entry, persistent_ref) in entries.into_iter() {
@@ -324,10 +324,8 @@ impl<IT: Iterator<Item = Vec<u8>>> MsgHandler<Msg<IT>, Result<Reply, MsgError>> 
             }
 
             Msg::Insert(org_entry, chunk_it_opt) => {
-                let entry = match try!(self.index
-                                           .send_reply(index::Msg::Lookup(org_entry.parent_id,
-                                                                          org_entry.name
-                                                                                   .clone()))) {
+                let entry = match try!(self.index.lookup(org_entry.parent_id,
+                                                         org_entry.name.clone())) {
                     index::Reply::Entry(ref entry) if org_entry.accessed == entry.accessed &&
                                                       org_entry.modified == entry.modified &&
                                                       org_entry.created == entry.created => {
@@ -349,7 +347,7 @@ impl<IT: Iterator<Item = Vec<u8>>> MsgHandler<Msg<IT>, Result<Reply, MsgError>> 
                     _ => return reply_err(From::from("Unexpected reply from key index")),
                 };
 
-                let entry = match try!(self.index.send_reply(index::Msg::Insert(entry))) {
+                let entry = match try!(self.index.insert(entry)) {
                     index::Reply::Entry(entry) => entry,
                     _ => return reply_err(From::from("Could not insert entry into key index")),
                 };
@@ -367,7 +365,7 @@ impl<IT: Iterator<Item = Vec<u8>>> MsgHandler<Msg<IT>, Result<Reply, MsgError>> 
                 let it_opt = chunk_it_opt.and_then(|open| open.call(()));
                 if it_opt.is_none() {
                     // No data is associated with this entry.
-                    try!(self.index.send_reply(index::Msg::UpdateDataHash(entry, None, None)));
+                    try!(self.index.update_data_hash(entry, None, None));
                     // Bail out before storing data that does not exist:
                     return Ok(());
                 }
@@ -390,10 +388,9 @@ impl<IT: Iterator<Item = Vec<u8>>> MsgHandler<Msg<IT>, Result<Reply, MsgError>> 
 
                 // Update hash in key index.
                 // It is OK that this has is not yet valid, as we check hashes at snapshot time.
-                match try!(self.index
-                               .send_reply(index::Msg::UpdateDataHash(entry,
-                                                                      Some(hash),
-                                                                      Some(persistent_ref)))) {
+                match try!(self.index.update_data_hash(entry,
+                                                       Some(hash),
+                                                       Some(persistent_ref))) {
                     index::Reply::UpdateOk => (),
                     _ => {
                         // We lost the hash index before we completed the data transfer.
