@@ -121,7 +121,7 @@ impl Store {
         (backend: B)
          -> Result<Store, MsgError> {
         let ki_p = try!(Process::new(move || index::Index::new_for_testing()));
-        let hi_p = hash::IndexProcess::new(try!(hash::Index::new_for_testing()));
+        let hi_p = try!(hash::IndexProcess::new_for_testing(None));
         let bs_p = try!(Process::new(move || blob::Store::new_for_testing(backend, 1024)));
         Ok(Store {
             index: ki_p,

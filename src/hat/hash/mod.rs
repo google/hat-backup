@@ -14,7 +14,6 @@
 
 //! Local state for known hashes and their external location (blob reference).
 
-use std::borrow::Cow;
 use std::sync::{mpsc, Arc, Mutex, MutexGuard};
 use time::Duration;
 
@@ -31,7 +30,6 @@ use periodic_timer::PeriodicTimer;
 use tags;
 use unique_priority_queue::UniquePriorityQueue;
 use util;
-use util::FnBox;
 
 mod schema;
 pub mod tree;
@@ -40,9 +38,6 @@ pub mod tree;
 error_type! {
     #[derive(Debug)]
     pub enum MsgError {
-        Recv(mpsc::RecvError) {
-            cause;
-        },
         SqlConnection(diesel::ConnectionError) {
             cause;
         },
@@ -55,11 +50,6 @@ error_type! {
         SqlExecute(diesel::result::Error) {
             cause;
         },
-        Message(Cow<'static, str>) {
-            desc (e) &**e;
-            from (s: &'static str) s.into();
-            from (s: String) s.into();
-        }
     }
 }
 
@@ -81,6 +71,9 @@ pub struct GcData {
     pub num: i64,
     pub bytes: Vec<u8>,
 }
+pub trait UpdateFn : FnOnce(GcData) -> Option<GcData> {}
+impl<T> UpdateFn for T
+    where T: FnOnce(GcData) -> Option<GcData> {}
 
 impl Hash {
     /// Computes `hash(text)` and stores this digest as the `bytes` field in a new `Hash` structure.
@@ -142,7 +135,7 @@ pub struct Index {
 }
 
 impl Index {
-    pub fn new(path: String) -> Result<Index, MsgError> {
+    fn new(path: String) -> Result<Index, MsgError> {
         let conn = try!(SqliteConnection::establish(&path));
 
         let mut hi = Index {
@@ -164,8 +157,7 @@ impl Index {
         Ok(hi)
     }
 
-    #[cfg(test)]
-    pub fn new_for_testing() -> Result<Index, MsgError> {
+    fn new_for_testing() -> Result<Index, MsgError> {
         Index::new(":memory:".to_string())
     }
 
@@ -411,13 +403,13 @@ impl Index {
         }
     }
 
-    fn update_gc_data(&mut self,
-                      hash_id: i64,
-                      family_id: i64,
-                      f: Box<FnBox<GcData, Option<GcData>>>)
-                      -> GcData {
+    fn update_gc_data<F: UpdateFn>(&mut self,
+                                    hash_id: i64,
+                                    family_id: i64,
+                                    f: F)
+                                    -> GcData {
         let data = self.read_gc_data(hash_id, family_id);
-        match f.call(data.clone()) {
+        match f(data.clone()) {
             None => {
                 self.delete_gc_data(hash_id, family_id);
                 data
@@ -429,9 +421,10 @@ impl Index {
         }
     }
 
-    fn update_family_gc_data(&mut self,
-                             family_id_: i64,
-                             fs: mpsc::Receiver<Box<FnBox<GcData, Option<GcData>>>>) {
+    fn update_family_gc_data<F: UpdateFn, I: Iterator<Item=F>>
+        (&mut self,
+         family_id_: i64,
+         mut fns: I) {
         use self::schema::gc_metadata::dsl::*;
 
         let hash_ids_ = gc_metadata.filter(family_id.eq(family_id_))
@@ -440,7 +433,7 @@ impl Index {
                                    .expect("Error loading GC metadata");
 
         for hash_id_ in hash_ids_ {
-            let f = fs.recv().expect("Failed to recv update function");
+            let f = fns.next().expect("Failed to recv update function");
             self.update_gc_data(hash_id_, family_id_, f);
         }
     }
@@ -529,12 +522,14 @@ impl Index {
 }
 
 impl IndexProcess {
-    pub fn new(index: Index) -> IndexProcess {
-        IndexProcess::new_with_shutdown(index, None)
+    pub fn new(path: String) -> Result<IndexProcess, MsgError> {
+        let index = try!(Index::new(path));
+        Ok(IndexProcess(Arc::new(Mutex::new((index, None)))))
     }
 
-    pub fn new_with_shutdown(index: Index, shutdown: Option<i64>) -> IndexProcess {
-        IndexProcess(Arc::new(Mutex::new((index, shutdown))))
+    pub fn new_for_testing(shutdown: Option<i64>) -> Result<IndexProcess, MsgError> {
+        let index = try!(Index::new_for_testing());
+        Ok(IndexProcess(Arc::new(Mutex::new((index, shutdown)))))
     }
 
     fn lock(&self) -> MutexGuard<(Index, Option<i64>)> {
@@ -658,18 +653,20 @@ impl IndexProcess {
     }
 
     /// API related to garbage collector metadata tied to (hash id, family id) pairs.
-    pub fn update_gc_data(&self,
-                          hash_id: i64,
-                          family_id: i64,
-                          update_fn: Box<FnBox<GcData, Option<GcData>>>)
-                          -> GcData {
+    pub fn update_gc_data<F: UpdateFn>
+        (&self,
+         hash_id: i64,
+         family_id: i64,
+         update_fn: F)
+         -> GcData {
         self.lock().0.update_gc_data(hash_id, family_id, update_fn)
     }
 
     /// API related to garbage collector metadata tied to (hash id, family id) pairs.
-    pub fn update_family_gc_data(&self,
-                                 family_id: i64,
-                                 update_fns: mpsc::Receiver<Box<FnBox<GcData, Option<GcData>>>>) {
+    pub fn update_family_gc_data<F: UpdateFn, I: Iterator<Item=F>>
+        (&self,
+         family_id: i64,
+         update_fns: I) {
         self.lock().0.update_family_gc_data(family_id, update_fns)
     }
 

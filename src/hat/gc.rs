@@ -18,14 +18,12 @@ use std::fmt;
 use std::mem;
 use std::sync::{mpsc, Arc, Mutex};
 
-use hash::GcData;
+use hash::{UpdateFn, GcData};
 use snapshot;
 use tags;
-use util::FnBox;
 
 
 pub type Id = i64;
-pub type UpdateFn = Box<FnBox<GcData, Option<GcData>>>;
 
 
 #[derive(PartialEq, Debug)]
@@ -40,15 +38,17 @@ pub trait GcBackend {
 
     fn get_data(&self, hash_id: Id, family_id: Id) -> Result<GcData, Self::Err>;
 
-    fn update_data(&mut self,
-                   hash_id: Id,
-                   family_id: Id,
-                   f: UpdateFn)
-                   -> Result<GcData, Self::Err>;
-    fn update_all_data_by_family(&mut self,
-                                 family_id: Id,
-                                 fs: mpsc::Receiver<UpdateFn>)
-                                 -> Result<(), Self::Err>;
+    fn update_data<F: UpdateFn>
+        (&mut self,
+         hash_id: Id,
+         family_id: Id,
+         f: F)
+         -> Result<GcData, Self::Err>;
+    fn update_all_data_by_family<F: UpdateFn, I: Iterator<Item=F>>
+        (&mut self,
+         family_id: Id,
+         fns: I)
+         -> Result<(), Self::Err>;
 
     fn set_tag(&mut self, hash_id: Id, tag: tags::Tag) -> Result<(), Self::Err>;
     fn get_tag(&self, hash_id: Id) -> Result<Option<tags::Tag>, Self::Err>;
@@ -199,12 +199,13 @@ impl GcBackend for SafeMemoryBackend {
                .clone())
     }
 
-    fn update_data(&mut self,
-                   hash_id: Id,
-                   family_id: Id,
-                   f: UpdateFn)
-                   -> Result<GcData, Self::Err> {
-        let new = match f.call(try!(self.get_data(hash_id, family_id))) {
+    fn update_data<F: UpdateFn>
+        (&mut self,
+         hash_id: Id,
+         family_id: Id,
+         f: F)
+         -> Result<GcData, Self::Err> {
+        let new = match f(try!(self.get_data(hash_id, family_id))) {
             Some(d) => d,
             None => {
                 GcData {
@@ -218,14 +219,15 @@ impl GcBackend for SafeMemoryBackend {
         Ok(new)
     }
 
-    fn update_all_data_by_family(&mut self,
-                                 family_id: Id,
-                                 fs: mpsc::Receiver<UpdateFn>)
-                                 -> Result<(), Self::Err> {
+    fn update_all_data_by_family<F: UpdateFn, I: Iterator<Item=F>>
+        (&mut self,
+         family_id: Id,
+         mut fns: I)
+         -> Result<(), Self::Err> {
         for (k, v) in &mut self.backend.lock().unwrap().gc_data {
             if k.1 == family_id {
-                let f = fs.recv().unwrap();
-                *v = f.call(v.clone()).unwrap_or(GcData {
+                let f = fns.next().unwrap();
+                *v = f(v.clone()).unwrap_or(GcData {
                     num: 0,
                     bytes: vec![],
                 });
