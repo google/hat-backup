@@ -321,8 +321,8 @@ impl<B: 'static + blob::StoreBackend + Clone + Send> HatRc<B> {
             None => ":memory:".to_string(),
         };
 
-        let ki_p = try!(Process::new_with_shutdown(move || key::Index::new(key_index_path),
-                                                   shutdown_after));
+        let ki_p = key::IndexProcess::new_with_shutdown(try!(key::Index::new(key_index_path)),
+                                                        shutdown_after);
 
         let local_ks = key::Store::new(ki_p.clone(),
                                        self.hash_index.clone(),

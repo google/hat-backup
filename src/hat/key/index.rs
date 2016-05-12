@@ -20,13 +20,12 @@ use diesel;
 use diesel::prelude::*;
 use diesel::sqlite::SqliteConnection;
 
-use std::sync::mpsc;
+use std::sync::{Arc, Mutex, MutexGuard};
 use time::Duration;
 
 use blob;
 use hash;
 use periodic_timer::PeriodicTimer;
-use process::{Process, MsgHandler};
 use util;
 
 use super::schema;
@@ -34,9 +33,6 @@ use super::schema;
 error_type! {
     #[derive(Debug)]
     pub enum IndexError {
-        Recv(mpsc::RecvError) {
-            cause;
-        },
         SqlConnection(diesel::ConnectionError) {
             cause;
         },
@@ -77,7 +73,8 @@ pub struct Entry {
     pub data_length: Option<u64>,
 }
 
-pub type IndexProcess = Process<Msg, Result<Reply, IndexError>>;
+#[derive(Clone)]
+pub struct IndexProcess(Arc<Mutex<(Index, Option<i64>)>>);
 
 pub enum Msg {
     /// Insert an entry in the key index.
@@ -170,13 +167,11 @@ impl Clone for Index {
     }
 }
 
-impl MsgHandler<Msg, Result<Reply, IndexError>> for Index {
-    type Err = IndexError;
-
-    fn handle(&mut self,
-              msg: Msg,
-              reply: Box<Fn(Result<Reply, IndexError>)>)
-              -> Result<(), IndexError> {
+impl Index {
+    fn handle<F: Fn(Result<Reply, IndexError>)>
+        (&mut self,
+         msg: Msg,
+         reply: F)-> Result<(), IndexError> {
         let reply_ok = |x| {
             reply(Ok(x));
             Ok(())
@@ -340,5 +335,47 @@ impl MsgHandler<Msg, Result<Reply, IndexError>> for Index {
                 reply_ok(Reply::ListResult(res.collect()))
             }
         }
+    }
+}
+
+impl IndexProcess {
+    pub fn new(index: Index) -> IndexProcess {
+        IndexProcess::new_with_shutdown(index, None)
+    }
+
+    pub fn new_with_shutdown(index: Index, shutdown: Option<i64>) -> IndexProcess {
+        IndexProcess(Arc::new(Mutex::new((index, shutdown))))
+    }
+
+    fn lock(&self) -> MutexGuard<(Index, Option<i64>)> {
+        let mut guard = self.0.lock().expect("index-process has failed");
+
+        match &mut guard.1 {
+            &mut None => (),
+            &mut Some(0) => panic!("No more requests for this index process"),
+            &mut Some(ref mut n) => {
+                *n -= 1;
+            }
+        }
+
+        guard
+    }
+
+    pub fn send_reply(&self, msg: Msg) -> Result<Reply, IndexError>  {
+        let mut guard = self.lock();
+        let res = Mutex::new(None);
+
+        let can_continue = guard.0.handle(msg, |r| {
+            let mut guard = res.lock().unwrap();
+            assert!((*guard).is_none());
+            *guard = Some(r)
+        }).is_ok();
+
+        if !can_continue {
+            guard.1 = Some(0);
+        }
+
+        let res: Option<Result<Reply, IndexError>> = res.into_inner().expect("Channel should not be poisened");
+        res.expect("Callback must be called exactly once")
     }
 }

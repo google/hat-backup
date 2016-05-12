@@ -120,7 +120,7 @@ impl Store {
     pub fn new_for_testing<B: 'static + blob::StoreBackend + Send + Clone>
         (backend: B)
          -> Result<Store, MsgError> {
-        let ki_p = try!(Process::new(move || index::Index::new_for_testing()));
+        let ki_p = index::IndexProcess::new(try!(index::Index::new_for_testing()));
         let hi_p = try!(hash::HashIndex::new_for_testing(None));
         let bs_p = try!(Process::new(move || blob::Store::new_for_testing(backend, 1024)));
         Ok(Store {
