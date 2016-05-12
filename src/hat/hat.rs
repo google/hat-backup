@@ -95,15 +95,14 @@ impl gc::GcBackend for GcBackend {
     fn get_data(&self, hash_id: gc::Id, family_id: gc::Id) -> Result<hash::GcData, Self::Err> {
         Ok(self.hash_index.read_gc_data(hash_id, family_id))
     }
-    fn update_data<F: hash::UpdateFn>
-        (&mut self,
-         hash_id: gc::Id,
-         family_id: gc::Id,
-         f: F)
-         -> Result<hash::GcData, Self::Err> {
+    fn update_data<F: hash::UpdateFn>(&mut self,
+                                      hash_id: gc::Id,
+                                      family_id: gc::Id,
+                                      f: F)
+                                      -> Result<hash::GcData, Self::Err> {
         Ok(self.hash_index.update_gc_data(hash_id, family_id, f))
     }
-    fn update_all_data_by_family<F: hash::UpdateFn, I: Iterator<Item=F>>
+    fn update_all_data_by_family<F: hash::UpdateFn, I: Iterator<Item = F>>
         (&mut self,
          family_id: gc::Id,
          fns: I)
@@ -960,7 +959,7 @@ impl<B: 'static + blob::StoreBackend + Clone + Send> HatRc<B> {
             _ => panic!("Unexpected reply from blob store."),
         }
         let mut live_blobs = 0;
-        for entry in entries.iter() {
+        for entry in entries.into_iter() {
             if let Some(pref) = entry.persistent_ref {
                 live_blobs += 1;
                 match self.blob_store.send_reply(blob::Msg::Tag(pref, tags::Tag::Reserved)) {

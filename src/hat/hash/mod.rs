@@ -14,7 +14,7 @@
 
 //! Local state for known hashes and their external location (blob reference).
 
-use std::sync::{mpsc, Arc, Mutex, MutexGuard};
+use std::sync::{Arc, Mutex, MutexGuard};
 use time::Duration;
 
 use diesel;
@@ -71,9 +71,8 @@ pub struct GcData {
     pub num: i64,
     pub bytes: Vec<u8>,
 }
-pub trait UpdateFn : FnOnce(GcData) -> Option<GcData> {}
-impl<T> UpdateFn for T
-    where T: FnOnce(GcData) -> Option<GcData> {}
+pub trait UpdateFn: FnOnce(GcData) -> Option<GcData> {}
+impl<T> UpdateFn for T where T: FnOnce(GcData) -> Option<GcData> {}
 
 impl Hash {
     /// Computes `hash(text)` and stores this digest as the `bytes` field in a new `Hash` structure.
@@ -113,7 +112,10 @@ pub struct Entry {
 }
 
 pub struct RetryError;
-pub enum ReserveResult { HashKnown, ReserveOk }
+pub enum ReserveResult {
+    HashKnown,
+    ReserveOk,
+}
 
 #[derive(Clone)]
 struct QueueEntry {
@@ -403,11 +405,7 @@ impl Index {
         }
     }
 
-    fn update_gc_data<F: UpdateFn>(&mut self,
-                                    hash_id: i64,
-                                    family_id: i64,
-                                    f: F)
-                                    -> GcData {
+    fn update_gc_data<F: UpdateFn>(&mut self, hash_id: i64, family_id: i64, f: F) -> GcData {
         let data = self.read_gc_data(hash_id, family_id);
         match f(data.clone()) {
             None => {
@@ -421,10 +419,9 @@ impl Index {
         }
     }
 
-    fn update_family_gc_data<F: UpdateFn, I: Iterator<Item=F>>
-        (&mut self,
-         family_id_: i64,
-         mut fns: I) {
+    fn update_family_gc_data<F: UpdateFn, I: Iterator<Item = F>>(&mut self,
+                                                                 family_id_: i64,
+                                                                 mut fns: I) {
         use self::schema::gc_metadata::dsl::*;
 
         let hash_ids_ = gc_metadata.filter(family_id.eq(family_id_))
@@ -459,36 +456,32 @@ impl Index {
         self.maybe_flush();
     }
 
-    fn list(&mut self) -> mpsc::Receiver<Entry> {
-        let (sender, receiver) = mpsc::channel();
-
+    fn list(&mut self) -> Vec<Entry> {
         use self::schema::hashes::dsl::*;
-        let hashes_ = hashes.load::<schema::Hash>(&self.conn)
-                            .expect("Error listing hashes");
-        for hash_ in hashes_ {
-            if let Err(_) = sender.send(Entry {
-                hash: Hash { bytes: hash_.hash },
-                level: hash_.height,
-                payload: hash_.payload.and_then(|p| {
-                    if p.is_empty() {
-                        None
-                    } else {
-                        Some(p)
-                    }
-                }),
-                persistent_ref: hash_.blob_ref.and_then(|b| {
-                    if b.is_empty() {
-                        None
-                    } else {
-                        Some(blob::ChunkRef::from_bytes(&mut &b[..]).unwrap())
-                    }
-                }),
-            }) {
-                break;
-            }
-        }
-
-        receiver
+        hashes.load::<schema::Hash>(&self.conn)
+              .expect("Error listing hashes")
+              .into_iter()
+              .map(|hash_| {
+                  Entry {
+                      hash: Hash { bytes: hash_.hash },
+                      level: hash_.height,
+                      payload: hash_.payload.and_then(|p| {
+                          if p.is_empty() {
+                              None
+                          } else {
+                              Some(p)
+                          }
+                      }),
+                      persistent_ref: hash_.blob_ref.and_then(|b| {
+                          if b.is_empty() {
+                              None
+                          } else {
+                              Some(blob::ChunkRef::from_bytes(&mut &b[..]).unwrap())
+                          }
+                      }),
+                  }
+              })
+              .collect()
     }
 
     fn delete(&mut self, id_: i64) {
@@ -574,9 +567,7 @@ impl IndexProcess {
         assert!(!hash.bytes.is_empty());
         match self.lock().0.locate(hash) {
             Some(ref queue_entry) if queue_entry.persistent_ref.is_none() => Err(RetryError),
-            Some(queue_entry) => {
-                Ok(Some(queue_entry.persistent_ref.expect("persistent_ref")))
-            }
+            Some(queue_entry) => Ok(Some(queue_entry.persistent_ref.expect("persistent_ref"))),
             None => Ok(None),
         }
     }
@@ -614,7 +605,7 @@ impl IndexProcess {
     }
 
     /// List all hash entries.
-    pub fn list(&self) -> mpsc::Receiver<Entry> {
+    pub fn list(&self) -> Vec<Entry> {
         self.lock().0.list()
     }
 
@@ -653,20 +644,18 @@ impl IndexProcess {
     }
 
     /// API related to garbage collector metadata tied to (hash id, family id) pairs.
-    pub fn update_gc_data<F: UpdateFn>
-        (&self,
-         hash_id: i64,
-         family_id: i64,
-         update_fn: F)
-         -> GcData {
+    pub fn update_gc_data<F: UpdateFn>(&self,
+                                       hash_id: i64,
+                                       family_id: i64,
+                                       update_fn: F)
+                                       -> GcData {
         self.lock().0.update_gc_data(hash_id, family_id, update_fn)
     }
 
     /// API related to garbage collector metadata tied to (hash id, family id) pairs.
-    pub fn update_family_gc_data<F: UpdateFn, I: Iterator<Item=F>>
-        (&self,
-         family_id: i64,
-         update_fns: I) {
+    pub fn update_family_gc_data<F: UpdateFn, I: Iterator<Item = F>>(&self,
+                                                                     family_id: i64,
+                                                                     update_fns: I) {
         self.lock().0.update_family_gc_data(family_id, update_fns)
     }
 

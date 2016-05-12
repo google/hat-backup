@@ -38,17 +38,15 @@ pub trait GcBackend {
 
     fn get_data(&self, hash_id: Id, family_id: Id) -> Result<GcData, Self::Err>;
 
-    fn update_data<F: UpdateFn>
-        (&mut self,
-         hash_id: Id,
-         family_id: Id,
-         f: F)
-         -> Result<GcData, Self::Err>;
-    fn update_all_data_by_family<F: UpdateFn, I: Iterator<Item=F>>
-        (&mut self,
-         family_id: Id,
-         fns: I)
-         -> Result<(), Self::Err>;
+    fn update_data<F: UpdateFn>(&mut self,
+                                hash_id: Id,
+                                family_id: Id,
+                                f: F)
+                                -> Result<GcData, Self::Err>;
+    fn update_all_data_by_family<F: UpdateFn, I: Iterator<Item = F>>(&mut self,
+                                                                     family_id: Id,
+                                                                     fns: I)
+                                                                     -> Result<(), Self::Err>;
 
     fn set_tag(&mut self, hash_id: Id, tag: tags::Tag) -> Result<(), Self::Err>;
     fn get_tag(&self, hash_id: Id) -> Result<Option<tags::Tag>, Self::Err>;
@@ -199,12 +197,11 @@ impl GcBackend for SafeMemoryBackend {
                .clone())
     }
 
-    fn update_data<F: UpdateFn>
-        (&mut self,
-         hash_id: Id,
-         family_id: Id,
-         f: F)
-         -> Result<GcData, Self::Err> {
+    fn update_data<F: UpdateFn>(&mut self,
+                                hash_id: Id,
+                                family_id: Id,
+                                f: F)
+                                -> Result<GcData, Self::Err> {
         let new = match f(try!(self.get_data(hash_id, family_id))) {
             Some(d) => d,
             None => {
@@ -219,11 +216,10 @@ impl GcBackend for SafeMemoryBackend {
         Ok(new)
     }
 
-    fn update_all_data_by_family<F: UpdateFn, I: Iterator<Item=F>>
-        (&mut self,
-         family_id: Id,
-         mut fns: I)
-         -> Result<(), Self::Err> {
+    fn update_all_data_by_family<F: UpdateFn, I: Iterator<Item = F>>(&mut self,
+                                                                     family_id: Id,
+                                                                     mut fns: I)
+                                                                     -> Result<(), Self::Err> {
         for (k, v) in &mut self.backend.lock().unwrap().gc_data {
             if k.1 == family_id {
                 let f = fns.next().unwrap();
