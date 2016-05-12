@@ -76,15 +76,6 @@ pub struct Entry {
 #[derive(Clone)]
 pub struct IndexProcess(Arc<Mutex<(Index, Option<i64>)>>);
 
-pub enum Reply {
-    Entry(Entry),
-    NotFound,
-    UpdateOk,
-    ListResult(Vec<(Entry, Option<blob::ChunkRef>)>),
-    FlushOk,
-}
-
-
 pub struct Index {
     path: String,
     conn: SqliteConnection,
@@ -139,7 +130,7 @@ impl Index {
 
     /// Insert an entry in the key index.
     /// Returns `Id` with the new entry ID.
-    fn insert(&mut self, entry: Entry) -> Result<Reply, IndexError> {
+    fn insert(&mut self, entry: Entry) -> Result<Entry, IndexError> {
         use super::schema::keys::dsl::*;
 
         let entry = match entry.id {
@@ -180,12 +171,12 @@ impl Index {
             }
         };
 
-        Ok(Reply::Entry(entry))
+        Ok(entry)
     }
 
     /// Lookup an entry in the key index by its parent id and name.
     /// Returns either `Entry` with the found entry or `NotFound`.
-    fn lookup(&mut self, parent_: Option<u64>, name_: Vec<u8>) -> Result<Reply, IndexError> {
+    fn lookup(&mut self, parent_: Option<u64>, name_: Vec<u8>) -> Result<Option<Entry>, IndexError> {
         use super::schema::keys::dsl::*;
 
         let row_opt = match parent_ {
@@ -204,7 +195,7 @@ impl Index {
         };
 
         if let Some(row) = row_opt {
-            Ok(Reply::Entry(Entry {
+            Ok(Some(Entry {
                 id: Some(row.id as u64),
                 parent_id: parent_,
                 name: name_,
@@ -218,7 +209,7 @@ impl Index {
                 data_length: None,
             }))
         } else {
-            Ok(Reply::NotFound)
+            Ok(None)
         }
     }
 
@@ -226,7 +217,7 @@ impl Index {
     /// Update the `payload` and `persistent_ref` of an entry.
     /// Returns `UpdateOk`.
     fn update_data_hash(&mut self, entry: Entry, hash_opt: Option<hash::Hash>,
-                        persistent_ref_opt: Option<blob::ChunkRef>) -> Result<Reply, IndexError> {
+                        persistent_ref_opt: Option<blob::ChunkRef>) -> Result<(), IndexError> {
         use super::schema::keys::dsl::*;
 
         let id_ = match entry.id {
@@ -252,14 +243,12 @@ impl Index {
                  .execute(&self.conn));
         }
 
-        try!(self.maybe_flush());
-
-        Ok(Reply::UpdateOk)
+        self.maybe_flush()
     }
 
     /// List a directory (aka. `level`) in the index.
     /// Returns `ListResult` with all the entries under the given parent.
-    fn list_dir(&mut self, parent_opt: Option<u64>) -> Result<Reply, IndexError> {
+    fn list_dir(&mut self, parent_opt: Option<u64>) -> Result<Vec<(Entry, Option<blob::ChunkRef>)>, IndexError> {
         use super::schema::keys::dsl::*;
 
         let rows = match parent_opt {
@@ -273,8 +262,8 @@ impl Index {
             }
         };
 
-        let res = rows.into_iter()
-            .map(|mut r| {
+        Ok(rows.into_iter()
+           .map(|mut r| {
                 (Entry {
                     id: Some(r.id as u64),
                     parent_id: r.parent.map(|x| x as u64),
@@ -292,9 +281,8 @@ impl Index {
                  r.persistent_ref
                  .as_mut()
                  .map(|p| blob::ChunkRef::from_bytes(&mut &p[..]).unwrap()))
-            });
-
-        Ok(Reply::ListResult(res.collect()))
+           })
+           .collect())
     }
 }
 
@@ -321,26 +309,24 @@ impl IndexProcess {
         guard
     }
 
-    pub fn insert(&self, entry: Entry) -> Result<Reply, IndexError> {
+    pub fn insert(&self, entry: Entry) -> Result<Entry, IndexError> {
         self.lock().0.insert(entry)
     }
 
-    pub fn lookup(&self, parent_: Option<u64>, name_: Vec<u8>) -> Result<Reply, IndexError> {
+    pub fn lookup(&self, parent_: Option<u64>, name_: Vec<u8>) -> Result<Option<Entry>, IndexError> {
         self.lock().0.lookup(parent_, name_)
     }
 
     pub fn update_data_hash(&self, entry: Entry, hash_opt: Option<hash::Hash>,
-                            persistent_ref_opt: Option<blob::ChunkRef>) -> Result<Reply, IndexError> {
+                            persistent_ref_opt: Option<blob::ChunkRef>) -> Result<(), IndexError> {
         self.lock().0.update_data_hash(entry, hash_opt, persistent_ref_opt)
     }
 
-    pub fn list_dir(&self, parent_opt: Option<u64>) -> Result<Reply, IndexError> {
+    pub fn list_dir(&self, parent_opt: Option<u64>) -> Result<Vec<(Entry, Option<blob::ChunkRef>)>, IndexError> {
         self.lock().0.list_dir(parent_opt)
     }
 
-    pub fn flush(&self) -> Result<Reply, IndexError> {
-        try!(self.lock().0.flush());
-
-        Ok(Reply::FlushOk)
+    pub fn flush(&self) -> Result<(), IndexError> {
+        self.lock().0.flush()
     }
 }

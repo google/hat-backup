@@ -302,7 +302,7 @@ impl<IT: Iterator<Item = Vec<u8>>> MsgHandler<Msg<IT>, Result<Reply, MsgError>> 
 
             Msg::ListDir(parent) => {
                 match self.index.list_dir(parent) {
-                    Ok(index::Reply::ListResult(entries)) => {
+                    Ok(entries) => {
                         let mut my_entries: Vec<DirElem> = Vec::with_capacity(entries.len());
                         for (entry, persistent_ref) in entries.into_iter() {
                             let open_fn = entry.data_hash.as_ref().map(|bytes| {
@@ -319,14 +319,13 @@ impl<IT: Iterator<Item = Vec<u8>>> MsgHandler<Msg<IT>, Result<Reply, MsgError>> 
                         reply_ok(Reply::ListResult(my_entries))
                     }
                     Err(e) => reply_err(From::from(e)),
-                    _ => reply_err(From::from("Unexpected result from key index")),
                 }
             }
 
             Msg::Insert(org_entry, chunk_it_opt) => {
                 let entry = match try!(self.index.lookup(org_entry.parent_id,
                                                          org_entry.name.clone())) {
-                    index::Reply::Entry(ref entry) if org_entry.accessed == entry.accessed &&
+                    Some(ref entry) if org_entry.accessed == entry.accessed &&
                                                       org_entry.modified == entry.modified &&
                                                       org_entry.created == entry.created => {
                         if chunk_it_opt.is_some() && entry.data_hash.is_some() {
@@ -342,15 +341,11 @@ impl<IT: Iterator<Item = Vec<u8>>> MsgHandler<Msg<IT>, Result<Reply, MsgError>> 
                         // Our stored entry is incomplete.
                         Entry { id: entry.id, ..org_entry }
                     }
-                    index::Reply::Entry(entry) => Entry { id: entry.id, ..org_entry },
-                    index::Reply::NotFound => org_entry,
-                    _ => return reply_err(From::from("Unexpected reply from key index")),
+                    Some(entry) => Entry { id: entry.id, ..org_entry },
+                    None => org_entry,
                 };
 
-                let entry = match try!(self.index.insert(entry)) {
-                    index::Reply::Entry(entry) => entry,
-                    _ => return reply_err(From::from("Could not insert entry into key index")),
-                };
+                let entry = try!(self.index.insert(entry));
 
                 // Send out the ID early to allow the client to continue its key discovery routine.
                 // The bounded input-channel will prevent the client from overflowing us.
@@ -388,16 +383,9 @@ impl<IT: Iterator<Item = Vec<u8>>> MsgHandler<Msg<IT>, Result<Reply, MsgError>> 
 
                 // Update hash in key index.
                 // It is OK that this has is not yet valid, as we check hashes at snapshot time.
-                match try!(self.index.update_data_hash(entry,
-                                                       Some(hash),
-                                                       Some(persistent_ref))) {
-                    index::Reply::UpdateOk => (),
-                    _ => {
-                        // We lost the hash index before we completed the data transfer.
-                        // Returning an error here will terminate our process.
-                        return Err(From::from("Unexpected reply from key index"));
-                    }
-                };
+                try!(self.index.update_data_hash(entry,
+                                                 Some(hash),
+                                                 Some(persistent_ref)));
 
                 Ok(())
             }
