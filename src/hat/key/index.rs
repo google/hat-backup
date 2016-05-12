@@ -168,18 +168,8 @@ impl Clone for Index {
 }
 
 impl Index {
-    fn handle<F: Fn(Result<Reply, IndexError>)>
-        (&mut self,
-         msg: Msg,
-         reply: F)-> Result<(), IndexError> {
-        let reply_ok = |x| {
-            reply(Ok(x));
-            Ok(())
-        };
-        let reply_err = |e| {
-            reply(Err(e));
-            Ok(())
-        };
+    fn handle(&mut self,
+              msg: Msg)-> Result<Reply, IndexError> {
         match msg {
             Msg::Insert(entry) => {
                 use super::schema::keys::dsl::*;
@@ -222,7 +212,7 @@ impl Index {
                     }
                 };
 
-                reply_ok(Reply::Entry(entry))
+                Ok(Reply::Entry(entry))
             }
             Msg::Lookup(parent_, name_) => {
                 use super::schema::keys::dsl::*;
@@ -243,7 +233,7 @@ impl Index {
                 };
 
                 if let Some(row) = row_opt {
-                    return reply_ok(Reply::Entry(Entry {
+                    Ok(Reply::Entry(Entry {
                         id: Some(row.id as u64),
                         parent_id: parent_,
                         name: name_,
@@ -255,10 +245,10 @@ impl Index {
                         group_id: row.group_id.map(|x| x as u64),
                         data_hash: row.hash,
                         data_length: None,
-                    }));
+                    }))
+                } else {
+                    Ok(Reply::NotFound)
                 }
-
-                reply_ok(Reply::NotFound)
             }
             Msg::UpdateDataHash(entry, hash_opt, persistent_ref_opt) => {
                 use super::schema::keys::dsl::*;
@@ -266,7 +256,7 @@ impl Index {
                 let id_ = match entry.id {
                     Some(i) => i as i64,
                     None => {
-                        return reply_err(From::from("Tried to update data hash without an id"));
+                        return Err(From::from("Tried to update data hash without an id"))
                     }
                 };
                 assert!(hash_opt.is_some() == persistent_ref_opt.is_some());
@@ -288,13 +278,13 @@ impl Index {
 
                 try!(self.maybe_flush());
 
-                reply_ok(Reply::UpdateOk)
+                Ok(Reply::UpdateOk)
             }
 
             Msg::Flush => {
                 try!(self.flush());
 
-                reply_ok(Reply::FlushOk)
+                Ok(Reply::FlushOk)
             }
 
             Msg::ListDir(parent_opt) => {
@@ -332,7 +322,7 @@ impl Index {
                                     .map(|p| blob::ChunkRef::from_bytes(&mut &p[..]).unwrap()))
                               });
 
-                reply_ok(Reply::ListResult(res.collect()))
+                Ok(Reply::ListResult(res.collect()))
             }
         }
     }
@@ -362,20 +352,6 @@ impl IndexProcess {
     }
 
     pub fn send_reply(&self, msg: Msg) -> Result<Reply, IndexError>  {
-        let mut guard = self.lock();
-        let res = Mutex::new(None);
-
-        let can_continue = guard.0.handle(msg, |r| {
-            let mut guard = res.lock().unwrap();
-            assert!((*guard).is_none());
-            *guard = Some(r)
-        }).is_ok();
-
-        if !can_continue {
-            guard.1 = Some(0);
-        }
-
-        let res: Option<Result<Reply, IndexError>> = res.into_inner().expect("Channel should not be poisened");
-        res.expect("Callback must be called exactly once")
+        self.lock().0.handle(msg)
     }
 }
