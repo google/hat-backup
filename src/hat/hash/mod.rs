@@ -57,7 +57,7 @@ error_type! {
 pub static HASHBYTES: usize = sha512::DIGESTBYTES;
 
 #[derive(Clone)]
-pub struct IndexProcess(Arc<Mutex<(Index, Option<i64>)>>);
+pub struct HashIndex(Arc<Mutex<(InternalHashIndex, Option<i64>)>>);
 
 
 /// A wrapper around Hash digests.
@@ -125,7 +125,7 @@ struct QueueEntry {
     persistent_ref: Option<blob::ChunkRef>,
 }
 
-pub struct Index {
+pub struct InternalHashIndex {
     conn: SqliteConnection,
 
     id_counter: CumulativeCounter,
@@ -136,11 +136,11 @@ pub struct Index {
     flush_periodically: bool,
 }
 
-impl Index {
-    fn new(path: String) -> Result<Index, MsgError> {
+impl InternalHashIndex {
+    fn new(path: String) -> Result<InternalHashIndex, MsgError> {
         let conn = try!(SqliteConnection::establish(&path));
 
-        let mut hi = Index {
+        let mut hi = InternalHashIndex {
             conn: conn,
             id_counter: CumulativeCounter::new(0),
             queue: UniquePriorityQueue::new(),
@@ -159,8 +159,8 @@ impl Index {
         Ok(hi)
     }
 
-    fn new_for_testing() -> Result<Index, MsgError> {
-        Index::new(":memory:".to_string())
+    fn new_for_testing() -> Result<InternalHashIndex, MsgError> {
+        InternalHashIndex::new(":memory:".to_string())
     }
 
     fn index_locate(&mut self, hash_: &Hash) -> Option<QueueEntry> {
@@ -514,18 +514,18 @@ impl Index {
     }
 }
 
-impl IndexProcess {
-    pub fn new(path: String) -> Result<IndexProcess, MsgError> {
-        let index = try!(Index::new(path));
-        Ok(IndexProcess(Arc::new(Mutex::new((index, None)))))
+impl HashIndex {
+    pub fn new(path: String) -> Result<HashIndex, MsgError> {
+        let index = try!(InternalHashIndex::new(path));
+        Ok(HashIndex(Arc::new(Mutex::new((index, None)))))
     }
 
-    pub fn new_for_testing(shutdown: Option<i64>) -> Result<IndexProcess, MsgError> {
-        let index = try!(Index::new_for_testing());
-        Ok(IndexProcess(Arc::new(Mutex::new((index, shutdown)))))
+    pub fn new_for_testing(shutdown: Option<i64>) -> Result<HashIndex, MsgError> {
+        let index = try!(InternalHashIndex::new_for_testing());
+        Ok(HashIndex(Arc::new(Mutex::new((index, shutdown)))))
     }
 
-    fn lock(&self) -> MutexGuard<(Index, Option<i64>)> {
+    fn lock(&self) -> MutexGuard<(InternalHashIndex, Option<i64>)> {
         let mut guard = self.0.lock().expect("index-process has failed");
 
         match &mut guard.1 {

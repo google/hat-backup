@@ -86,7 +86,7 @@ error_type! {
 
 
 pub struct GcBackend {
-    hash_index: hash::IndexProcess,
+    hash_index: hash::HashIndex,
 }
 
 impl gc::GcBackend for GcBackend {
@@ -163,7 +163,7 @@ pub struct Hat<B, G: gc::Gc> {
     repository_root: Option<PathBuf>,
     snapshot_index: snapshot::IndexProcess,
     blob_store: blob::StoreProcess,
-    hash_index: hash::IndexProcess,
+    hash_index: hash::HashIndex,
     blob_backend: B,
     hash_backend: key::HashStoreBackend,
     gc: G,
@@ -207,7 +207,7 @@ fn list_snapshot(backend: &key::HashStoreBackend,
     }
 }
 
-fn get_hash_id(index: &hash::IndexProcess, hash: &hash::Hash) -> Result<i64, HatError> {
+fn get_hash_id(index: &hash::HashIndex, hash: &hash::Hash) -> Result<i64, HatError> {
     match index.get_id(hash) {
         Some(id) => Ok(id),
         None => Err(From::from("Tried to register an unknown hash")),
@@ -224,7 +224,7 @@ impl<B: 'static + blob::StoreBackend + Clone + Send> HatRc<B> {
         let hash_index_path = hash_index_name(repository_root);
         let si_p = try!(Process::new(move || snapshot::Index::new(snapshot_index_path)));
         let bi_p = try!(Process::new(move || blob::Index::new(blob_index_path)));
-        let hi_p = try!(hash::IndexProcess::new(hash_index_path));
+        let hi_p = try!(hash::HashIndex::new(hash_index_path));
 
         let local_blob_index = bi_p.clone();
         let local_backend = backend.clone();
@@ -266,7 +266,7 @@ impl<B: 'static + blob::StoreBackend + Clone + Send> HatRc<B> {
         let bi_p = Process::new_with_shutdown(move || blob::Index::new_for_testing(),
                                               shutdown.next().cloned())
                        .unwrap();
-        let hi_p = hash::IndexProcess::new_for_testing(shutdown.next().cloned()).unwrap();
+        let hi_p = hash::HashIndex::new_for_testing(shutdown.next().cloned()).unwrap();
 
         let local_blob_index = bi_p.clone();
         let local_backend = backend.clone();
@@ -411,7 +411,7 @@ impl<B: 'static + blob::StoreBackend + Clone + Send> HatRc<B> {
                         hash: hash::Hash,
                         dir_ref: blob::ChunkRef)
                         -> Result<(), HatError> {
-        fn recover_entry(hashes: &hash::IndexProcess,
+        fn recover_entry(hashes: &hash::HashIndex,
                          blobs: &blob::StoreProcess,
                          entry: hash::Entry)
                          -> Result<i64, HatError> {
