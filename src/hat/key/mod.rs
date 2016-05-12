@@ -323,11 +323,11 @@ impl<IT: Iterator<Item = Vec<u8>>> MsgHandler<Msg<IT>, Result<Reply, MsgError>> 
             }
 
             Msg::Insert(org_entry, chunk_it_opt) => {
-                let entry = match try!(self.index.lookup(org_entry.parent_id,
-                                                         org_entry.name.clone())) {
+                let entry = match try!(self.index
+                                           .lookup(org_entry.parent_id, org_entry.name.clone())) {
                     Some(ref entry) if org_entry.accessed == entry.accessed &&
-                                                      org_entry.modified == entry.modified &&
-                                                      org_entry.created == entry.created => {
+                                       org_entry.modified == entry.modified &&
+                                       org_entry.created == entry.created => {
                         if chunk_it_opt.is_some() && entry.data_hash.is_some() {
                             let hash = hash::Hash { bytes: entry.data_hash.clone().unwrap() };
                             if self.hash_index.hash_exists(&hash) {
@@ -383,9 +383,7 @@ impl<IT: Iterator<Item = Vec<u8>>> MsgHandler<Msg<IT>, Result<Reply, MsgError>> 
 
                 // Update hash in key index.
                 // It is OK that this has is not yet valid, as we check hashes at snapshot time.
-                try!(self.index.update_data_hash(entry,
-                                                 Some(hash),
-                                                 Some(persistent_ref)));
+                try!(self.index.update_data_hash(entry, Some(hash), Some(persistent_ref)));
 
                 Ok(())
             }

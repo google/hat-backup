@@ -137,12 +137,12 @@ impl Index {
             Some(id_) => {
                 // Replace existing entry.
                 try!(diesel::update(keys.find(id_ as i64))
-                     .set((parent.eq(entry.parent_id.map(|x| x as i64)),
-                           name.eq(&entry.name[..]),
-                           created.eq(entry.created),
-                           modified.eq(entry.modified),
-                           accessed.eq(entry.accessed)))
-                     .execute(&self.conn));
+                         .set((parent.eq(entry.parent_id.map(|x| x as i64)),
+                               name.eq(&entry.name[..]),
+                               created.eq(entry.created),
+                               modified.eq(entry.modified),
+                               accessed.eq(entry.accessed)))
+                         .execute(&self.conn));
                 entry
             }
             None => {
@@ -162,8 +162,8 @@ impl Index {
                     };
 
                     try!(diesel::insert(&new)
-                         .into(keys)
-                         .execute(&self.conn));
+                             .into(keys)
+                             .execute(&self.conn));
                 }
                 let mut entry = entry;
                 entry.id = Some(try!(self.last_insert_rowid()) as u64);
@@ -176,21 +176,24 @@ impl Index {
 
     /// Lookup an entry in the key index by its parent id and name.
     /// Returns either `Entry` with the found entry or `NotFound`.
-    fn lookup(&mut self, parent_: Option<u64>, name_: Vec<u8>) -> Result<Option<Entry>, IndexError> {
+    fn lookup(&mut self,
+              parent_: Option<u64>,
+              name_: Vec<u8>)
+              -> Result<Option<Entry>, IndexError> {
         use super::schema::keys::dsl::*;
 
         let row_opt = match parent_ {
             Some(p) => {
                 try!(keys.filter(parent.eq(p as i64))
-                     .filter(name.eq(&name_[..]))
-                     .first::<schema::Key>(&self.conn)
-                     .optional())
+                         .filter(name.eq(&name_[..]))
+                         .first::<schema::Key>(&self.conn)
+                         .optional())
             }
             None => {
                 try!(keys.filter(parent.is_null())
-                     .filter(name.eq(&name_[..]))
-                     .first::<schema::Key>(&self.conn)
-                     .optional())
+                         .filter(name.eq(&name_[..]))
+                         .first::<schema::Key>(&self.conn)
+                         .optional())
             }
         };
 
@@ -216,15 +219,16 @@ impl Index {
 
     /// Update the `payload` and `persistent_ref` of an entry.
     /// Returns `UpdateOk`.
-    fn update_data_hash(&mut self, entry: Entry, hash_opt: Option<hash::Hash>,
-                        persistent_ref_opt: Option<blob::ChunkRef>) -> Result<(), IndexError> {
+    fn update_data_hash(&mut self,
+                        entry: Entry,
+                        hash_opt: Option<hash::Hash>,
+                        persistent_ref_opt: Option<blob::ChunkRef>)
+                        -> Result<(), IndexError> {
         use super::schema::keys::dsl::*;
 
         let id_ = match entry.id {
             Some(i) => i as i64,
-            None => {
-                return Err(From::from("Tried to update data hash without an id"))
-            }
+            None => return Err(From::from("Tried to update data hash without an id")),
         };
         assert!(hash_opt.is_some() == persistent_ref_opt.is_some());
 
@@ -233,14 +237,14 @@ impl Index {
 
         if entry.modified.is_some() {
             try!(diesel::update(keys.find(id_)
-                                .filter(modified.eq::<Option<i64>>(None)
-                                        .or(modified.le(entry.modified))))
-                 .set((hash.eq(hash_bytes), persistent_ref.eq(persistent_ref_bytes)))
-                 .execute(&self.conn));
+                                    .filter(modified.eq::<Option<i64>>(None)
+                                                    .or(modified.le(entry.modified))))
+                     .set((hash.eq(hash_bytes), persistent_ref.eq(persistent_ref_bytes)))
+                     .execute(&self.conn));
         } else {
             try!(diesel::update(keys.find(id_))
-                 .set((hash.eq(hash_bytes), persistent_ref.eq(persistent_ref_bytes)))
-                 .execute(&self.conn));
+                     .set((hash.eq(hash_bytes), persistent_ref.eq(persistent_ref_bytes)))
+                     .execute(&self.conn));
         }
 
         self.maybe_flush()
@@ -248,41 +252,43 @@ impl Index {
 
     /// List a directory (aka. `level`) in the index.
     /// Returns `ListResult` with all the entries under the given parent.
-    fn list_dir(&mut self, parent_opt: Option<u64>) -> Result<Vec<(Entry, Option<blob::ChunkRef>)>, IndexError> {
+    fn list_dir(&mut self,
+                parent_opt: Option<u64>)
+                -> Result<Vec<(Entry, Option<blob::ChunkRef>)>, IndexError> {
         use super::schema::keys::dsl::*;
 
         let rows = match parent_opt {
             Some(p) => {
                 try!(keys.filter(parent.eq(p as i64))
-                     .load::<schema::Key>(&self.conn))
+                         .load::<schema::Key>(&self.conn))
             }
             None => {
                 try!(keys.filter(parent.is_null())
-                     .load::<schema::Key>(&self.conn))
+                         .load::<schema::Key>(&self.conn))
             }
         };
 
         Ok(rows.into_iter()
-           .map(|mut r| {
-                (Entry {
-                    id: Some(r.id as u64),
-                    parent_id: r.parent.map(|x| x as u64),
-                    name: r.name,
-                    created: r.created,
-                    modified: r.modified,
-                    accessed: r.accessed,
-                    permissions: r.permissions
-                        .map(|x| x as u64),
-                    user_id: r.user_id.map(|x| x as u64),
-                    group_id: r.group_id.map(|x| x as u64),
-                    data_hash: r.hash,
-                    data_length: None,
-                },
-                 r.persistent_ref
-                 .as_mut()
-                 .map(|p| blob::ChunkRef::from_bytes(&mut &p[..]).unwrap()))
-           })
-           .collect())
+               .map(|mut r| {
+                   (Entry {
+                       id: Some(r.id as u64),
+                       parent_id: r.parent.map(|x| x as u64),
+                       name: r.name,
+                       created: r.created,
+                       modified: r.modified,
+                       accessed: r.accessed,
+                       permissions: r.permissions
+                                     .map(|x| x as u64),
+                       user_id: r.user_id.map(|x| x as u64),
+                       group_id: r.group_id.map(|x| x as u64),
+                       data_hash: r.hash,
+                       data_length: None,
+                   },
+                    r.persistent_ref
+                     .as_mut()
+                     .map(|p| blob::ChunkRef::from_bytes(&mut &p[..]).unwrap()))
+               })
+               .collect())
     }
 }
 
@@ -313,16 +319,24 @@ impl IndexProcess {
         self.lock().0.insert(entry)
     }
 
-    pub fn lookup(&self, parent_: Option<u64>, name_: Vec<u8>) -> Result<Option<Entry>, IndexError> {
+    pub fn lookup(&self,
+                  parent_: Option<u64>,
+                  name_: Vec<u8>)
+                  -> Result<Option<Entry>, IndexError> {
         self.lock().0.lookup(parent_, name_)
     }
 
-    pub fn update_data_hash(&self, entry: Entry, hash_opt: Option<hash::Hash>,
-                            persistent_ref_opt: Option<blob::ChunkRef>) -> Result<(), IndexError> {
+    pub fn update_data_hash(&self,
+                            entry: Entry,
+                            hash_opt: Option<hash::Hash>,
+                            persistent_ref_opt: Option<blob::ChunkRef>)
+                            -> Result<(), IndexError> {
         self.lock().0.update_data_hash(entry, hash_opt, persistent_ref_opt)
     }
 
-    pub fn list_dir(&self, parent_opt: Option<u64>) -> Result<Vec<(Entry, Option<blob::ChunkRef>)>, IndexError> {
+    pub fn list_dir(&self,
+                    parent_opt: Option<u64>)
+                    -> Result<Vec<(Entry, Option<blob::ChunkRef>)>, IndexError> {
         self.lock().0.list_dir(parent_opt)
     }
 
