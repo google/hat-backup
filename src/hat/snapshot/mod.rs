@@ -15,7 +15,7 @@
 //! Local state for known snapshots.
 
 use std::borrow::Cow;
-use std::sync::{mpsc, Arc, Mutex, MutexGuard};
+use std::sync::{Arc, Mutex, MutexGuard};
 
 use diesel;
 use diesel::prelude::*;
@@ -32,9 +32,6 @@ mod schema;
 error_type! {
     #[derive(Debug)]
     pub enum MsgError {
-        Recv(mpsc::RecvError) {
-            cause;
-        },
         SqlConnection(diesel::ConnectionError) {
             cause;
         },
@@ -134,12 +131,12 @@ pub struct Status {
 }
 
 
-pub struct Index {
+pub struct InternalSnapshotIndex {
     conn: SqliteConnection,
 }
 
 #[derive(Clone)]
-pub struct IndexProcess(Arc<Mutex<(Index, Option<i64>)>>);
+pub struct SnapshotIndex(Arc<Mutex<(InternalSnapshotIndex, Option<i64>)>>);
 
 
 fn tag_to_work_status(tag: tags::Tag) -> WorkStatus {
@@ -163,11 +160,11 @@ fn work_status_to_tag(status: WorkStatus) -> tags::Tag {
     }
 }
 
-impl Index {
-    pub fn new(path: String) -> Result<Index, MsgError> {
-        let conn = try!(SqliteConnection::establish(&path));
+impl InternalSnapshotIndex {
+    pub fn new(path: &str) -> Result<InternalSnapshotIndex, MsgError> {
+        let conn = try!(SqliteConnection::establish(path));
 
-        let si = Index { conn: conn };
+        let si = InternalSnapshotIndex { conn: conn };
 
         let dir = try!(diesel::migrations::find_migrations_directory());
         try!(diesel::migrations::run_pending_migrations_in_directory(&si.conn,
@@ -176,11 +173,6 @@ impl Index {
 
         try!(si.conn.begin_transaction());
         Ok(si)
-    }
-
-    #[cfg(test)]
-    pub fn new_for_testing() -> Result<Index, MsgError> {
-        Index::new(":memory:".to_string())
     }
 
     fn last_insert_rowid(&self) -> i64 {
@@ -427,10 +419,7 @@ impl Index {
         self.conn.commit_transaction().unwrap();
         self.conn.begin_transaction().unwrap();
     }
-}
 
-
-impl Index {
     fn handle(&mut self, msg: Msg) -> Reply {
         match msg {
             Msg::Reserve(family) => {
@@ -498,17 +487,21 @@ impl Index {
     }
 }
 
-impl IndexProcess {
-    pub fn new(index: Index) -> IndexProcess {
-        IndexProcess::new_with_shutdown(index, None)
+impl SnapshotIndex {
+    pub fn new(path: &str) -> Result<SnapshotIndex, MsgError> {
+        SnapshotIndex::new_with_shutdown(path, None)
     }
 
-    pub fn new_with_shutdown(index: Index, shutdown: Option<i64>) -> IndexProcess {
-        IndexProcess(Arc::new(Mutex::new((index, shutdown))))
+    pub fn new_for_testing(shutdown: Option<i64>) -> Result<SnapshotIndex, MsgError> {
+        SnapshotIndex::new_with_shutdown(":memory:", shutdown)
     }
 
+    pub fn new_with_shutdown(path: &str, shutdown: Option<i64>) -> Result<SnapshotIndex, MsgError> {
+        let index = try!(InternalSnapshotIndex::new(path));
+        Ok(SnapshotIndex(Arc::new(Mutex::new((index, shutdown)))))
+    }
 
-    fn lock(&self) -> MutexGuard<(Index, Option<i64>)> {
+    fn lock(&self) -> MutexGuard<(InternalSnapshotIndex, Option<i64>)> {
         let mut guard = self.0.lock().expect("index-process has failed");
 
         match &mut guard.1 {
