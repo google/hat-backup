@@ -63,39 +63,6 @@ pub struct BlobDesc {
     pub id: i64,
 }
 
-pub enum Msg {
-    /// Reserve an internal `BlobDesc` for a new blob.
-    Reserve,
-
-    /// Report that this blob is in the process of being committed to persistent storage. If a
-    /// blob is in this state when the system starts up, it may or may not exist in the persistent
-    /// storage, but **should not** be referenced elsewhere, and is therefore safe to delete.
-    InAir(BlobDesc),
-
-    /// Report that this blob has been fully committed to persistent storage. We can now use its
-    /// reference internally. Only committed blobs are considered "safe to use".
-    CommitDone(BlobDesc),
-
-    /// Reinstall blob recovered by from external storage.
-    /// Creates a new blob by a known external name.
-    Recover(Vec<u8>),
-
-    Tag(BlobDesc, tags::Tag),
-    TagAll(tags::Tag),
-    ListByTag(tags::Tag),
-    DeleteByTag(tags::Tag),
-
-    Flush,
-}
-
-pub enum Reply {
-    Reserved(BlobDesc),
-    RecoverOk(BlobDesc),
-    Listing(mpsc::Receiver<BlobDesc>),
-    CommitOk,
-    Ok,
-}
-
 pub struct Index {
     conn: SqliteConnection,
     next_id: i64,
@@ -280,47 +247,6 @@ impl Index {
     }
 }
 
-impl Index {
-    fn handle(&mut self, msg: Msg) -> Reply {
-        match msg {
-            Msg::Reserve => {
-                Reply::Reserved(self.reserve())
-            }
-            Msg::InAir(blob) => {
-                self.in_air(&blob);
-                Reply::CommitOk
-            }
-            Msg::CommitDone(blob) => {
-                self.commit_blob(&blob);
-                Reply::CommitOk
-            }
-            Msg::Recover(name) => {
-                let blob = self.recover(name);
-                Reply::RecoverOk(blob)
-            }
-            Msg::Flush => {
-                self.new_transaction();
-                Reply::CommitOk
-            }
-            Msg::Tag(blob, tag) => {
-                self.tag(tag, Some(blob));
-                Reply::Ok
-            }
-            Msg::TagAll(tag) => {
-                self.tag(tag, None);
-                Reply::Ok
-            }
-            Msg::ListByTag(tag) => {
-                Reply::Listing(self.list_by_tag(tag))
-            }
-            Msg::DeleteByTag(tag) => {
-                self.delete_by_tag(tag);
-                Reply::Ok
-            }
-        }
-    }
-}
-
 impl IndexProcess {
     pub fn new(index: Index) -> IndexProcess {
         IndexProcess::new_with_shutdown(index, None)
@@ -344,7 +270,47 @@ impl IndexProcess {
         guard
     }
 
-    pub fn send_reply(&self, msg: Msg) -> Reply  {
-        self.lock().0.handle(msg)
+    /// Reserve an internal `BlobDesc` for a new blob.
+    pub fn reserve(&self) -> BlobDesc {
+        self.lock().0.reserve()
+    }
+
+    /// Report that this blob is in the process of being committed to persistent storage. If a
+    /// blob is in this state when the system starts up, it may or may not exist in the persistent
+    /// storage, but **should not** be referenced elsewhere, and is therefore safe to delete.
+    pub fn in_air(&self, blob: &BlobDesc) {
+        self.lock().0.in_air(&blob)
+    }
+
+    /// Report that this blob has been fully committed to persistent storage. We can now use its
+    /// reference internally. Only committed blobs are considered "safe to use".
+    pub fn commit_done(&self, blob: &BlobDesc) {
+        self.lock().0.commit_blob(blob)
+    }
+
+    /// Reinstall blob recovered by from external storage.
+    /// Creates a new blob by a known external name.
+    pub fn recover(&self, name: Vec<u8>) -> BlobDesc {
+        self.lock().0.recover(name)
+    }
+
+    pub fn tag(&self, blob: BlobDesc, tag: tags::Tag) {
+        self.lock().0.tag(tag, Some(blob))
+    }
+
+    pub fn tag_all(&self, tag: tags::Tag) {
+        self.lock().0.tag(tag, None)
+    }
+
+    pub fn list_by_tag(&self, tag: tags::Tag) -> mpsc::Receiver<BlobDesc> {
+        self.lock().0.list_by_tag(tag)
+    }
+
+    pub fn delete_by_tag(&self, tag: tags::Tag) {
+        self.lock().0.delete_by_tag(tag)
+    }
+
+    pub fn flush(&self) {
+        self.lock().0.new_transaction()
     }
 }
