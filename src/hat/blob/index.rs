@@ -15,7 +15,7 @@
 //! Local state for external blobs and their states.
 
 use std::collections::HashMap;
-use std::sync::{mpsc, Arc, Mutex, MutexGuard};
+use std::sync::{Arc, Mutex, MutexGuard};
 
 use diesel;
 use diesel::prelude::*;
@@ -213,23 +213,17 @@ impl InternalBlobIndex {
             .expect("Error deleting blobs");
     }
 
-    fn list_by_tag(&mut self, tag_: tags::Tag) -> mpsc::Receiver<BlobDesc> {
+    fn list_by_tag(&mut self, tag_: tags::Tag) -> Vec<BlobDesc> {
         use super::schema::blobs::dsl::*;
-        let (sender, receiver) = mpsc::channel();
-
-        let blobs_ = blobs.filter(tag.eq(tag_ as i32))
-                          .load::<schema::Blob>(&self.conn)
-                          .expect("Error listing blobs");
-        for blob_ in blobs_ {
-            if let Err(_) = sender.send(BlobDesc {
+        blobs.filter(tag.eq(tag_ as i32))
+            .load::<schema::Blob>(&self.conn)
+            .expect("Error listing blobs")
+            .into_iter()
+            .map(|blob_| BlobDesc {
                 id: blob_.id,
                 name: blob_.name,
-            }) {
-                break; // channel closed.
-            }
-        }
-
-        receiver
+            })
+            .collect()
     }
 }
 
@@ -293,7 +287,7 @@ impl BlobIndex {
         self.lock().0.tag(tag, None)
     }
 
-    pub fn list_by_tag(&self, tag: tags::Tag) -> mpsc::Receiver<BlobDesc> {
+    pub fn list_by_tag(&self, tag: tags::Tag) -> Vec<BlobDesc> {
         self.lock().0.list_by_tag(tag)
     }
 

@@ -222,7 +222,7 @@ impl<B: 'static + blob::StoreBackend + Clone + Send> HatRc<B> {
         let snapshot_index_path = snapshot_index_name(repository_root);
         let blob_index_path = blob_index_name(repository_root);
         let hash_index_path = hash_index_name(repository_root);
-        let si_p = try!(Process::new(move || snapshot::Index::new(snapshot_index_path)));
+        let si_p = snapshot::IndexProcess::new(try!(snapshot::Index::new(snapshot_index_path)));
         let bi_p = try!(blob::BlobIndex::new(&blob_index_path));
         let hi_p = try!(hash::HashIndex::new(&hash_index_path));
 
@@ -260,9 +260,8 @@ impl<B: 'static + blob::StoreBackend + Clone + Send> HatRc<B> {
         // If provided, we cycle the possible shutdown values to give every process one.
         let mut shutdown = shutdown_after.iter().cycle();
 
-        let si_p = Process::new_with_shutdown(move || snapshot::Index::new_for_testing(),
-                                              shutdown.next().cloned())
-                       .unwrap();
+        let si_p = snapshot::IndexProcess::new_with_shutdown(snapshot::Index::new_for_testing().unwrap(),
+                                                             shutdown.next().cloned());
         let bi_p = blob::BlobIndex::new_for_testing(shutdown.next().cloned()).unwrap();
         let hi_p = hash::HashIndex::new_for_testing(shutdown.next().cloned()).unwrap();
 

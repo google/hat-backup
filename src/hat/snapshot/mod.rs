@@ -15,7 +15,7 @@
 //! Local state for known snapshots.
 
 use std::borrow::Cow;
-use std::sync::mpsc;
+use std::sync::{mpsc, Arc, Mutex, MutexGuard};
 
 use diesel;
 use diesel::prelude::*;
@@ -23,7 +23,6 @@ use diesel::sqlite::SqliteConnection;
 
 use blob;
 use hash;
-use process;
 use tags;
 use util;
 
@@ -63,8 +62,6 @@ pub struct Info {
     pub family_id: i64,
     pub snapshot_id: i64,
 }
-
-pub type IndexProcess = process::Process<Msg, Reply>;
 
 pub enum Msg {
     Reserve(String),
@@ -140,6 +137,10 @@ pub struct Status {
 pub struct Index {
     conn: SqliteConnection,
 }
+
+#[derive(Clone)]
+pub struct IndexProcess(Arc<Mutex<(Index, Option<i64>)>>);
+
 
 fn tag_to_work_status(tag: tags::Tag) -> WorkStatus {
     match tag {
@@ -429,75 +430,99 @@ impl Index {
 }
 
 
-impl process::MsgHandler<Msg, Reply> for Index {
-    type Err = MsgError;
-
-    fn handle(&mut self, msg: Msg, reply: Box<Fn(Reply)>) -> Result<(), MsgError> {
+impl Index {
+    fn handle(&mut self, msg: Msg) -> Reply {
         match msg {
-
             Msg::Reserve(family) => {
-                reply(Reply::Reserved(self.reserve_snapshot(family)));
+                Reply::Reserved(self.reserve_snapshot(family))
             }
 
             Msg::Update(snapshot, hash, tree_ref) => {
                 self.update(snapshot, "anonymous".to_owned(), hash, tree_ref);
-                reply(Reply::UpdateOk);
+                Reply::UpdateOk
             }
 
             Msg::ReadyCommit(snapshot) => {
                 self.set_tag(snapshot, tags::Tag::Complete);
-                reply(Reply::UpdateOk);
+                Reply::UpdateOk
             }
 
             Msg::Commit(snapshot) => {
                 self.set_tag(snapshot, tags::Tag::Done);
-                reply(Reply::CommitOk);
+                Reply::CommitOk
             }
 
             Msg::Latest(name) => {
                 let res_opt = self.latest_snapshot(name);
-                reply(Reply::Snapshot(res_opt));
+                Reply::Snapshot(res_opt)
             }
 
             Msg::Lookup(name, id) => {
                 let res_opt = self.get_snapshot_info(name, id);
-                reply(Reply::Snapshot(res_opt));
+                Reply::Snapshot(res_opt)
             }
 
             Msg::WillDelete(snapshot) => {
                 self.set_tag(snapshot, tags::Tag::WillDelete);
-                reply(Reply::UpdateOk);
+                Reply::UpdateOk
             }
 
             Msg::ReadyDelete(snapshot) => {
                 self.set_tag(snapshot, tags::Tag::ReadyDelete);
-                reply(Reply::UpdateOk);
+                Reply::UpdateOk
             }
 
             Msg::Delete(snapshot) => {
                 self.delete_snapshot(snapshot);
-                reply(Reply::UpdateOk);
+                Reply::UpdateOk
             }
 
             Msg::ListNotDone => {
-                reply(Reply::NotDone(self.list_all(Some(tags::Tag::Done) /* not_tag */)));
+                Reply::NotDone(self.list_all(Some(tags::Tag::Done) /* not_tag */))
             }
 
             Msg::ListAll => {
-                reply(Reply::All(self.list_all(None)));
+                Reply::All(self.list_all(None))
             }
 
             Msg::Recover(snapshot_id, family_name, msg, hash, tree_ref, work_opt) => {
                 self.recover(snapshot_id, family_name, msg, hash, tree_ref, work_opt);
-                reply(Reply::RecoverOk);
+                Reply::RecoverOk
             }
 
             Msg::Flush => {
                 self.flush();
-                reply(Reply::FlushOk);
+                Reply::FlushOk
             }
-        };
+        }
+    }
+}
 
-        Ok(())
+impl IndexProcess {
+    pub fn new(index: Index) -> IndexProcess {
+        IndexProcess::new_with_shutdown(index, None)
+    }
+
+    pub fn new_with_shutdown(index: Index, shutdown: Option<i64>) -> IndexProcess {
+        IndexProcess(Arc::new(Mutex::new((index, shutdown))))
+    }
+
+
+    fn lock(&self) -> MutexGuard<(Index, Option<i64>)> {
+        let mut guard = self.0.lock().expect("index-process has failed");
+
+        match &mut guard.1 {
+            &mut None => (),
+            &mut Some(0) => panic!("No more requests for this index process"),
+            &mut Some(ref mut n) => {
+                *n -= 1;
+            }
+        }
+
+        guard
+    }
+
+    pub fn send_reply(&self, msg: Msg) -> Reply {
+        self.lock().0.handle(msg)
     }
 }
