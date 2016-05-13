@@ -16,7 +16,7 @@
 
 use std::borrow::Cow;
 use std::collections::HashMap;
-use std::sync::mpsc;
+use std::sync::{mpsc, Arc, Mutex, MutexGuard};
 
 use diesel;
 use diesel::prelude::*;
@@ -24,7 +24,6 @@ use diesel::sqlite::SqliteConnection;
 
 use sodiumoxide::randombytes::randombytes;
 
-use process::{Process, MsgHandler};
 use tags;
 use util;
 
@@ -57,8 +56,6 @@ error_type! {
     }
 }
 
-
-pub type IndexProcess = Process<Msg, Reply>;
 
 #[derive(Clone, Debug)]
 pub struct BlobDesc {
@@ -104,6 +101,9 @@ pub struct Index {
     next_id: i64,
     reserved: HashMap<Vec<u8>, BlobDesc>,
 }
+
+#[derive(Clone)]
+pub struct IndexProcess(Arc<Mutex<(Index, Option<i64>)>>);
 
 
 impl Index {
@@ -280,10 +280,9 @@ impl Index {
     }
 }
 
-impl MsgHandler<Msg, Reply> for Index {
-    type Err = IndexError;
-
-    fn handle(&mut self, msg: Msg, reply: Box<Fn(Reply)>) -> Result<(), IndexError> {
+impl Index {
+    fn handle<F: Fn(Reply)>
+        (&mut self, msg: Msg, reply: F) -> Result<(), IndexError> {
         match msg {
             Msg::Reserve => {
                 reply(Reply::Reserved(self.reserve()));
@@ -322,5 +321,47 @@ impl MsgHandler<Msg, Reply> for Index {
         }
 
         Ok(())
+    }
+}
+
+impl IndexProcess {
+    pub fn new(index: Index) -> IndexProcess {
+        IndexProcess::new_with_shutdown(index, None)
+    }
+
+    pub fn new_with_shutdown(index: Index, shutdown: Option<i64>) -> IndexProcess {
+        IndexProcess(Arc::new(Mutex::new((index, shutdown))))
+    }
+
+
+    fn lock(&self) -> MutexGuard<(Index, Option<i64>)> {
+        let mut guard = self.0.lock().expect("index-process has failed");
+
+        match &mut guard.1 {
+            &mut None => (),
+            &mut Some(0) => panic!("No more requests for this index process"),
+            &mut Some(ref mut n) => {
+                *n -= 1;
+            }
+        }
+
+        guard
+    }
+
+    pub fn send_reply(&self, msg: Msg) -> Reply  {
+        let mut guard = self.lock();
+        let res = Mutex::new(None);
+        let can_continue = guard.0.handle(msg, |r| {
+            let mut guard = res.lock().unwrap();
+            assert!((*guard).is_none());
+            *guard = Some(r)
+        }).is_ok();
+
+        if !can_continue {
+            guard.1 = Some(0);
+        }
+
+        let res: Option<Reply> = res.into_inner().expect("Channel should not be poisened");
+        res.expect("Callback must be called exactly once")
     }
 }

@@ -37,7 +37,7 @@ use util::FnBox;
 mod index;
 mod schema;
 
-pub use self::index::{Index, IndexError, BlobDesc};
+pub use self::index::{Index, IndexProcess, IndexError, BlobDesc};
 
 
 error_type! {
@@ -289,7 +289,7 @@ impl<B: StoreBackend> Store<B> {
 
     #[cfg(test)]
     pub fn new_for_testing(backend: B, max_blob_size: usize) -> Result<Store<B>, MsgError> {
-        let bi_p = try!(Process::new(move || index::Index::new_for_testing()));
+        let bi_p = index::IndexProcess::new(try!(index::Index::new_for_testing()));
         let mut bs = Store {
             backend: backend,
             blob_index: bi_p,
