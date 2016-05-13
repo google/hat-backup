@@ -37,7 +37,7 @@ use util::FnBox;
 mod index;
 mod schema;
 
-pub use self::index::{Index, IndexProcess, IndexError, BlobDesc};
+pub use self::index::{BlobIndex, IndexError, BlobDesc};
 
 
 error_type! {
@@ -252,7 +252,7 @@ pub enum Reply {
 pub struct Store<B> {
     backend: B,
 
-    blob_index: index::IndexProcess,
+    blob_index: index::BlobIndex,
     blob_desc: BlobDesc,
 
     buffer_data: Vec<(ChunkRef, Vec<u8>, Box<FnBox<ChunkRef, ()>>)>,
@@ -271,7 +271,7 @@ fn empty_blob_desc() -> BlobDesc {
 
 
 impl<B: StoreBackend> Store<B> {
-    pub fn new(index: index::IndexProcess,
+    pub fn new(index: index::BlobIndex,
                backend: B,
                max_blob_size: usize)
                -> Result<Store<B>, MsgError> {
@@ -289,7 +289,7 @@ impl<B: StoreBackend> Store<B> {
 
     #[cfg(test)]
     pub fn new_for_testing(backend: B, max_blob_size: usize) -> Result<Store<B>, MsgError> {
-        let bi_p = index::IndexProcess::new(try!(index::Index::new_for_testing()));
+        let bi_p = try!(index::BlobIndex::new_for_testing(None));
         let mut bs = Store {
             backend: backend,
             blob_index: bi_p,
@@ -424,7 +424,7 @@ impl<B: StoreBackend> MsgHandler<Msg, Reply> for Store<B> {
                 reply(Reply::RecoverOk);
             }
             Msg::Tag(chunk, tag) => {
-                self.blob_index.tag(BlobDesc {
+                self.blob_index.tag(&BlobDesc {
                     id: 0,
                     name: chunk.blob_id,
                 }, tag);

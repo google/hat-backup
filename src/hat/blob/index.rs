@@ -63,21 +63,21 @@ pub struct BlobDesc {
     pub id: i64,
 }
 
-pub struct Index {
+pub struct InternalBlobIndex {
     conn: SqliteConnection,
     next_id: i64,
     reserved: HashMap<Vec<u8>, BlobDesc>,
 }
 
 #[derive(Clone)]
-pub struct IndexProcess(Arc<Mutex<(Index, Option<i64>)>>);
+pub struct BlobIndex(Arc<Mutex<(InternalBlobIndex, Option<i64>)>>);
 
 
-impl Index {
-    pub fn new(path: String) -> Result<Index, IndexError> {
-        let conn = SqliteConnection::establish(&path).expect("Could not open SQLite database");
+impl InternalBlobIndex {
+    pub fn new(path: &str) -> Result<InternalBlobIndex, IndexError> {
+        let conn = SqliteConnection::establish(path).expect("Could not open SQLite database");
 
-        let mut bi = Index {
+        let mut bi = InternalBlobIndex {
             conn: conn,
             next_id: -1,
             reserved: HashMap::new(),
@@ -90,11 +90,6 @@ impl Index {
         try!(bi.conn.begin_transaction());
         bi.refresh_next_id();
         Ok(bi)
-    }
-
-    #[cfg(test)]
-    pub fn new_for_testing() -> Result<Index, IndexError> {
-        Index::new(":memory:".to_string())
     }
 
     fn new_blob_desc(&mut self) -> BlobDesc {
@@ -195,7 +190,7 @@ impl Index {
              .expect("Error reading blob")
     }
 
-    fn tag(&mut self, tag_: tags::Tag, target: Option<BlobDesc>) {
+    fn tag(&mut self, tag_: tags::Tag, target: Option<&BlobDesc>) {
         use super::schema::blobs::dsl::*;
         match target {
             None => {
@@ -247,16 +242,21 @@ impl Index {
     }
 }
 
-impl IndexProcess {
-    pub fn new(index: Index) -> IndexProcess {
-        IndexProcess::new_with_shutdown(index, None)
+impl BlobIndex {
+    pub fn new(path: &str) -> Result<BlobIndex, IndexError> {
+        BlobIndex::new_with_shutdown(path, None)
     }
 
-    pub fn new_with_shutdown(index: Index, shutdown: Option<i64>) -> IndexProcess {
-        IndexProcess(Arc::new(Mutex::new((index, shutdown))))
+    pub fn new_for_testing(shutdown: Option<i64>) -> Result<BlobIndex, IndexError> {
+        BlobIndex::new_with_shutdown(":memory:", shutdown)
     }
 
-    fn lock(&self) -> MutexGuard<(Index, Option<i64>)> {
+    pub fn new_with_shutdown(path: &str, shutdown: Option<i64>) -> Result<BlobIndex, IndexError> {
+        let index = try!(InternalBlobIndex::new(path));
+        Ok(BlobIndex(Arc::new(Mutex::new((index, shutdown)))))
+    }
+
+    fn lock(&self) -> MutexGuard<(InternalBlobIndex, Option<i64>)> {
         let mut guard = self.0.lock().expect("index-process has failed");
 
         match &mut guard.1 {
@@ -294,7 +294,7 @@ impl IndexProcess {
         self.lock().0.recover(name)
     }
 
-    pub fn tag(&self, blob: BlobDesc, tag: tags::Tag) {
+    pub fn tag(&self, blob: &BlobDesc, tag: tags::Tag) {
         self.lock().0.tag(tag, Some(blob))
     }
 
