@@ -216,14 +216,16 @@ impl InternalBlobIndex {
     fn list_by_tag(&mut self, tag_: tags::Tag) -> Vec<BlobDesc> {
         use super::schema::blobs::dsl::*;
         blobs.filter(tag.eq(tag_ as i32))
-            .load::<schema::Blob>(&self.conn)
-            .expect("Error listing blobs")
-            .into_iter()
-            .map(|blob_| BlobDesc {
-                id: blob_.id,
-                name: blob_.name,
-            })
-            .collect()
+             .load::<schema::Blob>(&self.conn)
+             .expect("Error listing blobs")
+             .into_iter()
+             .map(|blob_| {
+                 BlobDesc {
+                     id: blob_.id,
+                     name: blob_.name,
+                 }
+             })
+             .collect()
     }
 }
 

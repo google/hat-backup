@@ -425,9 +425,10 @@ impl<B: StoreBackend> MsgHandler<Msg, Reply> for Store<B> {
             }
             Msg::Tag(chunk, tag) => {
                 self.blob_index.tag(&BlobDesc {
-                    id: 0,
-                    name: chunk.blob_id,
-                }, tag);
+                                        id: 0,
+                                        name: chunk.blob_id,
+                                    },
+                                    tag);
                 reply(Reply::Ok);
             }
             Msg::TagAll(tag) => {
