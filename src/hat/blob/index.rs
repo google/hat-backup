@@ -14,7 +14,6 @@
 
 //! Local state for external blobs and their states.
 
-use std::borrow::Cow;
 use std::collections::HashMap;
 use std::sync::{mpsc, Arc, Mutex, MutexGuard};
 
@@ -33,9 +32,6 @@ use super::schema;
 error_type! {
     #[derive(Debug)]
     pub enum IndexError {
-        Recv(mpsc::RecvError) {
-            cause;
-        },
         SqlConnection(diesel::ConnectionError) {
             cause;
         },
@@ -48,11 +44,6 @@ error_type! {
         SqlExecute(diesel::result::Error) {
             cause;
         },
-        Message(Cow<'static, str>) {
-            desc (e) &**e;
-            from (s: &'static str) s.into();
-            from (s: String) s.into();
-        }
     }
 }
 
@@ -75,7 +66,7 @@ pub struct BlobIndex(Arc<Mutex<(InternalBlobIndex, Option<i64>)>>);
 
 impl InternalBlobIndex {
     pub fn new(path: &str) -> Result<InternalBlobIndex, IndexError> {
-        let conn = SqliteConnection::establish(path).expect("Could not open SQLite database");
+        let conn = try!(SqliteConnection::establish(path));
 
         let mut bi = InternalBlobIndex {
             conn: conn,
