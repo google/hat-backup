@@ -74,21 +74,19 @@ pub struct Entry {
 }
 
 #[derive(Clone)]
-pub struct IndexProcess(Arc<Mutex<(Index, Option<i64>)>>);
+pub struct KeyIndex(Arc<Mutex<(InternalKeyIndex, Option<i64>)>>);
 
-pub struct Index {
-    path: String,
+pub struct InternalKeyIndex {
     conn: SqliteConnection,
     flush_timer: PeriodicTimer,
 }
 
 
-impl Index {
-    pub fn new(path: String) -> Result<Index, IndexError> {
-        let conn = try!(SqliteConnection::establish(&path));
+impl InternalKeyIndex {
+    fn new(path: &str) -> Result<InternalKeyIndex, IndexError> {
+        let conn = try!(SqliteConnection::establish(path));
 
-        let ki = Index {
-            path: path,
+        let ki = InternalKeyIndex {
             conn: conn,
             flush_timer: PeriodicTimer::new(Duration::seconds(5)),
         };
@@ -102,18 +100,13 @@ impl Index {
         Ok(ki)
     }
 
-    #[cfg(test)]
-    pub fn new_for_testing() -> Result<Index, IndexError> {
-        Index::new(":memory:".to_string())
-    }
-
     fn last_insert_rowid(&self) -> Result<i64, IndexError> {
         let id = try!(diesel::select(diesel::expression::sql("last_insert_rowid()"))
                           .first::<i64>(&self.conn));
         Ok(id)
     }
 
-    pub fn maybe_flush(&mut self) -> Result<(), IndexError> {
+    fn maybe_flush(&mut self) -> Result<(), IndexError> {
         if self.flush_timer.did_fire() {
             try!(self.flush());
         }
@@ -121,7 +114,7 @@ impl Index {
         Ok(())
     }
 
-    pub fn flush(&mut self) -> Result<(), IndexError> {
+    fn flush(&mut self) -> Result<(), IndexError> {
         try!(self.conn.commit_transaction());
         try!(self.conn.begin_transaction());
 
@@ -292,16 +285,21 @@ impl Index {
     }
 }
 
-impl IndexProcess {
-    pub fn new(index: Index) -> IndexProcess {
-        IndexProcess::new_with_shutdown(index, None)
+impl KeyIndex {
+    pub fn new(path: &str) -> Result<KeyIndex, IndexError> {
+        KeyIndex::new_with_shutdown(path, None)
     }
 
-    pub fn new_with_shutdown(index: Index, shutdown: Option<i64>) -> IndexProcess {
-        IndexProcess(Arc::new(Mutex::new((index, shutdown))))
+    pub fn new_for_testing(shutdown: Option<i64>) -> Result<KeyIndex, IndexError> {
+        KeyIndex::new_with_shutdown(":memory:", shutdown)
     }
 
-    fn lock(&self) -> MutexGuard<(Index, Option<i64>)> {
+    pub fn new_with_shutdown(path: &str, shutdown: Option<i64>) -> Result<KeyIndex, IndexError> {
+        let index = try!(InternalKeyIndex::new(path));
+        Ok(KeyIndex(Arc::new(Mutex::new((index, shutdown)))))
+    }
+
+    fn lock(&self) -> MutexGuard<(InternalKeyIndex, Option<i64>)> {
         let mut guard = self.0.lock().expect("index-process has failed");
 
         match &mut guard.1 {

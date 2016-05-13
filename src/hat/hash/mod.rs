@@ -137,8 +137,8 @@ pub struct InternalHashIndex {
 }
 
 impl InternalHashIndex {
-    fn new(path: String) -> Result<InternalHashIndex, MsgError> {
-        let conn = try!(SqliteConnection::establish(&path));
+    fn new(path: &str) -> Result<InternalHashIndex, MsgError> {
+        let conn = try!(SqliteConnection::establish(path));
 
         let mut hi = InternalHashIndex {
             conn: conn,
@@ -157,10 +157,6 @@ impl InternalHashIndex {
 
         hi.refresh_id_counter();
         Ok(hi)
-    }
-
-    fn new_for_testing() -> Result<InternalHashIndex, MsgError> {
-        InternalHashIndex::new(":memory:".to_string())
     }
 
     fn index_locate(&mut self, hash_: &Hash) -> Option<QueueEntry> {
@@ -515,13 +511,16 @@ impl InternalHashIndex {
 }
 
 impl HashIndex {
-    pub fn new(path: String) -> Result<HashIndex, MsgError> {
-        let index = try!(InternalHashIndex::new(path));
-        Ok(HashIndex(Arc::new(Mutex::new((index, None)))))
+    pub fn new(path: &str) -> Result<HashIndex, MsgError> {
+        HashIndex::new_with_shutdown(path, None)
     }
 
     pub fn new_for_testing(shutdown: Option<i64>) -> Result<HashIndex, MsgError> {
-        let index = try!(InternalHashIndex::new_for_testing());
+        HashIndex::new_with_shutdown(":memory:", shutdown)
+    }
+
+    pub fn new_with_shutdown(path: &str, shutdown: Option<i64>) -> Result<HashIndex, MsgError> {
+        let index = try!(InternalHashIndex::new(path));
         Ok(HashIndex(Arc::new(Mutex::new((index, shutdown)))))
     }
 

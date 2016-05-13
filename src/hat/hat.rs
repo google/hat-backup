@@ -224,7 +224,7 @@ impl<B: 'static + blob::StoreBackend + Clone + Send> HatRc<B> {
         let hash_index_path = hash_index_name(repository_root);
         let si_p = try!(Process::new(move || snapshot::Index::new(snapshot_index_path)));
         let bi_p = try!(Process::new(move || blob::Index::new(blob_index_path)));
-        let hi_p = try!(hash::HashIndex::new(hash_index_path));
+        let hi_p = try!(hash::HashIndex::new(&hash_index_path));
 
         let local_blob_index = bi_p.clone();
         let local_backend = backend.clone();
@@ -321,8 +321,7 @@ impl<B: 'static + blob::StoreBackend + Clone + Send> HatRc<B> {
             None => ":memory:".to_string(),
         };
 
-        let ki_p = key::IndexProcess::new_with_shutdown(try!(key::Index::new(key_index_path)),
-                                                        shutdown_after);
+        let ki_p = try!(key::KeyIndex::new_with_shutdown(&key_index_path, shutdown_after));
 
         let local_ks = key::Store::new(ki_p.clone(),
                                        self.hash_index.clone(),
