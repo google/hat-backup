@@ -17,6 +17,7 @@
 use std::collections::BTreeMap;
 
 use std::fs;
+use std::mem;
 use std::io::{Read, Write};
 use std::path::PathBuf;
 
@@ -303,11 +304,7 @@ impl<B: StoreBackend> Store<B> {
     }
 
     fn reserve_new_blob(&mut self) -> BlobDesc {
-        let old_blob_desc = self.blob_desc.clone();
-
-        self.blob_desc = self.blob_index.reserve();
-
-        old_blob_desc
+        mem::replace(&mut self.blob_desc, self.blob_index.reserve())
     }
 
     fn backend_store(&mut self, name: &[u8], blob: &[u8]) {
@@ -436,7 +433,7 @@ impl<B: StoreBackend> MsgHandler<Msg, Reply> for Store<B> {
                 reply(Reply::Ok);
             }
             Msg::DeleteByTag(tag) => {
-                let blobs = self.blob_index.list_by_tag(tag.clone());
+                let blobs = self.blob_index.list_by_tag(tag);
                 for b in blobs.iter() {
                     match self.backend.delete(&b.name) {
                         Ok(_) => (),

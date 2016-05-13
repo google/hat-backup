@@ -513,7 +513,7 @@ mod tests {
         }
     }
 
-    fn insert_and_update_fs(fs: &mut FileSystem, ks_p: StoreProcess<EntryStub>) {
+    fn insert_and_update_fs(fs: &mut FileSystem, ks_p: &StoreProcess<EntryStub>) {
         let local_file = fs.file.clone();
         let id = match ks_p.send_reply(Msg::Insert(fs.file.key_entry.clone(),
                                                    if fs.file.data.is_some() {
@@ -530,11 +530,11 @@ mod tests {
 
         for f in fs.filelist.iter_mut() {
             f.file.key_entry.parent_id = Some(id);
-            insert_and_update_fs(f, ks_p.clone());
+            insert_and_update_fs(f, ks_p);
         }
     }
 
-    fn verify_filesystem(fs: &FileSystem, ks_p: StoreProcess<EntryStub>) -> usize {
+    fn verify_filesystem(fs: &FileSystem, ks_p: &StoreProcess<EntryStub>) -> usize {
         let listing = match ks_p.send_reply(Msg::ListDir(fs.file.key_entry.id)).unwrap() {
             Reply::ListResult(ls) => ls,
             _ => panic!("Unexpected result from key store."),
@@ -581,7 +581,7 @@ mod tests {
 
         let mut count = fs.filelist.len();
         for dir in fs.filelist.iter() {
-            count += verify_filesystem(dir, ks_p.clone());
+            count += verify_filesystem(dir, ks_p);
         }
 
         count
@@ -594,7 +594,7 @@ mod tests {
             let ks_p = Process::new(move || Store::new_for_testing(backend)).unwrap();
 
             let mut fs = rng_filesystem(size as usize);
-            insert_and_update_fs(&mut fs, ks_p.clone());
+            insert_and_update_fs(&mut fs, &ks_p);
             let fs = fs;
 
             match ks_p.send_reply(Msg::Flush).unwrap() {
@@ -602,7 +602,7 @@ mod tests {
                 _ => panic!("Unexpected result from key store."),
             }
 
-            verify_filesystem(&fs, ks_p.clone());
+            verify_filesystem(&fs, &ks_p);
             true
         }
         quickcheck::quickcheck(prop as fn(u8) -> bool);

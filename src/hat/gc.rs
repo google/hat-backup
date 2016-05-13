@@ -63,15 +63,15 @@ pub trait GcBackend {
 pub fn mark_tree<B>(backend: &mut B, root: Id, tag: tags::Tag) -> Result<(), B::Err>
     where B: GcBackend
 {
-    try!(backend.set_tag(root, tag.clone()));
+    try!(backend.set_tag(root, tag));
     for r in try!(backend.reverse_refs(root)) {
         if let Some(current) = try!(backend.get_tag(r)) {
             if current == tag {
                 continue;
             }
         }
-        try!(backend.set_tag(r, tag.clone()));
-        try!(mark_tree(backend, r, tag.clone()));
+        try!(backend.set_tag(r, tag));
+        try!(mark_tree(backend, r, tag));
     }
 
     Ok(())
@@ -247,7 +247,7 @@ impl GcBackend for SafeMemoryBackend {
         let vals: Vec<Vec<Id>> = backend.snapshot_refs.values().cloned().collect();
         for refs in vals {
             for r in refs {
-                backend.tags.insert(r, tag.clone());
+                backend.tags.insert(r, tag);
             }
         }
         Ok(())
