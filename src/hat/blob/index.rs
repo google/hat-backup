@@ -281,46 +281,43 @@ impl Index {
 }
 
 impl Index {
-    fn handle<F: Fn(Reply)>
-        (&mut self, msg: Msg, reply: F) -> Result<(), IndexError> {
+    fn handle(&mut self, msg: Msg) -> Reply {
         match msg {
             Msg::Reserve => {
-                reply(Reply::Reserved(self.reserve()));
+                Reply::Reserved(self.reserve())
             }
             Msg::InAir(blob) => {
                 self.in_air(&blob);
-                reply(Reply::CommitOk);
+                Reply::CommitOk
             }
             Msg::CommitDone(blob) => {
                 self.commit_blob(&blob);
-                reply(Reply::CommitOk);
+                Reply::CommitOk
             }
             Msg::Recover(name) => {
                 let blob = self.recover(name);
-                reply(Reply::RecoverOk(blob));
+                Reply::RecoverOk(blob)
             }
             Msg::Flush => {
                 self.new_transaction();
-                reply(Reply::CommitOk);
+                Reply::CommitOk
             }
             Msg::Tag(blob, tag) => {
                 self.tag(tag, Some(blob));
-                reply(Reply::Ok);
+                Reply::Ok
             }
             Msg::TagAll(tag) => {
                 self.tag(tag, None);
-                reply(Reply::Ok);
+                Reply::Ok
             }
             Msg::ListByTag(tag) => {
-                reply(Reply::Listing(self.list_by_tag(tag)));
+                Reply::Listing(self.list_by_tag(tag))
             }
             Msg::DeleteByTag(tag) => {
                 self.delete_by_tag(tag);
-                reply(Reply::Ok);
+                Reply::Ok
             }
         }
-
-        Ok(())
     }
 }
 
@@ -332,7 +329,6 @@ impl IndexProcess {
     pub fn new_with_shutdown(index: Index, shutdown: Option<i64>) -> IndexProcess {
         IndexProcess(Arc::new(Mutex::new((index, shutdown))))
     }
-
 
     fn lock(&self) -> MutexGuard<(Index, Option<i64>)> {
         let mut guard = self.0.lock().expect("index-process has failed");
@@ -349,19 +345,6 @@ impl IndexProcess {
     }
 
     pub fn send_reply(&self, msg: Msg) -> Reply  {
-        let mut guard = self.lock();
-        let res = Mutex::new(None);
-        let can_continue = guard.0.handle(msg, |r| {
-            let mut guard = res.lock().unwrap();
-            assert!((*guard).is_none());
-            *guard = Some(r)
-        }).is_ok();
-
-        if !can_continue {
-            guard.1 = Some(0);
-        }
-
-        let res: Option<Reply> = res.into_inner().expect("Channel should not be poisened");
-        res.expect("Callback must be called exactly once")
+        self.lock().0.handle(msg)
     }
 }
