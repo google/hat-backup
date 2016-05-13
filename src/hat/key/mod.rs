@@ -219,7 +219,7 @@ impl HashTreeBackend for HashStoreBackend {
     }
 
     fn insert_chunk(&mut self,
-                    hash: hash::Hash,
+                    hash: &hash::Hash,
                     level: i64,
                     payload: Option<Vec<u8>>,
                     chunk: Vec<u8>)
@@ -236,15 +236,16 @@ impl HashTreeBackend for HashStoreBackend {
         match self.hash_index.reserve(hash_entry.clone()) {
             hash::ReserveResult::HashKnown => {
                 // Someone came before us: piggyback on their result.
-                return self.fetch_persistent_ref(&hash)
+                return self.fetch_persistent_ref(hash)
                            .expect("Could not find persistent_ref for known chunk.");
             }
             hash::ReserveResult::ReserveOk => {
                 // We came first: this data-chunk is ours to process.
                 let local_hash_index = self.hash_index.clone();
 
+                let local_hash = hash.clone();
                 let callback = Box::new(move |chunk_ref: blob::ChunkRef| {
-                    local_hash_index.commit(&hash, chunk_ref);
+                    local_hash_index.commit(&local_hash, chunk_ref);
                 });
                 let kind = if level == 0 {
                     blob::Kind::TreeLeaf

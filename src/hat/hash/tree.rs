@@ -77,7 +77,7 @@ pub trait HashTreeBackend {
     fn fetch_chunk(&mut self, &Hash, Option<ChunkRef>) -> Option<Vec<u8>>;
     fn fetch_payload(&mut self, &Hash) -> Option<Vec<u8>>;
     fn fetch_persistent_ref(&mut self, &Hash) -> Option<ChunkRef>;
-    fn insert_chunk(&mut self, Hash, i64, Option<Vec<u8>>, Vec<u8>) -> ChunkRef;
+    fn insert_chunk(&mut self, &Hash, i64, Option<Vec<u8>>, Vec<u8>) -> ChunkRef;
 }
 
 
@@ -194,7 +194,7 @@ impl<B: HashTreeBackend + Clone> SimpleHashTreeWriter<B> {
 
     fn append_at(&mut self, level: usize, data: Vec<u8>, metadata: Option<Vec<u8>>) {
         let hash = Hash::new(&data[..]);
-        let persistent_ref = self.backend.insert_chunk(hash.clone(), level as i64, metadata, data);
+        let persistent_ref = self.backend.insert_chunk(&hash, level as i64, metadata, data);
         let hash_ref = HashRef {
             hash: hash.bytes,
             persistent_ref: persistent_ref,
@@ -513,7 +513,7 @@ mod tests {
         }
 
         fn insert_chunk(&mut self,
-                        hash: Hash,
+                        hash: &Hash,
                         level: i64,
                         payload: Option<Vec<u8>>,
                         chunk: Vec<u8>)
@@ -527,7 +527,7 @@ mod tests {
             let len = hash.bytes.len();
 
             ChunkRef {
-                blob_id: hash.bytes,
+                blob_id: hash.bytes.clone(),
                 offset: 0,
                 length: len,
                 kind: if level == 0 {
