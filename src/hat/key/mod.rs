@@ -158,9 +158,9 @@ impl HashStoreBackend {
         }
     }
 
-    fn fetch_chunk_from_hash(&mut self, hash: hash::Hash) -> Option<Vec<u8>> {
+    fn fetch_chunk_from_hash(&mut self, hash: &hash::Hash) -> Option<Vec<u8>> {
         assert!(!hash.bytes.is_empty());
-        match self.hash_index.fetch_persistent_ref(&hash) {
+        match self.hash_index.fetch_persistent_ref(hash) {
             Ok(Some(chunk_ref)) => self.fetch_chunk_from_persistent_ref(chunk_ref),
             _ => None,  // TODO: Do we need to distinguish `missing` from `unknown ref`?
         }
@@ -184,7 +184,7 @@ impl HashTreeBackend for HashStoreBackend {
         let data_opt = if let Some(r) = persistent_ref {
             self.fetch_chunk_from_persistent_ref(r)
         } else {
-            self.fetch_chunk_from_hash(hash.clone())
+            self.fetch_chunk_from_hash(&hash)
         };
 
         data_opt.and_then(|data| {

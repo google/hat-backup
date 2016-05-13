@@ -58,7 +58,7 @@ error_type! {
         KeyDb(key::IndexError) {
             cause;
         },
-        Snapshots(snapshot::MsgError) {
+        Snapshots(snapshot::IndexError) {
             cause;
         },
         Blobs(blob::MsgError) {
@@ -383,7 +383,7 @@ impl<B: 'static + blob::StoreBackend + Clone + Send> HatRc<B> {
                           .unwrap(),
                          s.get_msg().unwrap(),
                          s.get_hash().unwrap(),
-                         tree_ref,
+                         &tree_ref,
                          Some(snapshot::WorkStatus::RecoverInProgress));
         }
         self.flush_snapshot_index();

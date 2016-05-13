@@ -14,7 +14,6 @@
 
 //! Local state for known snapshots.
 
-use std::borrow::Cow;
 use std::sync::{Arc, Mutex, MutexGuard};
 
 use diesel;
@@ -31,7 +30,7 @@ mod schema;
 
 error_type! {
     #[derive(Debug)]
-    pub enum MsgError {
+    pub enum IndexError {
         SqlConnection(diesel::ConnectionError) {
             cause;
         },
@@ -44,11 +43,6 @@ error_type! {
         SqlExecute(diesel::result::Error) {
             cause;
         },
-        Message(Cow<'static, str>) {
-            desc (e) &**e;
-            from (s: &'static str) s.into();
-            from (s: String) s.into();
-        }
     }
 }
 
@@ -110,7 +104,7 @@ fn work_status_to_tag(status: WorkStatus) -> tags::Tag {
 }
 
 impl InternalSnapshotIndex {
-    pub fn new(path: &str) -> Result<InternalSnapshotIndex, MsgError> {
+    pub fn new(path: &str) -> Result<InternalSnapshotIndex, IndexError> {
         let conn = try!(SqliteConnection::establish(path));
 
         let si = InternalSnapshotIndex { conn: conn };
@@ -332,12 +326,12 @@ impl InternalSnapshotIndex {
                family: &str,
                msg_: &str,
                hash_: &[u8],
-               tree_ref_: blob::ChunkRef,
+               tree_ref_: &blob::ChunkRef,
                work_opt_: Option<WorkStatus>) {
         let family_id_ = self.get_or_create_family_id(&family);
         let insert = match self.get_snapshot_info(family, snapshot_id_) {
             Some((_info, h, r)) => {
-                if h.bytes != hash_ || r.is_none() || r.unwrap() != tree_ref_ {
+                if h.bytes != hash_ || r.is_none() || &r.unwrap() != tree_ref_ {
                     panic!("Snapshot already exists, but with different hash");
                 }
                 false
@@ -371,15 +365,15 @@ impl InternalSnapshotIndex {
 }
 
 impl SnapshotIndex {
-    pub fn new(path: &str) -> Result<SnapshotIndex, MsgError> {
+    pub fn new(path: &str) -> Result<SnapshotIndex, IndexError> {
         SnapshotIndex::new_with_shutdown(path, None)
     }
 
-    pub fn new_for_testing(shutdown: Option<i64>) -> Result<SnapshotIndex, MsgError> {
+    pub fn new_for_testing(shutdown: Option<i64>) -> Result<SnapshotIndex, IndexError> {
         SnapshotIndex::new_with_shutdown(":memory:", shutdown)
     }
 
-    pub fn new_with_shutdown(path: &str, shutdown: Option<i64>) -> Result<SnapshotIndex, MsgError> {
+    pub fn new_with_shutdown(path: &str, shutdown: Option<i64>) -> Result<SnapshotIndex, IndexError> {
         let index = try!(InternalSnapshotIndex::new(path));
         Ok(SnapshotIndex(Arc::new(Mutex::new((index, shutdown)))))
     }
@@ -466,7 +460,7 @@ impl SnapshotIndex {
                    family_name: &str,
                    msg: &str,
                    hash: &[u8],
-                   tree_ref: blob::ChunkRef,
+                   tree_ref: &blob::ChunkRef,
                    work_opt: Option<WorkStatus>) {
         self.lock().0.recover(snapshot_id, family_name, msg, hash, tree_ref, work_opt)
     }
