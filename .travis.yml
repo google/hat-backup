@@ -3,7 +3,11 @@ sudo: false
 rust:
   - stable
   - beta
+  - nightly-2016-05-09
   - nightly
+matrix:
+  allow_failures:
+    - rust: nightly
 addons:
   apt:
     sources:
@@ -21,7 +25,6 @@ cache:
   directories:
   - $HOME/libsodium
   - $HOME/capnp
-
 
 install:
   - ./travis-install-libsodium.sh
