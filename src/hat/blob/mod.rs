@@ -256,8 +256,8 @@ pub struct Store<B> {
     blob_index: index::BlobIndex,
     blob_desc: BlobDesc,
 
-    buffer_data: Vec<(ChunkRef, Vec<u8>, Box<FnBox<ChunkRef, ()>>)>,
-    buffer_data_len: usize,
+    blob_data: Vec<u8>,
+    blob_refs: Vec<(ChunkRef, Box<FnBox<ChunkRef, ()>>)>,
 
     max_blob_size: usize,
 }
@@ -280,8 +280,8 @@ impl<B: StoreBackend> Store<B> {
             backend: backend,
             blob_index: index,
             blob_desc: empty_blob_desc(),
-            buffer_data: Vec::new(),
-            buffer_data_len: 0,
+            blob_refs: Vec::new(),
+            blob_data: Vec::with_capacity(max_blob_size),
             max_blob_size: max_blob_size,
         };
         bs.reserve_new_blob();
@@ -295,8 +295,8 @@ impl<B: StoreBackend> Store<B> {
             backend: backend,
             blob_index: bi_p,
             blob_desc: empty_blob_desc(),
-            buffer_data: Vec::new(),
-            buffer_data_len: 0,
+            blob_refs: Vec::new(),
+            blob_data: Vec::with_capacity(max_blob_size),
             max_blob_size: max_blob_size,
         };
         bs.reserve_new_blob();
@@ -322,38 +322,27 @@ impl<B: StoreBackend> Store<B> {
     }
 
     fn flush(&mut self) {
-        if self.buffer_data_len == 0 {
+        if self.blob_data.len() == 0 {
             return;
         }
 
         // Replace blob id
         let old_blob_desc = self.reserve_new_blob();
-        self.buffer_data_len = 0;
 
-        // Prepare blob
-        let mut ready_callback = Vec::new();
-        let mut blob = Vec::new();
-
-        self.buffer_data.reverse();
-        while let Some((chunk_ref, chunk, cb)) = self.buffer_data.pop() {
-            ready_callback.push((chunk_ref, cb));
-            for c in chunk {
-                blob.push(c);
-            }
-        }
+        let old_blob = mem::replace(&mut self.blob_data, Vec::with_capacity(self.max_blob_size));
 
         self.blob_index.in_air(&old_blob_desc);
-        self.backend_store(&old_blob_desc.name[..], &blob[..]);
+        self.backend_store(&old_blob_desc.name[..], &old_blob[..]);
         self.blob_index.commit_done(&old_blob_desc);
 
         // Go through callbacks
-        for (blobid, callback) in ready_callback.into_iter() {
+        while let Some((blobid, callback)) = self.blob_refs.pop() {
             callback.call(blobid);
         }
     }
 
     fn maybe_flush(&mut self) {
-        if self.buffer_data_len >= self.max_blob_size {
+        if self.blob_data.len() >= self.max_blob_size {
             self.flush();
         }
     }
@@ -364,7 +353,7 @@ impl<B: StoreBackend> MsgHandler<Msg, Reply> for Store<B> {
 
     fn handle(&mut self, msg: Msg, reply: Box<Fn(Reply)>) -> Result<(), MsgError> {
         match msg {
-            Msg::Store(chunk, kind, callback) => {
+            Msg::Store(mut chunk, kind, callback) => {
                 if chunk.is_empty() {
                     let id = ChunkRef {
                         blob_id: vec![0],
@@ -380,14 +369,14 @@ impl<B: StoreBackend> MsgHandler<Msg, Reply> for Store<B> {
 
                 let id = ChunkRef {
                     blob_id: self.blob_desc.name.clone(),
-                    offset: self.buffer_data_len,
+                    offset: self.blob_data.len(),
                     length: chunk.len(),
                     kind: kind,
                 };
 
-                let new_size = self.buffer_data_len + chunk.len();
-                self.buffer_data_len = new_size;
-                self.buffer_data.push((id.clone(), chunk, callback));
+                self.blob_refs.push((id.clone(), callback));
+                self.blob_data.append(&mut chunk);
+                drop(chunk);  // now empty.
 
                 // To avoid unnecessary blocking, we reply with the ID *before* possibly flushing.
                 reply(Reply::StoreOk(id));
@@ -532,10 +521,8 @@ pub mod tests {
             let mut backend = MemoryBackend::new();
 
             let local_backend = backend.clone();
-            let bs_p: StoreProcess = Process::new(move || {
-                                         Store::new_for_testing(local_backend, 1024)
-                                     })
-                                         .unwrap();
+            let bs_p: StoreProcess =
+                Process::new(move || Store::new_for_testing(local_backend, 1024)).unwrap();
 
             let mut ids = Vec::new();
             for chunk in chunks.iter() {
@@ -580,10 +567,8 @@ pub mod tests {
             let mut backend = MemoryBackend::new();
 
             let local_backend = backend.clone();
-            let bs_p: StoreProcess = Process::new(move || {
-                                         Store::new_for_testing(local_backend, 1024)
-                                     })
-                                         .unwrap();
+            let bs_p: StoreProcess =
+                Process::new(move || Store::new_for_testing(local_backend, 1024)).unwrap();
 
             let mut ids = Vec::new();
             for chunk in chunks.iter() {
