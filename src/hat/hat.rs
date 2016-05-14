@@ -987,9 +987,10 @@ impl Clone for FileEntry {
     }
 }
 
-enum FileIterator {
+pub enum FileIterator {
     File(fs::File),
     Buf(Vec<u8>, usize),
+    Iter(Box<Iterator<Item=Vec<u8>> + Send>),
 }
 
 impl FileIterator {
@@ -1001,6 +1002,9 @@ impl FileIterator {
     }
     fn from_bytes(contents: Vec<u8>) -> FileIterator {
         FileIterator::Buf(contents, 0)
+    }
+    fn from_iter<I>(i: Box<I>) -> FileIterator where I:Iterator<Item=Vec<u8>>+Send+'static {
+        FileIterator::Iter(i)
     }
 }
 
@@ -1026,6 +1030,9 @@ impl Iterator for FileIterator {
                     *pos += chunk_size;
                     Some(next.to_owned())
                 }
+            }
+            &mut FileIterator::Iter(ref mut iter) => {
+                iter.next()
             }
         }
     }
@@ -1139,12 +1146,12 @@ impl Family {
     pub fn snapshot_direct(&self,
                            file: key::Entry,
                            is_directory: bool,
-                           contents: Option<Vec<u8>>)
+                           contents: Option<FileIterator>)
                            -> Result<(), HatError> {
         let f = if is_directory {
             None
         } else {
-            Some(Box::new(move |()| contents.map(FileIterator::from_bytes)) as Box<FnBox<(), _>>)
+            Some(Box::new(move |()| contents) as Box<FnBox<(), _>>)
         };
         match try!(self.key_store_process.send_reply(key::Msg::Insert(file, f))) {
             key::Reply::Id(..) => return Ok(()),
@@ -1439,7 +1446,8 @@ mod tests {
 
     fn snapshot_files(family: &Family, files: Vec<(&str, Vec<u8>)>) {
         for (name, contents) in files {
-            family.snapshot_direct(entry(name.bytes().collect()), false, Some(contents)).unwrap();
+            family.snapshot_direct(entry(name.bytes().collect()), false,
+                                   Some(FileIterator::from_bytes(contents))).unwrap();
         }
     }
 
@@ -1631,6 +1639,7 @@ mod bench {
     use super::*;
     use super::tests::*;
 
+    use std::sync::{Arc, Mutex};
     use test::Bencher;
 
     use blob;
@@ -1646,9 +1655,14 @@ mod bench {
         (hat, fam)
     }
 
-    struct UniqueBlockFiller(u32);
+    #[derive(Clone)]
+    struct UniqueBlockFiller(Arc<Mutex<u32>>);
 
     impl UniqueBlockFiller {
+        fn new(id: u32) -> UniqueBlockFiller {
+            UniqueBlockFiller(Arc::new(Mutex::new(id)))
+        }
+
         /// Fill the buffer with 1KB unique blocks of data.
         /// Each block is unique for the given id and among the other blocks.
         fn fill_bytes(&mut self, buf: &mut [u8]) {
@@ -1657,28 +1671,71 @@ mod bench {
                     // Last block is too short to make unique.
                     break;
                 }
-                block[0] = self.0 as u8;
-                block[1] = (self.0 >> 8) as u8;
-                block[2] = (self.0 >> 16) as u8;
-                block[3] = (self.0 >> 24) as u8;
-                self.0 += 1;
+                let mut n = self.0.lock().unwrap();
+
+                block[0] = *n as u8;
+                block[1] = (*n >> 8) as u8;
+                block[2] = (*n >> 16) as u8;
+                block[3] = (*n >> 24) as u8;
+                *n += 1;
             }
         }
     }
 
-    fn insert_files(bench: &mut Bencher, filesize: usize, unique: bool) {
+    #[derive(Clone)]
+    struct UniqueBlockIter{
+        filler: UniqueBlockFiller,
+        block: Vec<u8>,
+        filesize: i32,
+    }
+
+    impl UniqueBlockIter {
+        fn new(filler: UniqueBlockFiller, blocksize: usize, filesize: i32) -> UniqueBlockIter {
+            UniqueBlockIter{filler: filler,
+                            block: vec![0; blocksize],
+                            filesize: filesize}
+        }
+        fn reset_filesize(&mut self, filesize: i32) {
+            self.filesize = filesize;
+        }
+        fn reset_filler(&mut self, id: u32) {
+            self.filler = UniqueBlockFiller::new(id);
+        }
+    }
+
+    impl Iterator for UniqueBlockIter {
+        type Item = Vec<u8>;
+
+        fn next(&mut self) -> Option<Vec<u8>> {
+            if self.filesize <= 0 {
+                None
+            } else {
+                self.filesize -= self.block.len() as i32;
+                self.filler.fill_bytes(&mut self.block);
+                Some(self.block.clone())
+            }
+        }
+    }
+
+    fn insert_files(bench: &mut Bencher, filesize: i32, unique: bool) {
         let (_, family) = setup_family();
 
+        let mut filler = UniqueBlockFiller::new(0);
         let mut name = vec![0; 8];
-        let mut data = vec![0; filesize];
 
-        let mut filler = UniqueBlockFiller(0);
+        let mut file_iter = UniqueBlockIter::new(filler.clone(), 128*1024, filesize);
+
         bench.iter(|| {
             filler.fill_bytes(&mut name);
-            if unique {
-                filler.fill_bytes(&mut data);
+
+            file_iter.reset_filesize(filesize);
+            if !unique {
+                // Reset data filler.
+                file_iter.reset_filler(0);
             }
-            family.snapshot_direct(entry(name.clone()), false, Some(data.clone())).unwrap();
+
+            let file = FileIterator::from_iter(Box::new(file_iter.clone()));
+            family.snapshot_direct(entry(name.clone()), false, Some(file)).unwrap();
         });
 
         bench.bytes = filesize as u64;
