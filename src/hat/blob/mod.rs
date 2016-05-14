@@ -329,8 +329,7 @@ impl<B: StoreBackend> Store<B> {
         // Replace blob id
         let old_blob_desc = self.reserve_new_blob();
 
-        let old_blob = mem::replace(&mut self.blob_data,
-                                    Vec::with_capacity(self.max_blob_size));
+        let old_blob = mem::replace(&mut self.blob_data, Vec::with_capacity(self.max_blob_size));
 
         self.blob_index.in_air(&old_blob_desc);
         self.backend_store(&old_blob_desc.name[..], &old_blob[..]);
@@ -340,7 +339,7 @@ impl<B: StoreBackend> Store<B> {
         while let Some((blobid, callback)) = self.blob_refs.pop() {
             callback.call(blobid);
         }
-     }
+    }
 
     fn maybe_flush(&mut self) {
         if self.blob_data.len() >= self.max_blob_size {
@@ -522,10 +521,8 @@ pub mod tests {
             let mut backend = MemoryBackend::new();
 
             let local_backend = backend.clone();
-            let bs_p: StoreProcess = Process::new(move || {
-                                         Store::new_for_testing(local_backend, 1024)
-                                     })
-                                         .unwrap();
+            let bs_p: StoreProcess =
+                Process::new(move || Store::new_for_testing(local_backend, 1024)).unwrap();
 
             let mut ids = Vec::new();
             for chunk in chunks.iter() {
@@ -570,10 +567,8 @@ pub mod tests {
             let mut backend = MemoryBackend::new();
 
             let local_backend = backend.clone();
-            let bs_p: StoreProcess = Process::new(move || {
-                                         Store::new_for_testing(local_backend, 1024)
-                                     })
-                                         .unwrap();
+            let bs_p: StoreProcess =
+                Process::new(move || Store::new_for_testing(local_backend, 1024)).unwrap();
 
             let mut ids = Vec::new();
             for chunk in chunks.iter() {
