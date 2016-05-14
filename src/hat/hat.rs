@@ -135,14 +135,14 @@ impl gc::GcBackend for GcBackend {
         }
 
         Ok(hash::tree::decode_metadata_refs(&entry.payload.unwrap())
-               .into_iter()
-               .map(|bytes| {
-                   match self.hash_index.get_id(&hash::Hash { bytes: bytes }) {
-                       Some(id) => id,
-                       None => panic!("HashNotKnown in hash index."),
-                   }
-               })
-               .collect())
+            .into_iter()
+            .map(|bytes| {
+                match self.hash_index.get_id(&hash::Hash { bytes: bytes }) {
+                    Some(id) => id,
+                    None => panic!("HashNotKnown in hash index."),
+                }
+            })
+            .collect())
     }
 
     fn list_ids_by_tag(&self, tag: tags::Tag) -> Result<mpsc::Receiver<i64>, Self::Err> {
@@ -264,7 +264,7 @@ impl<B: 'static + blob::StoreBackend + Clone + Send> HatRc<B> {
                                                                    max_blob_size)
                                               },
                                               shutdown.next().cloned())
-                       .unwrap();
+            .unwrap();
 
         let gc_backend = GcBackend { hash_index: hi_p.clone() };
         let gc = gc::Gc::new(gc_backend);
@@ -356,7 +356,7 @@ impl<B: 'static + blob::StoreBackend + Clone + Send> HatRc<B> {
 
     pub fn recover(&mut self) -> Result<(), HatError> {
         let root = match self.blob_store
-                             .send_reply(blob::Msg::RetrieveNamed("root".to_owned())) {
+            .send_reply(blob::Msg::RetrieveNamed("root".to_owned())) {
             blob::Reply::RetrieveOk(r) => r,
             _ => return Err(From::from("Could not read root file")),
         };
@@ -368,11 +368,11 @@ impl<B: 'static + blob::StoreBackend + Clone + Send> HatRc<B> {
 
         for s in snapshot_list.get_snapshots().unwrap().iter() {
             let tree_ref = blob::ChunkRef::from_bytes(&mut s.get_tree_reference().unwrap())
-                               .unwrap();
+                .unwrap();
             self.snapshot_index
                 .recover(s.get_id(),
                          s.get_family_name()
-                          .unwrap(),
+                             .unwrap(),
                          s.get_msg().unwrap(),
                          s.get_hash().unwrap(),
                          &tree_ref,
@@ -414,7 +414,7 @@ impl<B: 'static + blob::StoreBackend + Clone + Send> HatRc<B> {
         }
 
         let family = self.open_family(family_name.clone())
-                         .expect(&format!("Could not open family '{}'", family_name));
+            .expect(&format!("Could not open family '{}'", family_name));
         let (register_sender, register_receiver) = mpsc::channel();
         let (recover_sender, recover_receiver) = mpsc::channel();
         let (final_payload, final_level) = self.recover_dir_ref(&family,
@@ -480,9 +480,8 @@ impl<B: 'static + blob::StoreBackend + Clone + Send> HatRc<B> {
                 }
             }
         }
-        for (file, hash, pref) in family.fetch_dir_data(dir_hash,
-                                                        dir_ref.clone(),
-                                                        self.hash_backend.clone()) {
+        for (file, hash, pref) in
+            family.fetch_dir_data(dir_hash, dir_ref.clone(), self.hash_backend.clone()) {
             let (payload, level) = match file.data_hash {
                 Some(..) => {
                     // Entry is a data leaf. Read the hash tree.
@@ -522,8 +521,9 @@ impl<B: 'static + blob::StoreBackend + Clone + Send> HatRc<B> {
                     let done_hash_opt = match &snapshot.hash {
                         &None => None,
                         &Some(ref h) => {
-                            let status_res = self.hash_index.get_id(h)
-                                                 .map(|id| self.gc.status(id));
+                            let status_res = self.hash_index
+                                .get_id(h)
+                                .map(|id| self.gc.status(id));
                             let status_opt = match status_res {
                                 None => None,
                                 Some(res) => try!(res),
@@ -588,8 +588,9 @@ impl<B: 'static + blob::StoreBackend + Clone + Send> HatRc<B> {
                 }
                 snapshot::WorkStatus::DeleteInProgress => {
                     let hash = snapshot.hash.expect("Snapshot has no hash");
-                    let hash_id = self.hash_index.get_id(&hash)
-                                      .expect("Snapshot hash not recognized");
+                    let hash_id = self.hash_index
+                        .get_id(&hash)
+                        .expect("Snapshot hash not recognized");
                     let status = try!(self.gc.status(hash_id));
                     match status {
                         None |
@@ -609,8 +610,9 @@ impl<B: 'static + blob::StoreBackend + Clone + Send> HatRc<B> {
                 }
                 snapshot::WorkStatus::DeleteComplete => {
                     let hash = snapshot.hash.expect("Snapshot has no hash");
-                    let hash_id = self.hash_index.get_id(&hash)
-                                      .expect("Snapshot hash not recognized");
+                    let hash_id = self.hash_index
+                        .get_id(&hash)
+                        .expect("Snapshot hash not recognized");
                     try!(self.deregister_finalize_by_name(snapshot.family_name,
                                                           snapshot.info,
                                                           hash_id))
@@ -749,7 +751,7 @@ impl<B: 'static + blob::StoreBackend + Clone + Send> HatRc<B> {
         };
 
         let family = self.open_family(family_name.clone())
-                         .expect(&format!("Could not open family '{}'", family_name));
+            .expect(&format!("Could not open family '{}'", family_name));
 
         let mut output_dir = output_dir;
         self.checkout_dir_ref(&family, &mut output_dir, &dir_hash, dir_ref);
@@ -761,9 +763,8 @@ impl<B: 'static + blob::StoreBackend + Clone + Send> HatRc<B> {
                         dir_hash: &hash::Hash,
                         dir_ref: blob::ChunkRef) {
         fs::create_dir_all(&output).unwrap();
-        for (entry, hash, pref) in family.fetch_dir_data(dir_hash,
-                                                         dir_ref,
-                                                         self.hash_backend.clone()) {
+        for (entry, hash, pref) in
+            family.fetch_dir_data(dir_hash, dir_ref, self.hash_backend.clone()) {
             assert!(entry.name.len() > 0);
 
             output.push(str::from_utf8(&entry.name[..]).unwrap());
@@ -796,7 +797,7 @@ impl<B: 'static + blob::StoreBackend + Clone + Send> HatRc<B> {
 
     pub fn deregister(&mut self, family: &Family, snapshot_id: i64) -> Result<(), HatError> {
         let (info, dir_hash, dir_ref) = match self.snapshot_index
-                                                  .lookup(&family.name, snapshot_id) {
+            .lookup(&family.name, snapshot_id) {
             Some((i, h, Some(r))) => (i, h, r),
             _ => {
                 return Err(From::from(format!("No complete snapshot found for family {} with \
@@ -837,8 +838,9 @@ impl<B: 'static + blob::StoreBackend + Clone + Send> HatRc<B> {
             id_receiver
         };
 
-        let final_ref = self.hash_index.get_id(&dir_hash)
-                            .expect("Snapshot hash does not exist");
+        let final_ref = self.hash_index
+            .get_id(&dir_hash)
+            .expect("Snapshot hash does not exist");
         try!(self.gc.deregister(info.clone(), final_ref, listing));
         try!(family.flush());
 
@@ -990,7 +992,7 @@ impl Clone for FileEntry {
 pub enum FileIterator {
     File(fs::File),
     Buf(Vec<u8>, usize),
-    Iter(Box<Iterator<Item=Vec<u8>> + Send>),
+    Iter(Box<Iterator<Item = Vec<u8>> + Send>),
 }
 
 impl FileIterator {
@@ -1003,7 +1005,9 @@ impl FileIterator {
     fn from_bytes(contents: Vec<u8>) -> FileIterator {
         FileIterator::Buf(contents, 0)
     }
-    fn from_iter<I>(i: Box<I>) -> FileIterator where I:Iterator<Item=Vec<u8>>+Send+'static {
+    fn from_iter<I>(i: Box<I>) -> FileIterator
+        where I: Iterator<Item = Vec<u8>> + Send + 'static
+    {
         FileIterator::Iter(i)
     }
 }
@@ -1031,9 +1035,7 @@ impl Iterator for FileIterator {
                     Some(next.to_owned())
                 }
             }
-            &mut FileIterator::Iter(ref mut iter) => {
-                iter.next()
-            }
+            &mut FileIterator::Iter(ref mut iter) => iter.next(),
         }
     }
 }
@@ -1088,27 +1090,32 @@ impl listdir::PathHandler<Option<u64>> for InsertPathHandler {
                 let local_root = path;
                 let local_file_entry = file_entry.clone();
 
-                match self.key_store.lock().unwrap().send_reply(
-                    key::Msg::Insert(
-                      file_entry.key_entry,
-                      if is_directory { None }
-                      else { Some(Box::new(move|()| {
-                              match local_file_entry.file_iterator() {
-                                  Err(e) => {
-                                      println!("Skipping '{}': {}",
-                                               local_root.display(), e.to_string());
-                                      None
-                                  },
-                                  Ok(it) => { Some(it) }
+                match self.key_store
+                    .lock()
+                    .unwrap()
+                    .send_reply(key::Msg::Insert(file_entry.key_entry,
+                                                 if is_directory {
+                                                     None
+                                                 } else {
+                                                     Some(Box::new(move |()| {
+                            match local_file_entry.file_iterator() {
+                                Err(e) => {
+                                    println!("Skipping '{}': {}",
+                                             local_root.display(),
+                                             e.to_string());
+                                    None
                                 }
-                            }))
-                            }))
-        {
-          Ok(key::Reply::Id(id)) => {
-            if is_directory { return Some(Some(id)) }
-          },
-          _ => panic!("Unexpected reply from key store."),
-        }
+                                Ok(it) => Some(it),
+                            }
+                        }))
+                                                 })) {
+                    Ok(key::Reply::Id(id)) => {
+                        if is_directory {
+                            return Some(Some(id));
+                        }
+                    }
+                    _ => panic!("Unexpected reply from key store."),
+                }
             }
         }
 
@@ -1222,7 +1229,7 @@ impl Family {
          -> Vec<(key::Entry, hash::Hash, blob::ChunkRef)> {
         let mut out = Vec::new();
         let it = hash::tree::SimpleHashTreeReader::open(backend, dir_hash, Some(dir_ref))
-                     .expect("unable to open dir");
+            .expect("unable to open dir");
 
         for chunk in it {
             if chunk.is_empty() {
@@ -1317,8 +1324,8 @@ impl Family {
                 let mut files = files_root.init_files(files_at_a_time as u32);
 
                 for (idx, (entry, data_ref, _data_res_open)) in it.by_ref()
-                                                                  .take(files_at_a_time)
-                                                                  .enumerate() {
+                    .take(files_at_a_time)
+                    .enumerate() {
                     assert!(idx < files_at_a_time);
 
                     current_msg_is_empty = false;
@@ -1351,11 +1358,11 @@ impl Family {
                         // Populate data hash and ChunkRef.
                         hash_ref_root.set_hash(&hash_bytes);
                         data_ref.expect("has data")
-                                .populate_msg(hash_ref_root.borrow().init_chunk_ref());
+                            .populate_msg(hash_ref_root.borrow().init_chunk_ref());
                         // Set as file content.
                         try!(file_msg.borrow()
-                                     .init_content()
-                                     .set_data(hash_ref_root.as_reader()));
+                            .init_content()
+                            .set_data(hash_ref_root.as_reader()));
                         hash_ch.send(hash::Hash { bytes: hash_bytes }).unwrap();
                     } else {
                         drop(data_ref);  // May not use data reference without hash.
@@ -1375,8 +1382,8 @@ impl Family {
                         dir_ref.populate_msg(hash_ref_root.borrow().init_chunk_ref());
                         // Set as directory content.
                         try!(file_msg.borrow()
-                                     .init_content()
-                                     .set_directory(hash_ref_root.as_reader()));
+                            .init_content()
+                            .set_directory(hash_ref_root.as_reader()));
 
                         hash_ch.send(dir_hash).unwrap();
                     }
@@ -1446,8 +1453,10 @@ mod tests {
 
     fn snapshot_files(family: &Family, files: Vec<(&str, Vec<u8>)>) {
         for (name, contents) in files {
-            family.snapshot_direct(entry(name.bytes().collect()), false,
-                                   Some(FileIterator::from_bytes(contents))).unwrap();
+            family.snapshot_direct(entry(name.bytes().collect()),
+                                 false,
+                                 Some(FileIterator::from_bytes(contents)))
+                .unwrap();
         }
     }
 
@@ -1496,7 +1505,7 @@ mod tests {
 
         for i in 0..3000 {
             fam.snapshot_direct(entry(format!("name-{}", i).bytes().collect()), true, None)
-               .unwrap();
+                .unwrap();
         }
 
         fam.flush().unwrap();
@@ -1683,7 +1692,7 @@ mod bench {
     }
 
     #[derive(Clone)]
-    struct UniqueBlockIter{
+    struct UniqueBlockIter {
         filler: UniqueBlockFiller,
         block: Vec<u8>,
         filesize: i32,
@@ -1691,9 +1700,11 @@ mod bench {
 
     impl UniqueBlockIter {
         fn new(filler: UniqueBlockFiller, blocksize: usize, filesize: i32) -> UniqueBlockIter {
-            UniqueBlockIter{filler: filler,
-                            block: vec![0; blocksize],
-                            filesize: filesize}
+            UniqueBlockIter {
+                filler: filler,
+                block: vec![0; blocksize],
+                filesize: filesize,
+            }
         }
         fn reset_filesize(&mut self, filesize: i32) {
             self.filesize = filesize;
@@ -1723,7 +1734,7 @@ mod bench {
         let mut filler = UniqueBlockFiller::new(0);
         let mut name = vec![0; 8];
 
-        let mut file_iter = UniqueBlockIter::new(filler.clone(), 128*1024, filesize);
+        let mut file_iter = UniqueBlockIter::new(filler.clone(), 128 * 1024, filesize);
 
         bench.iter(|| {
             filler.fill_bytes(&mut name);
