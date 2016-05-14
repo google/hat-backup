@@ -86,35 +86,36 @@ error_type! {
 
 
 pub struct GcBackend {
-    hash_index: hash::IndexProcess,
+    hash_index: hash::HashIndex,
 }
 
 impl gc::GcBackend for GcBackend {
     type Err = HatError;
 
-    fn get_data(&self, hash_id: i64, family_id: i64) -> Result<hash::GcData, Self::Err> {
+    fn get_data(&self, hash_id: gc::Id, family_id: gc::Id) -> Result<hash::GcData, Self::Err> {
         Ok(self.hash_index.read_gc_data(hash_id, family_id))
     }
-    fn update_data(&mut self,
-                   hash_id: i64,
-                   family_id: i64,
-                   f: gc::UpdateFn)
-                   -> Result<hash::GcData, Self::Err> {
+    fn update_data<F: hash::UpdateFn>(&mut self,
+                                      hash_id: gc::Id,
+                                      family_id: gc::Id,
+                                      f: F)
+                                      -> Result<hash::GcData, Self::Err> {
         Ok(self.hash_index.update_gc_data(hash_id, family_id, f))
     }
-    fn update_all_data_by_family(&mut self,
-                                 family_id: i64,
-                                 fns: mpsc::Receiver<gc::UpdateFn>)
-                                 -> Result<(), Self::Err> {
+    fn update_all_data_by_family<F: hash::UpdateFn, I: Iterator<Item = F>>
+        (&mut self,
+         family_id: gc::Id,
+         fns: I)
+         -> Result<(), Self::Err> {
         self.hash_index.update_family_gc_data(family_id, fns);
         Ok(())
     }
 
-    fn get_tag(&self, hash_id: i64) -> Result<Option<tags::Tag>, Self::Err> {
+    fn get_tag(&self, hash_id: gc::Id) -> Result<Option<tags::Tag>, Self::Err> {
         Ok(self.hash_index.get_tag(hash_id))
     }
 
-    fn set_tag(&mut self, hash_id: i64, tag: tags::Tag) -> Result<(), Self::Err> {
+    fn set_tag(&mut self, hash_id: gc::Id, tag: tags::Tag) -> Result<(), Self::Err> {
         self.hash_index.set_tag(hash_id, tag);
         Ok(())
     }
@@ -124,7 +125,7 @@ impl gc::GcBackend for GcBackend {
         Ok(())
     }
 
-    fn reverse_refs(&self, hash_id: i64) -> Result<Vec<i64>, Self::Err> {
+    fn reverse_refs(&self, hash_id: gc::Id) -> Result<Vec<gc::Id>, Self::Err> {
         let entry = match self.hash_index.get_hash(hash_id) {
             Some(entry) => entry,
             None => panic!("HashNotKnown in hash index."),
@@ -162,7 +163,7 @@ pub struct Hat<B, G: gc::Gc> {
     repository_root: Option<PathBuf>,
     snapshot_index: snapshot::IndexProcess,
     blob_store: blob::StoreProcess,
-    hash_index: hash::IndexProcess,
+    hash_index: hash::HashIndex,
     blob_backend: B,
     hash_backend: key::HashStoreBackend,
     gc: G,
@@ -206,7 +207,7 @@ fn list_snapshot(backend: &key::HashStoreBackend,
     }
 }
 
-fn get_hash_id(index: &hash::IndexProcess, hash: &hash::Hash) -> Result<i64, HatError> {
+fn get_hash_id(index: &hash::HashIndex, hash: &hash::Hash) -> Result<i64, HatError> {
     match index.get_id(hash) {
         Some(id) => Ok(id),
         None => Err(From::from("Tried to register an unknown hash")),
@@ -223,7 +224,7 @@ impl<B: 'static + blob::StoreBackend + Clone + Send> HatRc<B> {
         let hash_index_path = hash_index_name(repository_root);
         let si_p = try!(Process::new(move || snapshot::Index::new(snapshot_index_path)));
         let bi_p = try!(Process::new(move || blob::Index::new(blob_index_path)));
-        let hi_p = hash::IndexProcess::new(try!(hash::Index::new(hash_index_path)));
+        let hi_p = try!(hash::HashIndex::new(hash_index_path));
 
         let local_blob_index = bi_p.clone();
         let local_backend = backend.clone();
@@ -265,8 +266,7 @@ impl<B: 'static + blob::StoreBackend + Clone + Send> HatRc<B> {
         let bi_p = Process::new_with_shutdown(move || blob::Index::new_for_testing(),
                                               shutdown.next().cloned())
                        .unwrap();
-        let hi_p = hash::IndexProcess::new_with_shutdown(hash::Index::new_for_testing().unwrap(),
-                                                         shutdown.next().cloned());
+        let hi_p = hash::HashIndex::new_for_testing(shutdown.next().cloned()).unwrap();
 
         let local_blob_index = bi_p.clone();
         let local_backend = backend.clone();
@@ -411,7 +411,7 @@ impl<B: 'static + blob::StoreBackend + Clone + Send> HatRc<B> {
                         hash: hash::Hash,
                         dir_ref: blob::ChunkRef)
                         -> Result<(), HatError> {
-        fn recover_entry(hashes: &hash::IndexProcess,
+        fn recover_entry(hashes: &hash::HashIndex,
                          blobs: &blob::StoreProcess,
                          entry: hash::Entry)
                          -> Result<i64, HatError> {
@@ -959,7 +959,7 @@ impl<B: 'static + blob::StoreBackend + Clone + Send> HatRc<B> {
             _ => panic!("Unexpected reply from blob store."),
         }
         let mut live_blobs = 0;
-        for entry in entries.iter() {
+        for entry in entries.into_iter() {
             if let Some(pref) = entry.persistent_ref {
                 live_blobs += 1;
                 match self.blob_store.send_reply(blob::Msg::Tag(pref, tags::Tag::Reserved)) {

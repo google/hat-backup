@@ -49,14 +49,12 @@ impl<B: gc::GcBackend> gc::Gc for GcRc<B> {
 
         // Increment counters.
         for r in refs.iter() {
-            try!(self.backend.update_data(r,
-                                          DATA_FAMILY,
-                                          Box::new(move |GcData { num, bytes }| {
-                                              Some(GcData {
-                                                  num: num + 1,
-                                                  bytes: bytes,
-                                              })
-                                          })));
+            try!(self.backend.update_data(r, DATA_FAMILY, move |GcData { num, bytes }| {
+                Some(GcData {
+                    num: num + 1,
+                    bytes: bytes,
+                })
+            }));
         }
 
         Ok(())
@@ -67,14 +65,12 @@ impl<B: gc::GcBackend> gc::Gc for GcRc<B> {
                       ref_final: gc::Id)
                       -> Result<(), Self::Err> {
         // Increment final counter and tag it as ready.
-        try!(self.backend.update_data(ref_final,
-                                      DATA_FAMILY,
-                                      Box::new(move |GcData { num, bytes }| {
-                                          Some(GcData {
-                                              num: num + 1,
-                                              bytes: bytes,
-                                          })
-                                      })));
+        try!(self.backend.update_data(ref_final, DATA_FAMILY, move |GcData { num, bytes }| {
+            Some(GcData {
+                num: num + 1,
+                bytes: bytes,
+            })
+        }));
         try!(self.backend.set_tag(ref_final, tags::Tag::InProgress));
 
         Ok(())
@@ -102,14 +98,12 @@ impl<B: gc::GcBackend> gc::Gc for GcRc<B> {
         try!(self.backend.manual_commit());
 
         for r in refs().iter() {
-            try!(self.backend.update_data(r,
-                                          DATA_FAMILY,
-                                          Box::new(move |GcData { num, bytes }| {
-                                              Some(GcData {
-                                                  num: num - 1,
-                                                  bytes: bytes,
-                                              })
-                                          })));
+            try!(self.backend.update_data(r, DATA_FAMILY, move |GcData { num, bytes }| {
+                Some(GcData {
+                    num: num - 1,
+                    bytes: bytes,
+                })
+            }));
         }
         try!(self.backend.set_tag(ref_final, tags::Tag::ReadyDelete));
 

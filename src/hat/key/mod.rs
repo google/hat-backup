@@ -63,7 +63,7 @@ pub type DirElem = (Entry, Option<blob::ChunkRef>, Option<HashTreeReaderInitiali
 pub struct HashTreeReaderInitializer {
     hash: hash::Hash,
     persistent_ref: Option<blob::ChunkRef>,
-    hash_index: hash::IndexProcess,
+    hash_index: hash::HashIndex,
     blob_store: blob::StoreProcess,
 }
 
@@ -99,14 +99,14 @@ pub enum Reply {
 #[derive(Clone)]
 pub struct Store {
     index: index::IndexProcess,
-    hash_index: hash::IndexProcess,
+    hash_index: hash::HashIndex,
     blob_store: blob::StoreProcess,
 }
 
 // Implementations
 impl Store {
     pub fn new(index: index::IndexProcess,
-               hash_index: hash::IndexProcess,
+               hash_index: hash::HashIndex,
                blob_store: blob::StoreProcess)
                -> Result<Store, MsgError> {
         Ok(Store {
@@ -121,7 +121,7 @@ impl Store {
         (backend: B)
          -> Result<Store, MsgError> {
         let ki_p = try!(Process::new(move || index::Index::new_for_testing()));
-        let hi_p = hash::IndexProcess::new(try!(hash::Index::new_for_testing()));
+        let hi_p = try!(hash::HashIndex::new_for_testing(None));
         let bs_p = try!(Process::new(move || blob::Store::new_for_testing(backend, 1024)));
         Ok(Store {
             index: ki_p,
@@ -146,12 +146,12 @@ impl Store {
 
 #[derive(Clone)]
 pub struct HashStoreBackend {
-    hash_index: hash::IndexProcess,
+    hash_index: hash::HashIndex,
     blob_store: blob::StoreProcess,
 }
 
 impl HashStoreBackend {
-    pub fn new(hash_index: hash::IndexProcess, blob_store: blob::StoreProcess) -> HashStoreBackend {
+    pub fn new(hash_index: hash::HashIndex, blob_store: blob::StoreProcess) -> HashStoreBackend {
         HashStoreBackend {
             hash_index: hash_index,
             blob_store: blob_store,
@@ -161,9 +161,7 @@ impl HashStoreBackend {
     fn fetch_chunk_from_hash(&mut self, hash: hash::Hash) -> Option<Vec<u8>> {
         assert!(!hash.bytes.is_empty());
         match self.hash_index.fetch_persistent_ref(&hash) {
-            Ok(Some(chunk_ref)) => {
-                self.fetch_chunk_from_persistent_ref(chunk_ref)
-            }
+            Ok(Some(chunk_ref)) => self.fetch_chunk_from_persistent_ref(chunk_ref),
             _ => None,  // TODO: Do we need to distinguish `missing` from `unknown ref`?
         }
     }
