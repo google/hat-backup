@@ -17,6 +17,7 @@
 use std::collections::BTreeMap;
 
 use std::fs;
+use std::mem;
 use std::io::{Read, Write};
 use std::path::PathBuf;
 
@@ -37,7 +38,7 @@ use util::FnBox;
 mod index;
 mod schema;
 
-pub use self::index::{Index, IndexError, BlobDesc};
+pub use self::index::{BlobIndex, IndexError, BlobDesc};
 
 
 error_type! {
@@ -252,7 +253,7 @@ pub enum Reply {
 pub struct Store<B> {
     backend: B,
 
-    blob_index: index::IndexProcess,
+    blob_index: index::BlobIndex,
     blob_desc: BlobDesc,
 
     buffer_data: Vec<(ChunkRef, Vec<u8>, Box<FnBox<ChunkRef, ()>>)>,
@@ -271,7 +272,7 @@ fn empty_blob_desc() -> BlobDesc {
 
 
 impl<B: StoreBackend> Store<B> {
-    pub fn new(index: index::IndexProcess,
+    pub fn new(index: index::BlobIndex,
                backend: B,
                max_blob_size: usize)
                -> Result<Store<B>, MsgError> {
@@ -289,7 +290,7 @@ impl<B: StoreBackend> Store<B> {
 
     #[cfg(test)]
     pub fn new_for_testing(backend: B, max_blob_size: usize) -> Result<Store<B>, MsgError> {
-        let bi_p = try!(Process::new(move || index::Index::new_for_testing()));
+        let bi_p = try!(index::BlobIndex::new_for_testing(None));
         let mut bs = Store {
             backend: backend,
             blob_index: bi_p,
@@ -303,17 +304,7 @@ impl<B: StoreBackend> Store<B> {
     }
 
     fn reserve_new_blob(&mut self) -> BlobDesc {
-        let old_blob_desc = self.blob_desc.clone();
-
-        let res = self.blob_index.send_reply(index::Msg::Reserve);
-        match res {
-            index::Reply::Reserved(blob_desc) => {
-                self.blob_desc = blob_desc;
-            }
-            _ => panic!("Could not reserve blob."),
-        }
-
-        old_blob_desc
+        mem::replace(&mut self.blob_desc, self.blob_index.reserve())
     }
 
     fn backend_store(&mut self, name: &[u8], blob: &[u8]) {
@@ -351,9 +342,9 @@ impl<B: StoreBackend> Store<B> {
             }
         }
 
-        self.blob_index.send_reply(index::Msg::InAir(old_blob_desc.clone()));
+        self.blob_index.in_air(&old_blob_desc);
         self.backend_store(&old_blob_desc.name[..], &blob[..]);
-        self.blob_index.send_reply(index::Msg::CommitDone(old_blob_desc));
+        self.blob_index.commit_done(&old_blob_desc);
 
         // Go through callbacks
         for (blobid, callback) in ready_callback.into_iter() {
@@ -426,51 +417,35 @@ impl<B: StoreBackend> MsgHandler<Msg, Reply> for Store<B> {
                     reply(Reply::RecoverOk);
                     return Ok(());
                 }
-                match self.blob_index.send_reply(index::Msg::Recover(chunk.blob_id)) {
-                    index::Reply::RecoverOk(..) => reply(Reply::RecoverOk),
-                    _ => panic!("Unexpected reply from blob index."),
-                }
+                self.blob_index.recover(chunk.blob_id);
+                reply(Reply::RecoverOk);
             }
             Msg::Tag(chunk, tag) => {
-                match self.blob_index.send_reply(index::Msg::Tag(BlobDesc {
-                                                                     id: 0,
-                                                                     name: chunk.blob_id,
-                                                                 },
-                                                                 tag)) {
-                    index::Reply::Ok => reply(Reply::Ok),
-                    _ => panic!("Unexpected reply from blob index."),
-                }
+                self.blob_index.tag(&BlobDesc {
+                                        id: 0,
+                                        name: chunk.blob_id,
+                                    },
+                                    tag);
+                reply(Reply::Ok);
             }
             Msg::TagAll(tag) => {
-                match self.blob_index.send_reply(index::Msg::TagAll(tag)) {
-                    index::Reply::Ok => reply(Reply::Ok),
-                    _ => panic!("Unexpected reply from blob index."),
-                }
+                self.blob_index.tag_all(tag);
+                reply(Reply::Ok);
             }
             Msg::DeleteByTag(tag) => {
-                let blobs = match self.blob_index
-                                      .send_reply(index::Msg::ListByTag(tag.clone())) {
-                    index::Reply::Listing(ch) => ch,
-                    _ => panic!("Unexpected reply from blob index."),
-                };
+                let blobs = self.blob_index.list_by_tag(tag);
                 for b in blobs.iter() {
                     match self.backend.delete(&b.name) {
                         Ok(_) => (),
                         Err(e) => println!("Could not delete {}: {}", b.name.to_hex(), e),
                     }
                 }
-                match self.blob_index.send_reply(index::Msg::DeleteByTag(tag)) {
-                    index::Reply::Ok => (),
-                    _ => panic!("Unexpected reply from blob index."),
-                }
+                self.blob_index.delete_by_tag(tag);
                 reply(Reply::Ok);
             }
             Msg::Flush => {
                 self.flush();
-                match self.blob_index.send_reply(index::Msg::Flush) {
-                    index::Reply::CommitOk => (),
-                    _ => panic!("Unexpected reply from blob index."),
-                }
+                self.blob_index.flush();
                 reply(Reply::FlushOk);
             }
         }

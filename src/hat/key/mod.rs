@@ -29,7 +29,7 @@ mod schema;
 mod index;
 
 
-pub use self::index::{Index, IndexError, IndexProcess, Entry};
+pub use self::index::{IndexError, KeyIndex, Entry};
 
 
 error_type! {
@@ -98,14 +98,14 @@ pub enum Reply {
 
 #[derive(Clone)]
 pub struct Store {
-    index: index::IndexProcess,
+    index: index::KeyIndex,
     hash_index: hash::HashIndex,
     blob_store: blob::StoreProcess,
 }
 
 // Implementations
 impl Store {
-    pub fn new(index: index::IndexProcess,
+    pub fn new(index: index::KeyIndex,
                hash_index: hash::HashIndex,
                blob_store: blob::StoreProcess)
                -> Result<Store, MsgError> {
@@ -120,7 +120,7 @@ impl Store {
     pub fn new_for_testing<B: 'static + blob::StoreBackend + Send + Clone>
         (backend: B)
          -> Result<Store, MsgError> {
-        let ki_p = try!(Process::new(move || index::Index::new_for_testing()));
+        let ki_p = try!(index::KeyIndex::new_for_testing(None));
         let hi_p = try!(hash::HashIndex::new_for_testing(None));
         let bs_p = try!(Process::new(move || blob::Store::new_for_testing(backend, 1024)));
         Ok(Store {
@@ -133,7 +133,7 @@ impl Store {
     pub fn flush(&mut self) -> Result<(), MsgError> {
         self.blob_store.send_reply(blob::Msg::Flush);
         self.hash_index.flush();
-        try!(self.index.send_reply(index::Msg::Flush));
+        try!(self.index.flush());
 
         Ok(())
     }
@@ -158,9 +158,9 @@ impl HashStoreBackend {
         }
     }
 
-    fn fetch_chunk_from_hash(&mut self, hash: hash::Hash) -> Option<Vec<u8>> {
+    fn fetch_chunk_from_hash(&mut self, hash: &hash::Hash) -> Option<Vec<u8>> {
         assert!(!hash.bytes.is_empty());
-        match self.hash_index.fetch_persistent_ref(&hash) {
+        match self.hash_index.fetch_persistent_ref(hash) {
             Ok(Some(chunk_ref)) => self.fetch_chunk_from_persistent_ref(chunk_ref),
             _ => None,  // TODO: Do we need to distinguish `missing` from `unknown ref`?
         }
@@ -184,7 +184,7 @@ impl HashTreeBackend for HashStoreBackend {
         let data_opt = if let Some(r) = persistent_ref {
             self.fetch_chunk_from_persistent_ref(r)
         } else {
-            self.fetch_chunk_from_hash(hash.clone())
+            self.fetch_chunk_from_hash(&hash)
         };
 
         data_opt.and_then(|data| {
@@ -219,7 +219,7 @@ impl HashTreeBackend for HashStoreBackend {
     }
 
     fn insert_chunk(&mut self,
-                    hash: hash::Hash,
+                    hash: &hash::Hash,
                     level: i64,
                     payload: Option<Vec<u8>>,
                     chunk: Vec<u8>)
@@ -236,15 +236,16 @@ impl HashTreeBackend for HashStoreBackend {
         match self.hash_index.reserve(hash_entry.clone()) {
             hash::ReserveResult::HashKnown => {
                 // Someone came before us: piggyback on their result.
-                return self.fetch_persistent_ref(&hash)
+                return self.fetch_persistent_ref(hash)
                            .expect("Could not find persistent_ref for known chunk.");
             }
             hash::ReserveResult::ReserveOk => {
                 // We came first: this data-chunk is ours to process.
                 let local_hash_index = self.hash_index.clone();
 
+                let local_hash = hash.clone();
                 let callback = Box::new(move |chunk_ref: blob::ChunkRef| {
-                    local_hash_index.commit(&hash, chunk_ref);
+                    local_hash_index.commit(&local_hash, chunk_ref);
                 });
                 let kind = if level == 0 {
                     blob::Kind::TreeLeaf
@@ -301,8 +302,8 @@ impl<IT: Iterator<Item = Vec<u8>>> MsgHandler<Msg<IT>, Result<Reply, MsgError>> 
             }
 
             Msg::ListDir(parent) => {
-                match self.index.send_reply(index::Msg::ListDir(parent)) {
-                    Ok(index::Reply::ListResult(entries)) => {
+                match self.index.list_dir(parent) {
+                    Ok(entries) => {
                         let mut my_entries: Vec<DirElem> = Vec::with_capacity(entries.len());
                         for (entry, persistent_ref) in entries.into_iter() {
                             let open_fn = entry.data_hash.as_ref().map(|bytes| {
@@ -319,18 +320,15 @@ impl<IT: Iterator<Item = Vec<u8>>> MsgHandler<Msg<IT>, Result<Reply, MsgError>> 
                         reply_ok(Reply::ListResult(my_entries))
                     }
                     Err(e) => reply_err(From::from(e)),
-                    _ => reply_err(From::from("Unexpected result from key index")),
                 }
             }
 
             Msg::Insert(org_entry, chunk_it_opt) => {
                 let entry = match try!(self.index
-                                           .send_reply(index::Msg::Lookup(org_entry.parent_id,
-                                                                          org_entry.name
-                                                                                   .clone()))) {
-                    index::Reply::Entry(ref entry) if org_entry.accessed == entry.accessed &&
-                                                      org_entry.modified == entry.modified &&
-                                                      org_entry.created == entry.created => {
+                                           .lookup(org_entry.parent_id, org_entry.name.clone())) {
+                    Some(ref entry) if org_entry.accessed == entry.accessed &&
+                                       org_entry.modified == entry.modified &&
+                                       org_entry.created == entry.created => {
                         if chunk_it_opt.is_some() && entry.data_hash.is_some() {
                             let hash = hash::Hash { bytes: entry.data_hash.clone().unwrap() };
                             if self.hash_index.hash_exists(&hash) {
@@ -344,15 +342,11 @@ impl<IT: Iterator<Item = Vec<u8>>> MsgHandler<Msg<IT>, Result<Reply, MsgError>> 
                         // Our stored entry is incomplete.
                         Entry { id: entry.id, ..org_entry }
                     }
-                    index::Reply::Entry(entry) => Entry { id: entry.id, ..org_entry },
-                    index::Reply::NotFound => org_entry,
-                    _ => return reply_err(From::from("Unexpected reply from key index")),
+                    Some(entry) => Entry { id: entry.id, ..org_entry },
+                    None => org_entry,
                 };
 
-                let entry = match try!(self.index.send_reply(index::Msg::Insert(entry))) {
-                    index::Reply::Entry(entry) => entry,
-                    _ => return reply_err(From::from("Could not insert entry into key index")),
-                };
+                let entry = try!(self.index.insert(entry));
 
                 // Send out the ID early to allow the client to continue its key discovery routine.
                 // The bounded input-channel will prevent the client from overflowing us.
@@ -367,7 +361,7 @@ impl<IT: Iterator<Item = Vec<u8>>> MsgHandler<Msg<IT>, Result<Reply, MsgError>> 
                 let it_opt = chunk_it_opt.and_then(|open| open.call(()));
                 if it_opt.is_none() {
                     // No data is associated with this entry.
-                    try!(self.index.send_reply(index::Msg::UpdateDataHash(entry, None, None)));
+                    try!(self.index.update_data_hash(entry, None, None));
                     // Bail out before storing data that does not exist:
                     return Ok(());
                 }
@@ -390,17 +384,7 @@ impl<IT: Iterator<Item = Vec<u8>>> MsgHandler<Msg<IT>, Result<Reply, MsgError>> 
 
                 // Update hash in key index.
                 // It is OK that this has is not yet valid, as we check hashes at snapshot time.
-                match try!(self.index
-                               .send_reply(index::Msg::UpdateDataHash(entry,
-                                                                      Some(hash),
-                                                                      Some(persistent_ref)))) {
-                    index::Reply::UpdateOk => (),
-                    _ => {
-                        // We lost the hash index before we completed the data transfer.
-                        // Returning an error here will terminate our process.
-                        return Err(From::from("Unexpected reply from key index"));
-                    }
-                };
+                try!(self.index.update_data_hash(entry, Some(hash), Some(persistent_ref)));
 
                 Ok(())
             }
@@ -529,7 +513,7 @@ mod tests {
         }
     }
 
-    fn insert_and_update_fs(fs: &mut FileSystem, ks_p: StoreProcess<EntryStub>) {
+    fn insert_and_update_fs(fs: &mut FileSystem, ks_p: &StoreProcess<EntryStub>) {
         let local_file = fs.file.clone();
         let id = match ks_p.send_reply(Msg::Insert(fs.file.key_entry.clone(),
                                                    if fs.file.data.is_some() {
@@ -546,11 +530,11 @@ mod tests {
 
         for f in fs.filelist.iter_mut() {
             f.file.key_entry.parent_id = Some(id);
-            insert_and_update_fs(f, ks_p.clone());
+            insert_and_update_fs(f, ks_p);
         }
     }
 
-    fn verify_filesystem(fs: &FileSystem, ks_p: StoreProcess<EntryStub>) -> usize {
+    fn verify_filesystem(fs: &FileSystem, ks_p: &StoreProcess<EntryStub>) -> usize {
         let listing = match ks_p.send_reply(Msg::ListDir(fs.file.key_entry.id)).unwrap() {
             Reply::ListResult(ls) => ls,
             _ => panic!("Unexpected result from key store."),
@@ -597,7 +581,7 @@ mod tests {
 
         let mut count = fs.filelist.len();
         for dir in fs.filelist.iter() {
-            count += verify_filesystem(dir, ks_p.clone());
+            count += verify_filesystem(dir, ks_p);
         }
 
         count
@@ -610,7 +594,7 @@ mod tests {
             let ks_p = Process::new(move || Store::new_for_testing(backend)).unwrap();
 
             let mut fs = rng_filesystem(size as usize);
-            insert_and_update_fs(&mut fs, ks_p.clone());
+            insert_and_update_fs(&mut fs, &ks_p);
             let fs = fs;
 
             match ks_p.send_reply(Msg::Flush).unwrap() {
@@ -618,7 +602,7 @@ mod tests {
                 _ => panic!("Unexpected result from key store."),
             }
 
-            verify_filesystem(&fs, ks_p.clone());
+            verify_filesystem(&fs, &ks_p);
             true
         }
         quickcheck::quickcheck(prop as fn(u8) -> bool);

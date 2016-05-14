@@ -14,9 +14,8 @@
 
 //! Local state for external blobs and their states.
 
-use std::borrow::Cow;
 use std::collections::HashMap;
-use std::sync::mpsc;
+use std::sync::{Arc, Mutex, MutexGuard};
 
 use diesel;
 use diesel::prelude::*;
@@ -24,7 +23,6 @@ use diesel::sqlite::SqliteConnection;
 
 use sodiumoxide::randombytes::randombytes;
 
-use process::{Process, MsgHandler};
 use tags;
 use util;
 
@@ -34,9 +32,6 @@ use super::schema;
 error_type! {
     #[derive(Debug)]
     pub enum IndexError {
-        Recv(mpsc::RecvError) {
-            cause;
-        },
         SqlConnection(diesel::ConnectionError) {
             cause;
         },
@@ -49,16 +44,9 @@ error_type! {
         SqlExecute(diesel::result::Error) {
             cause;
         },
-        Message(Cow<'static, str>) {
-            desc (e) &**e;
-            from (s: &'static str) s.into();
-            from (s: String) s.into();
-        }
     }
 }
 
-
-pub type IndexProcess = Process<Msg, Reply>;
 
 #[derive(Clone, Debug)]
 pub struct BlobDesc {
@@ -66,51 +54,21 @@ pub struct BlobDesc {
     pub id: i64,
 }
 
-pub enum Msg {
-    /// Reserve an internal `BlobDesc` for a new blob.
-    Reserve,
-
-    /// Report that this blob is in the process of being committed to persistent storage. If a
-    /// blob is in this state when the system starts up, it may or may not exist in the persistent
-    /// storage, but **should not** be referenced elsewhere, and is therefore safe to delete.
-    InAir(BlobDesc),
-
-    /// Report that this blob has been fully committed to persistent storage. We can now use its
-    /// reference internally. Only committed blobs are considered "safe to use".
-    CommitDone(BlobDesc),
-
-    /// Reinstall blob recovered by from external storage.
-    /// Creates a new blob by a known external name.
-    Recover(Vec<u8>),
-
-    Tag(BlobDesc, tags::Tag),
-    TagAll(tags::Tag),
-    ListByTag(tags::Tag),
-    DeleteByTag(tags::Tag),
-
-    Flush,
-}
-
-pub enum Reply {
-    Reserved(BlobDesc),
-    RecoverOk(BlobDesc),
-    Listing(mpsc::Receiver<BlobDesc>),
-    CommitOk,
-    Ok,
-}
-
-pub struct Index {
+pub struct InternalBlobIndex {
     conn: SqliteConnection,
     next_id: i64,
     reserved: HashMap<Vec<u8>, BlobDesc>,
 }
 
+#[derive(Clone)]
+pub struct BlobIndex(Arc<Mutex<(InternalBlobIndex, Option<i64>)>>);
 
-impl Index {
-    pub fn new(path: String) -> Result<Index, IndexError> {
-        let conn = SqliteConnection::establish(&path).expect("Could not open SQLite database");
 
-        let mut bi = Index {
+impl InternalBlobIndex {
+    pub fn new(path: &str) -> Result<InternalBlobIndex, IndexError> {
+        let conn = try!(SqliteConnection::establish(path));
+
+        let mut bi = InternalBlobIndex {
             conn: conn,
             next_id: -1,
             reserved: HashMap::new(),
@@ -123,11 +81,6 @@ impl Index {
         try!(bi.conn.begin_transaction());
         bi.refresh_next_id();
         Ok(bi)
-    }
-
-    #[cfg(test)]
-    pub fn new_for_testing() -> Result<Index, IndexError> {
-        Index::new(":memory:".to_string())
     }
 
     fn new_blob_desc(&mut self) -> BlobDesc {
@@ -228,7 +181,7 @@ impl Index {
              .expect("Error reading blob")
     }
 
-    fn tag(&mut self, tag_: tags::Tag, target: Option<BlobDesc>) {
+    fn tag(&mut self, tag_: tags::Tag, target: Option<&BlobDesc>) {
         use super::schema::blobs::dsl::*;
         match target {
             None => {
@@ -260,67 +213,91 @@ impl Index {
             .expect("Error deleting blobs");
     }
 
-    fn list_by_tag(&mut self, tag_: tags::Tag) -> mpsc::Receiver<BlobDesc> {
+    fn list_by_tag(&mut self, tag_: tags::Tag) -> Vec<BlobDesc> {
         use super::schema::blobs::dsl::*;
-        let (sender, receiver) = mpsc::channel();
-
-        let blobs_ = blobs.filter(tag.eq(tag_ as i32))
-                          .load::<schema::Blob>(&self.conn)
-                          .expect("Error listing blobs");
-        for blob_ in blobs_ {
-            if let Err(_) = sender.send(BlobDesc {
-                id: blob_.id,
-                name: blob_.name,
-            }) {
-                break; // channel closed.
-            }
-        }
-
-        receiver
+        blobs.filter(tag.eq(tag_ as i32))
+             .load::<schema::Blob>(&self.conn)
+             .expect("Error listing blobs")
+             .into_iter()
+             .map(|blob_| {
+                 BlobDesc {
+                     id: blob_.id,
+                     name: blob_.name,
+                 }
+             })
+             .collect()
     }
 }
 
-impl MsgHandler<Msg, Reply> for Index {
-    type Err = IndexError;
+impl BlobIndex {
+    pub fn new(path: &str) -> Result<BlobIndex, IndexError> {
+        BlobIndex::new_with_shutdown(path, None)
+    }
 
-    fn handle(&mut self, msg: Msg, reply: Box<Fn(Reply)>) -> Result<(), IndexError> {
-        match msg {
-            Msg::Reserve => {
-                reply(Reply::Reserved(self.reserve()));
-            }
-            Msg::InAir(blob) => {
-                self.in_air(&blob);
-                reply(Reply::CommitOk);
-            }
-            Msg::CommitDone(blob) => {
-                self.commit_blob(&blob);
-                reply(Reply::CommitOk);
-            }
-            Msg::Recover(name) => {
-                let blob = self.recover(name);
-                reply(Reply::RecoverOk(blob));
-            }
-            Msg::Flush => {
-                self.new_transaction();
-                reply(Reply::CommitOk);
-            }
-            Msg::Tag(blob, tag) => {
-                self.tag(tag, Some(blob));
-                reply(Reply::Ok);
-            }
-            Msg::TagAll(tag) => {
-                self.tag(tag, None);
-                reply(Reply::Ok);
-            }
-            Msg::ListByTag(tag) => {
-                reply(Reply::Listing(self.list_by_tag(tag)));
-            }
-            Msg::DeleteByTag(tag) => {
-                self.delete_by_tag(tag);
-                reply(Reply::Ok);
+    pub fn new_for_testing(shutdown: Option<i64>) -> Result<BlobIndex, IndexError> {
+        BlobIndex::new_with_shutdown(":memory:", shutdown)
+    }
+
+    pub fn new_with_shutdown(path: &str, shutdown: Option<i64>) -> Result<BlobIndex, IndexError> {
+        let index = try!(InternalBlobIndex::new(path));
+        Ok(BlobIndex(Arc::new(Mutex::new((index, shutdown)))))
+    }
+
+    fn lock(&self) -> MutexGuard<(InternalBlobIndex, Option<i64>)> {
+        let mut guard = self.0.lock().expect("index-process has failed");
+
+        match &mut guard.1 {
+            &mut None => (),
+            &mut Some(0) => panic!("No more requests for this index process"),
+            &mut Some(ref mut n) => {
+                *n -= 1;
             }
         }
 
-        Ok(())
+        guard
+    }
+
+    /// Reserve an internal `BlobDesc` for a new blob.
+    pub fn reserve(&self) -> BlobDesc {
+        self.lock().0.reserve()
+    }
+
+    /// Report that this blob is in the process of being committed to persistent storage. If a
+    /// blob is in this state when the system starts up, it may or may not exist in the persistent
+    /// storage, but **should not** be referenced elsewhere, and is therefore safe to delete.
+    pub fn in_air(&self, blob: &BlobDesc) {
+        self.lock().0.in_air(&blob)
+    }
+
+    /// Report that this blob has been fully committed to persistent storage. We can now use its
+    /// reference internally. Only committed blobs are considered "safe to use".
+    pub fn commit_done(&self, blob: &BlobDesc) {
+        self.lock().0.commit_blob(blob)
+    }
+
+    /// Reinstall blob recovered by from external storage.
+    /// Creates a new blob by a known external name.
+    pub fn recover(&self, name: Vec<u8>) -> BlobDesc {
+        self.lock().0.recover(name)
+    }
+
+    pub fn tag(&self, blob: &BlobDesc, tag: tags::Tag) {
+        self.lock().0.tag(tag, Some(blob))
+    }
+
+    pub fn tag_all(&self, tag: tags::Tag) {
+        self.lock().0.tag(tag, None)
+    }
+
+    pub fn list_by_tag(&self, tag: tags::Tag) -> Vec<BlobDesc> {
+        self.lock().0.list_by_tag(tag)
+    }
+
+    pub fn delete_by_tag(&self, tag: tags::Tag) {
+        self.lock().0.delete_by_tag(tag)
+    }
+
+    pub fn flush(&self) {
+        self.lock().0.new_transaction()
     }
 }

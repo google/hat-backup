@@ -58,7 +58,7 @@ error_type! {
         KeyDb(key::IndexError) {
             cause;
         },
-        Snapshots(snapshot::MsgError) {
+        Snapshots(snapshot::IndexError) {
             cause;
         },
         Blobs(blob::MsgError) {
@@ -161,7 +161,7 @@ impl gc::GcBackend for GcBackend {
 
 pub struct Hat<B, G: gc::Gc> {
     repository_root: Option<PathBuf>,
-    snapshot_index: snapshot::IndexProcess,
+    snapshot_index: snapshot::SnapshotIndex,
     blob_store: blob::StoreProcess,
     hash_index: hash::HashIndex,
     blob_backend: B,
@@ -172,22 +172,21 @@ pub struct Hat<B, G: gc::Gc> {
 
 pub type HatRc<B> = Hat<B, gc_rc::GcRc<GcBackend>>;
 
-fn concat_filename(a: &PathBuf, b: String) -> String {
-    let mut result = a.clone();
-    result.push(&b);
-    result.into_os_string().into_string().unwrap()
+fn concat_filename(mut a: PathBuf, b: &str) -> String {
+    a.push(b);
+    a.into_os_string().into_string().unwrap()
 }
 
-fn snapshot_index_name(root: &PathBuf) -> String {
-    concat_filename(root, "snapshot_index.sqlite3".to_owned())
+fn snapshot_index_name(root: PathBuf) -> String {
+    concat_filename(root, "snapshot_index.sqlite3")
 }
 
-fn blob_index_name(root: &PathBuf) -> String {
-    concat_filename(root, "blob_index.sqlite3".to_owned())
+fn blob_index_name(root: PathBuf) -> String {
+    concat_filename(root, "blob_index.sqlite3")
 }
 
-fn hash_index_name(root: &PathBuf) -> String {
-    concat_filename(root, "hash_index.sqlite3".to_owned())
+fn hash_index_name(root: PathBuf) -> String {
+    concat_filename(root, "hash_index.sqlite3")
 }
 
 fn list_snapshot(backend: &key::HashStoreBackend,
@@ -207,24 +206,17 @@ fn list_snapshot(backend: &key::HashStoreBackend,
     }
 }
 
-fn get_hash_id(index: &hash::HashIndex, hash: &hash::Hash) -> Result<i64, HatError> {
-    match index.get_id(hash) {
-        Some(id) => Ok(id),
-        None => Err(From::from("Tried to register an unknown hash")),
-    }
-}
-
 impl<B: 'static + blob::StoreBackend + Clone + Send> HatRc<B> {
-    pub fn open_repository(repository_root: &PathBuf,
+    pub fn open_repository(repository_root: PathBuf,
                            backend: B,
                            max_blob_size: usize)
                            -> Result<HatRc<B>, HatError> {
-        let snapshot_index_path = snapshot_index_name(repository_root);
-        let blob_index_path = blob_index_name(repository_root);
-        let hash_index_path = hash_index_name(repository_root);
-        let si_p = try!(Process::new(move || snapshot::Index::new(snapshot_index_path)));
-        let bi_p = try!(Process::new(move || blob::Index::new(blob_index_path)));
-        let hi_p = try!(hash::HashIndex::new(hash_index_path));
+        let snapshot_index_path = snapshot_index_name(repository_root.clone());
+        let blob_index_path = blob_index_name(repository_root.clone());
+        let hash_index_path = hash_index_name(repository_root.clone());
+        let si_p = try!(snapshot::SnapshotIndex::new(&snapshot_index_path));
+        let bi_p = try!(blob::BlobIndex::new(&blob_index_path));
+        let hi_p = try!(hash::HashIndex::new(&hash_index_path));
 
         let local_blob_index = bi_p.clone();
         let local_backend = backend.clone();
@@ -236,7 +228,7 @@ impl<B: 'static + blob::StoreBackend + Clone + Send> HatRc<B> {
         let gc = gc::Gc::new(gc_backend);
 
         let mut hat = Hat {
-            repository_root: Some(repository_root.clone()),
+            repository_root: Some(repository_root),
             snapshot_index: si_p,
             hash_index: hi_p.clone(),
             blob_store: bs_p.clone(),
@@ -260,12 +252,8 @@ impl<B: 'static + blob::StoreBackend + Clone + Send> HatRc<B> {
         // If provided, we cycle the possible shutdown values to give every process one.
         let mut shutdown = shutdown_after.iter().cycle();
 
-        let si_p = Process::new_with_shutdown(move || snapshot::Index::new_for_testing(),
-                                              shutdown.next().cloned())
-                       .unwrap();
-        let bi_p = Process::new_with_shutdown(move || blob::Index::new_for_testing(),
-                                              shutdown.next().cloned())
-                       .unwrap();
+        let si_p = snapshot::SnapshotIndex::new_for_testing(shutdown.next().cloned()).unwrap();
+        let bi_p = blob::BlobIndex::new_for_testing(shutdown.next().cloned()).unwrap();
         let hi_p = hash::HashIndex::new_for_testing(shutdown.next().cloned()).unwrap();
 
         let local_blob_index = bi_p.clone();
@@ -317,12 +305,11 @@ impl<B: 'static + blob::StoreBackend + Clone + Send> HatRc<B> {
         //            -> blob::Store -> blob::Index
 
         let key_index_path = match self.repository_root {
-            Some(ref root) => concat_filename(root, name.clone()),
+            Some(ref root) => concat_filename(root.clone(), &name),
             None => ":memory:".to_string(),
         };
 
-        let ki_p = try!(Process::new_with_shutdown(move || key::Index::new(key_index_path),
-                                                   shutdown_after));
+        let ki_p = try!(key::KeyIndex::new_with_shutdown(&key_index_path, shutdown_after));
 
         let local_ks = key::Store::new(ki_p.clone(),
                                        self.hash_index.clone(),
@@ -339,10 +326,7 @@ impl<B: 'static + blob::StoreBackend + Clone + Send> HatRc<B> {
     }
 
     pub fn meta_commit(&mut self) {
-        let all_snapshots = match self.snapshot_index.send_reply(snapshot::Msg::ListAll) {
-            snapshot::Reply::All(lst) => lst,
-            _ => panic!("Invalid reply from snapshot index"),
-        };
+        let all_snapshots = self.snapshot_index.list_all();
 
         // TODO(jos): use a hash tree for this listing.
         let mut message = ::capnp::message::Builder::new_default();
@@ -385,19 +369,14 @@ impl<B: 'static + blob::StoreBackend + Clone + Send> HatRc<B> {
         for s in snapshot_list.get_snapshots().unwrap().iter() {
             let tree_ref = blob::ChunkRef::from_bytes(&mut s.get_tree_reference().unwrap())
                                .unwrap();
-            match self.snapshot_index
-                      .send_reply(
-                          snapshot::Msg::Recover(s.get_id(),
-                                                 s.get_family_name()
-                                                  .unwrap()
-                                                  .to_owned(),
-                                                 s.get_msg().unwrap().to_owned(),
-                                                 s.get_hash().unwrap().to_vec(),
-                                                 tree_ref,
-                                                 Some(snapshot::WorkStatus::RecoverInProgress))) {
-                snapshot::Reply::RecoverOk => (),
-                _ => return Err(From::from("Invalid reply from snapshot index")),
-            }
+            self.snapshot_index
+                .recover(s.get_id(),
+                         s.get_family_name()
+                          .unwrap(),
+                         s.get_msg().unwrap(),
+                         s.get_hash().unwrap(),
+                         &tree_ref,
+                         Some(snapshot::WorkStatus::RecoverInProgress));
         }
         self.flush_snapshot_index();
         try!(self.resume());
@@ -408,7 +387,7 @@ impl<B: 'static + blob::StoreBackend + Clone + Send> HatRc<B> {
     fn recover_snapshot(&mut self,
                         family_name: String,
                         info: snapshot::Info,
-                        hash: hash::Hash,
+                        hash: &hash::Hash,
                         dir_ref: blob::ChunkRef)
                         -> Result<(), HatError> {
         fn recover_entry(hashes: &hash::HashIndex,
@@ -425,13 +404,13 @@ impl<B: 'static + blob::StoreBackend + Clone + Send> HatRc<B> {
             }
             // Now insert the hash information if needed.
             match hashes.reserve(entry) {
-                hash::ReserveResult::HashKnown => return Ok(get_hash_id(hashes, &hash).unwrap()),
+                hash::ReserveResult::HashKnown => return Ok(hashes.get_id(&hash).unwrap()),
                 hash::ReserveResult::ReserveOk => (),
             }
             // Commit hash.
-            hashes.commit(&hash, pref.clone());
+            hashes.commit(&hash, pref);
 
-            Ok(get_hash_id(hashes, &hash).unwrap())
+            Ok(hashes.get_id(&hash).unwrap())
         }
 
         let family = self.open_family(family_name.clone())
@@ -439,7 +418,7 @@ impl<B: 'static + blob::StoreBackend + Clone + Send> HatRc<B> {
         let (register_sender, register_receiver) = mpsc::channel();
         let (recover_sender, recover_receiver) = mpsc::channel();
         let (final_payload, final_level) = self.recover_dir_ref(&family,
-                                                                &hash,
+                                                                hash,
                                                                 dir_ref.clone(),
                                                                 register_sender,
                                                                 recover_sender);
@@ -472,7 +451,7 @@ impl<B: 'static + blob::StoreBackend + Clone + Send> HatRc<B> {
                                payload: final_payload,
                            }));
 
-        let final_id = get_hash_id(&self.hash_index, &hash).unwrap();
+        let final_id = self.hash_index.get_id(hash).unwrap();
         try!(self.gc.register_final(info.clone(), final_id));
 
         try!(self.commit_finalize(&family, info, hash));
@@ -534,20 +513,16 @@ impl<B: 'static + blob::StoreBackend + Clone + Send> HatRc<B> {
     }
 
     pub fn resume(&mut self) -> Result<(), HatError> {
-        let need_work = match self.snapshot_index.send_reply(snapshot::Msg::ListNotDone) {
-            snapshot::Reply::NotDone(lst) => lst,
-            _ => return Err(From::from("Invalid reply from snapshot index")),
-        };
+        let need_work = self.snapshot_index.list_not_done();
 
         for snapshot in need_work.into_iter() {
             match snapshot.status {
                 snapshot::WorkStatus::CommitInProgress |
                 snapshot::WorkStatus::RecoverInProgress => {
-                    let done_hash_opt = match snapshot.hash.clone() {
-                        None => None,
-                        Some(h) => {
-                            let status_res = get_hash_id(&self.hash_index, &h)
-                                                 .ok()
+                    let done_hash_opt = match &snapshot.hash {
+                        &None => None,
+                        &Some(ref h) => {
+                            let status_res = self.hash_index.get_id(h)
                                                  .map(|id| self.gc.status(id));
                             let status_opt = match status_res {
                                 None => None,
@@ -572,9 +547,9 @@ impl<B: 'static + blob::StoreBackend + Clone + Send> HatRc<B> {
                         }
                         (None, snapshot::WorkStatus::RecoverInProgress) => {
                             println!("Resuming recovery of: {}", snapshot.family_name);
-                            let hash = match snapshot.hash {
-                                Some(h) => h,
-                                None => {
+                            let hash = match &snapshot.hash {
+                                &Some(ref h) => h,
+                                &None => {
                                     return Err(From::from("recovered snapshot must have a hash"))
                                 }
                             };
@@ -597,13 +572,13 @@ impl<B: 'static + blob::StoreBackend + Clone + Send> HatRc<B> {
                     }
                 }
                 snapshot::WorkStatus::CommitComplete => {
-                    match snapshot.hash.clone() {
-                        Some(h) => {
+                    match &snapshot.hash {
+                        &Some(ref h) => {
                             try!(self.commit_finalize_by_name(snapshot.family_name,
                                                               snapshot.info,
                                                               h))
                         }
-                        None => {
+                        &None => {
                             // This should not happen.
                             return Err(From::from(format!("Snapshot {:?} is fully registered \
                                                            in GC, but has no hash",
@@ -613,7 +588,7 @@ impl<B: 'static + blob::StoreBackend + Clone + Send> HatRc<B> {
                 }
                 snapshot::WorkStatus::DeleteInProgress => {
                     let hash = snapshot.hash.expect("Snapshot has no hash");
-                    let hash_id = get_hash_id(&self.hash_index, &hash)
+                    let hash_id = self.hash_index.get_id(&hash)
                                       .expect("Snapshot hash not recognized");
                     let status = try!(self.gc.status(hash_id));
                     match status {
@@ -634,7 +609,7 @@ impl<B: 'static + blob::StoreBackend + Clone + Send> HatRc<B> {
                 }
                 snapshot::WorkStatus::DeleteComplete => {
                     let hash = snapshot.hash.expect("Snapshot has no hash");
-                    let hash_id = get_hash_id(&self.hash_index, &hash)
+                    let hash_id = self.hash_index.get_id(&hash)
                                       .expect("Snapshot hash not recognized");
                     try!(self.deregister_finalize_by_name(snapshot.family_name,
                                                           snapshot.info,
@@ -644,10 +619,7 @@ impl<B: 'static + blob::StoreBackend + Clone + Send> HatRc<B> {
         }
 
         // We should have finished everything there was to finish.
-        let need_work = match self.snapshot_index.send_reply(snapshot::Msg::ListNotDone) {
-            snapshot::Reply::NotDone(lst) => lst,
-            _ => panic!("Invalid reply from snapshot index"),
-        };
+        let need_work = self.snapshot_index.list_not_done();
         assert_eq!(need_work.len(), 0);
 
         Ok(())
@@ -675,11 +647,7 @@ impl<B: 'static + blob::StoreBackend + Clone + Send> HatRc<B> {
             Some(info) => info,  // Resume already started commit.
             None => {
                 // Create new commit.
-                match self.snapshot_index
-                          .send_reply(snapshot::Msg::Reserve(family.name.clone())) {
-                    snapshot::Reply::Reserved(info) => info,
-                    _ => return Err(From::from("Invalid reply from snapshot index")),
-                }
+                self.snapshot_index.reserve(family.name.clone())
             }
         };
         self.flush_snapshot_index();
@@ -691,7 +659,7 @@ impl<B: 'static + blob::StoreBackend + Clone + Send> HatRc<B> {
         let local_hash_index = self.hash_index.clone();
         thread::spawn(move || {
             for hash in hash_receiver.iter() {
-                hash_id_sender.send(get_hash_id(&local_hash_index, &hash).unwrap()).unwrap();
+                hash_id_sender.send(local_hash_index.get_id(&hash).unwrap()).unwrap();
             }
         });
 
@@ -713,21 +681,17 @@ impl<B: 'static + blob::StoreBackend + Clone + Send> HatRc<B> {
         // Tag 2:
         // We update the snapshot entry with the tree hash, which we then register.
         // When the GC has seen the final hash, we flush everything so far.
-        match self.snapshot_index
-                  .send_reply(snapshot::Msg::Update(snap_info.clone(), hash.clone(), top_ref)) {
-            snapshot::Reply::UpdateOk => (),
-            _ => return Err(From::from("Snapshot index update failed")),
-        };
+        self.snapshot_index.update(&snap_info, &hash, &top_ref);
         self.flush_snapshot_index();
 
         // Register the final hash.
         // At this point, the GC should still be able to either resume or rollback safely.
         // After a successful flush, all GC work is done.
         // The GC must be able to tell if it has completed or not.
-        let hash_id = get_hash_id(&self.hash_index, &hash).unwrap();
+        let hash_id = self.hash_index.get_id(&hash).unwrap();
         try!(self.gc.register_final(snap_info.clone(), hash_id));
         try!(family.flush());
-        try!(self.commit_finalize(family, snap_info, hash));
+        try!(self.commit_finalize(family, snap_info, &hash));
 
         Ok(())
     }
@@ -735,10 +699,10 @@ impl<B: 'static + blob::StoreBackend + Clone + Send> HatRc<B> {
     fn commit_finalize_by_name(&mut self,
                                family_name: String,
                                snap_info: snapshot::Info,
-                               hash: hash::Hash)
+                               hash: &hash::Hash)
                                -> Result<(), HatError> {
         let family = try!(self.open_family(family_name));
-        try!(self.commit_finalize(&family, snap_info, hash));
+        try!(self.commit_finalize(&family, snap_info, &hash));
 
         Ok(())
     }
@@ -746,35 +710,25 @@ impl<B: 'static + blob::StoreBackend + Clone + Send> HatRc<B> {
     fn commit_finalize(&mut self,
                        family: &Family,
                        snap_info: snapshot::Info,
-                       hash: hash::Hash)
+                       hash: &hash::Hash)
                        -> Result<(), HatError> {
         // Commit locally. Let the GC perform any needed cleanup.
-        match self.snapshot_index
-                  .send_reply(snapshot::Msg::ReadyCommit(snap_info.clone())) {
-            snapshot::Reply::UpdateOk => (),
-            _ => return Err(From::from("Invalid reply from snapshot index")),
-        };
+        self.snapshot_index.ready_commit(&snap_info);
         self.flush_snapshot_index();
 
-        let hash_id = get_hash_id(&self.hash_index, &hash).unwrap();
+        let hash_id = self.hash_index.get_id(hash).unwrap();
         try!(self.gc.register_cleanup(snap_info.clone(), hash_id));
         try!(family.flush());
 
         // Tag 0: All is done.
-        match self.snapshot_index.send_reply(snapshot::Msg::Commit(snap_info)) {
-            snapshot::Reply::CommitOk => (),
-            _ => return Err(From::from("Invalid reply from snapshot index")),
-        };
+        self.snapshot_index.commit(&snap_info);
         self.flush_snapshot_index();
 
         Ok(())
     }
 
     pub fn flush_snapshot_index(&self) {
-        match self.snapshot_index.send_reply(snapshot::Msg::Flush) {
-            snapshot::Reply::FlushOk => (),
-            _ => panic!("Invalid reply from snapshot index"),
-        };
+        self.snapshot_index.flush()
     }
 
     pub fn flush_blob_store(&self) {
@@ -786,16 +740,13 @@ impl<B: 'static + blob::StoreBackend + Clone + Send> HatRc<B> {
 
     pub fn checkout_in_dir(&self, family_name: String, output_dir: PathBuf) {
         // Extract latest snapshot info:
-        let (_info, dir_hash, dir_ref) =
-            match self.snapshot_index
-                      .send_reply(snapshot::Msg::Latest(family_name.clone())) {
-                snapshot::Reply::Snapshot(Some((i, h, Some(r)))) => (i, h, r),
-                snapshot::Reply::Snapshot(_) => {
-                    panic!("Tried to checkout family '{}' before first completed commit",
-                           family_name)
-                }
-                _ => panic!("Unexpected result from snapshot index"),
-            };
+        let (_info, dir_hash, dir_ref) = match self.snapshot_index.latest(&family_name) {
+            Some((i, h, Some(r))) => (i, h, r),
+            _ => {
+                panic!("Tried to checkout family '{}' before first completed commit",
+                       family_name)
+            }
+        };
 
         let family = self.open_family(family_name.clone())
                          .expect(&format!("Could not open family '{}'", family_name));
@@ -844,28 +795,19 @@ impl<B: 'static + blob::StoreBackend + Clone + Send> HatRc<B> {
     }
 
     pub fn deregister(&mut self, family: &Family, snapshot_id: i64) -> Result<(), HatError> {
-        let (info, dir_hash, dir_ref) =
-            match self.snapshot_index
-                      .send_reply(snapshot::Msg::Lookup(family.name.clone(), snapshot_id)) {
-                snapshot::Reply::Snapshot(opt) => {
-                    match opt {
-                        Some((i, h, Some(r))) => (i, h, r),
-                        _ => {
-                            return Err(From::from(format!("No complete snapshot found for \
-                                                           family {} with id {:?}",
-                                                          family.name,
-                                                          snapshot_id)));
-                        }
-                    }
-                }
-                _ => return Err(From::from("Unexpected reply from snapshot index")),
-            };
+        let (info, dir_hash, dir_ref) = match self.snapshot_index
+                                                  .lookup(&family.name, snapshot_id) {
+            Some((i, h, Some(r))) => (i, h, r),
+            _ => {
+                return Err(From::from(format!("No complete snapshot found for family {} with \
+                                               id {:?}",
+                                              family.name,
+                                              snapshot_id)));
+            }
+        };
 
         // Make the snapshot to enable resuming.
-        match self.snapshot_index.send_reply(snapshot::Msg::WillDelete(info.clone())) {
-            snapshot::Reply::UpdateOk => (),
-            _ => return Err(From::from("Unexpected reply from snapshot index")),
-        }
+        self.snapshot_index.will_delete(&info);
         self.flush_snapshot_index();
 
         let local_family = family.clone();
@@ -895,7 +837,7 @@ impl<B: 'static + blob::StoreBackend + Clone + Send> HatRc<B> {
             id_receiver
         };
 
-        let final_ref = get_hash_id(&self.hash_index, &dir_hash)
+        let final_ref = self.hash_index.get_id(&dir_hash)
                             .expect("Snapshot hash does not exist");
         try!(self.gc.deregister(info.clone(), final_ref, listing));
         try!(family.flush());
@@ -920,10 +862,7 @@ impl<B: 'static + blob::StoreBackend + Clone + Send> HatRc<B> {
                            final_ref: gc::Id)
                            -> Result<(), HatError> {
         // Mark the snapshot to enable resuming.
-        match self.snapshot_index.send_reply(snapshot::Msg::ReadyDelete(snap_info.clone())) {
-            snapshot::Reply::UpdateOk => (),
-            _ => return Err(From::from("Unexpected reply from snapshot index.")),
-        }
+        self.snapshot_index.ready_delete(&snap_info);
         self.flush_snapshot_index();
 
         // Clear GC state.
@@ -931,13 +870,10 @@ impl<B: 'static + blob::StoreBackend + Clone + Send> HatRc<B> {
         try!(family.flush());
 
         // Delete snapshot metadata.
-        self.snapshot_index.send_reply(snapshot::Msg::Delete(snap_info));
+        self.snapshot_index.delete(snap_info);
         self.flush_snapshot_index();
 
-        match self.snapshot_index.send_reply(snapshot::Msg::Flush) {
-            snapshot::Reply::FlushOk => (),
-            _ => return Err(From::from("Unexpected reply from snapshot index.")),
-        };
+        self.snapshot_index.flush();
 
         Ok(self.flush_snapshot_index())
     }
