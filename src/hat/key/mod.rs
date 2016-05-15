@@ -237,7 +237,7 @@ impl HashTreeBackend for HashStoreBackend {
             hash::ReserveResult::HashKnown => {
                 // Someone came before us: piggyback on their result.
                 return self.fetch_persistent_ref(hash)
-                           .expect("Could not find persistent_ref for known chunk.");
+                    .expect("Could not find persistent_ref for known chunk.");
             }
             hash::ReserveResult::ReserveOk => {
                 // We came first: this data-chunk is ours to process.
@@ -325,7 +325,7 @@ impl<IT: Iterator<Item = Vec<u8>>> MsgHandler<Msg<IT>, Result<Reply, MsgError>> 
 
             Msg::Insert(org_entry, chunk_it_opt) => {
                 let entry = match try!(self.index
-                                           .lookup(org_entry.parent_id, org_entry.name.clone())) {
+                    .lookup(org_entry.parent_id, org_entry.name.clone())) {
                     Some(ref entry) if org_entry.accessed == entry.accessed &&
                                        org_entry.modified == entry.modified &&
                                        org_entry.created == entry.created => {
@@ -516,12 +516,12 @@ mod tests {
     fn insert_and_update_fs(fs: &mut FileSystem, ks_p: &StoreProcess<EntryStub>) {
         let local_file = fs.file.clone();
         let id = match ks_p.send_reply(Msg::Insert(fs.file.key_entry.clone(),
-                                                   if fs.file.data.is_some() {
-                                                       Some(Box::new(move |()| Some(local_file)))
-                                                   } else {
-                                                       None
-                                                   }))
-                           .unwrap() {
+                                    if fs.file.data.is_some() {
+                                        Some(Box::new(move |()| Some(local_file)))
+                                    } else {
+                                        None
+                                    }))
+            .unwrap() {
             Reply::Id(id) => id,
             _ => panic!("unexpected reply from key store"),
         };
@@ -622,7 +622,7 @@ mod bench {
     fn insert_1_key_x_128000_zeros(bench: &mut Bencher) {
         let backend = DevNullBackend;
         let ks_p: StoreProcess<EntryStub> = Process::new(move || Store::new_for_testing(backend))
-                                                .unwrap();
+            .unwrap();
 
         let bytes = vec![0u8; 128*1024];
 
@@ -660,7 +660,7 @@ mod bench {
     fn insert_1_key_x_128000_unique(bench: &mut Bencher) {
         let backend = DevNullBackend;
         let ks_p: StoreProcess<EntryStub> = Process::new(move || Store::new_for_testing(backend))
-                                                .unwrap();
+            .unwrap();
 
         let bytes = vec![0u8; 128*1024];
 
@@ -702,7 +702,7 @@ mod bench {
     fn insert_1_key_x_16_x_128000_zeros(bench: &mut Bencher) {
         let backend = DevNullBackend;
         let ks_p: StoreProcess<EntryStub> = Process::new(move || Store::new_for_testing(backend))
-                                                .unwrap();
+            .unwrap();
 
         bench.iter(|| {
             let bytes = vec![0u8; 128*1024];
@@ -740,7 +740,7 @@ mod bench {
     fn insert_1_key_x_16_x_128000_unique(bench: &mut Bencher) {
         let backend = DevNullBackend;
         let ks_p: StoreProcess<EntryStub> = Process::new(move || Store::new_for_testing(backend))
-                                                .unwrap();
+            .unwrap();
 
         let bytes = vec![0u8; 128*1024];
         let mut i = 0i32;
@@ -794,7 +794,7 @@ mod bench {
     fn insert_1_key_unchanged_empty(bench: &mut Bencher) {
         let backend = DevNullBackend;
         let ks_p: StoreProcess<EntryStub> = Process::new(move || Store::new_for_testing(backend))
-                                                .unwrap();
+            .unwrap();
 
         bench.iter(|| {
             let entry = EntryStub {
@@ -821,7 +821,7 @@ mod bench {
     fn insert_1_key_updated_empty(bench: &mut Bencher) {
         let backend = DevNullBackend;
         let ks_p: StoreProcess<EntryStub> = Process::new(move || Store::new_for_testing(backend))
-                                                .unwrap();
+            .unwrap();
 
         let mut i = 0;
         bench.iter(|| {
@@ -850,7 +850,7 @@ mod bench {
     fn insert_1_key_unique_empty(bench: &mut Bencher) {
         let backend = DevNullBackend;
         let ks_p: StoreProcess<EntryStub> = Process::new(move || Store::new_for_testing(backend))
-                                                .unwrap();
+            .unwrap();
 
         let mut i = 0;
         bench.iter(|| {

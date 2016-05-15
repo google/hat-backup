@@ -102,7 +102,7 @@ impl InternalKeyIndex {
 
     fn last_insert_rowid(&self) -> Result<i64, IndexError> {
         let id = try!(diesel::select(diesel::expression::sql("last_insert_rowid()"))
-                          .first::<i64>(&self.conn));
+            .first::<i64>(&self.conn));
         Ok(id)
     }
 
@@ -130,12 +130,12 @@ impl InternalKeyIndex {
             Some(id_) => {
                 // Replace existing entry.
                 try!(diesel::update(keys.find(id_ as i64))
-                         .set((parent.eq(entry.parent_id.map(|x| x as i64)),
-                               name.eq(&entry.name[..]),
-                               created.eq(entry.created),
-                               modified.eq(entry.modified),
-                               accessed.eq(entry.accessed)))
-                         .execute(&self.conn));
+                    .set((parent.eq(entry.parent_id.map(|x| x as i64)),
+                          name.eq(&entry.name[..]),
+                          created.eq(entry.created),
+                          modified.eq(entry.modified),
+                          accessed.eq(entry.accessed)))
+                    .execute(&self.conn));
                 entry
             }
             None => {
@@ -155,8 +155,8 @@ impl InternalKeyIndex {
                     };
 
                     try!(diesel::insert(&new)
-                             .into(keys)
-                             .execute(&self.conn));
+                        .into(keys)
+                        .execute(&self.conn));
                 }
                 let mut entry = entry;
                 entry.id = Some(try!(self.last_insert_rowid()) as u64);
@@ -178,15 +178,15 @@ impl InternalKeyIndex {
         let row_opt = match parent_ {
             Some(p) => {
                 try!(keys.filter(parent.eq(p as i64))
-                         .filter(name.eq(&name_[..]))
-                         .first::<schema::Key>(&self.conn)
-                         .optional())
+                    .filter(name.eq(&name_[..]))
+                    .first::<schema::Key>(&self.conn)
+                    .optional())
             }
             None => {
                 try!(keys.filter(parent.is_null())
-                         .filter(name.eq(&name_[..]))
-                         .first::<schema::Key>(&self.conn)
-                         .optional())
+                    .filter(name.eq(&name_[..]))
+                    .first::<schema::Key>(&self.conn)
+                    .optional())
             }
         };
 
@@ -230,14 +230,14 @@ impl InternalKeyIndex {
 
         if entry.modified.is_some() {
             try!(diesel::update(keys.find(id_)
-                                    .filter(modified.eq::<Option<i64>>(None)
-                                                    .or(modified.le(entry.modified))))
-                     .set((hash.eq(hash_bytes), persistent_ref.eq(persistent_ref_bytes)))
-                     .execute(&self.conn));
+                    .filter(modified.eq::<Option<i64>>(None)
+                        .or(modified.le(entry.modified))))
+                .set((hash.eq(hash_bytes), persistent_ref.eq(persistent_ref_bytes)))
+                .execute(&self.conn));
         } else {
             try!(diesel::update(keys.find(id_))
-                     .set((hash.eq(hash_bytes), persistent_ref.eq(persistent_ref_bytes)))
-                     .execute(&self.conn));
+                .set((hash.eq(hash_bytes), persistent_ref.eq(persistent_ref_bytes)))
+                .execute(&self.conn));
         }
 
         self.maybe_flush()
@@ -253,35 +253,35 @@ impl InternalKeyIndex {
         let rows = match parent_opt {
             Some(p) => {
                 try!(keys.filter(parent.eq(p as i64))
-                         .load::<schema::Key>(&self.conn))
+                    .load::<schema::Key>(&self.conn))
             }
             None => {
                 try!(keys.filter(parent.is_null())
-                         .load::<schema::Key>(&self.conn))
+                    .load::<schema::Key>(&self.conn))
             }
         };
 
         Ok(rows.into_iter()
-               .map(|mut r| {
-                   (Entry {
-                       id: Some(r.id as u64),
-                       parent_id: r.parent.map(|x| x as u64),
-                       name: r.name,
-                       created: r.created,
-                       modified: r.modified,
-                       accessed: r.accessed,
-                       permissions: r.permissions
-                                     .map(|x| x as u64),
-                       user_id: r.user_id.map(|x| x as u64),
-                       group_id: r.group_id.map(|x| x as u64),
-                       data_hash: r.hash,
-                       data_length: None,
-                   },
-                    r.persistent_ref
-                     .as_mut()
-                     .map(|p| blob::ChunkRef::from_bytes(&mut &p[..]).unwrap()))
-               })
-               .collect())
+            .map(|mut r| {
+                (Entry {
+                    id: Some(r.id as u64),
+                    parent_id: r.parent.map(|x| x as u64),
+                    name: r.name,
+                    created: r.created,
+                    modified: r.modified,
+                    accessed: r.accessed,
+                    permissions: r.permissions
+                        .map(|x| x as u64),
+                    user_id: r.user_id.map(|x| x as u64),
+                    group_id: r.group_id.map(|x| x as u64),
+                    data_hash: r.hash,
+                    data_length: None,
+                },
+                 r.persistent_ref
+                    .as_mut()
+                    .map(|p| blob::ChunkRef::from_bytes(&mut &p[..]).unwrap()))
+            })
+            .collect())
     }
 }
 

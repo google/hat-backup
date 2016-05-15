@@ -103,7 +103,7 @@ fn hash_refs_from_bytes(bytes: &[u8]) -> Option<Vec<HashRef>> {
 
     let reader = capnp::serialize_packed::read_message(&mut &bytes[..],
                                                        capnp::message::ReaderOptions::new())
-                     .unwrap();
+        .unwrap();
     let msg = reader.get_root::<root_capnp::hash_ref_list::Reader>().unwrap();
 
     for ref_ in msg.get_hash_refs().unwrap().iter() {
@@ -252,9 +252,9 @@ impl<B: HashTreeBackend + Clone> SimpleHashTreeWriter<B> {
 
         // Locate first level that isn't empty (has data to collapse)
         let first_non_empty_level_idx = self.levels
-                                            .iter()
-                                            .take_while(|level| level.is_empty())
-                                            .count();
+            .iter()
+            .take_while(|level| level.is_empty())
+            .count();
 
         // Unless only root has data, collapse all levels up to top level (which is handled next)
         let top_level = self.top_level().expect("levels.len() > 0");
@@ -323,11 +323,11 @@ impl<B: HashTreeBackend + Clone> SimpleHashTreeReader<B> {
         }
 
         let pref = root_ref.or_else(|| backend.fetch_persistent_ref(root_hash))
-                           .expect("Could not find tree root hash");
+            .expect("Could not find tree root hash");
         let kind = pref.kind.clone();
 
         let data = backend.fetch_chunk(root_hash, Some(pref))
-                          .expect("Could not find tree root hash.");
+            .expect("Could not find tree root hash.");
         match kind {
             // This is a raw data block.
             Kind::TreeLeaf => Some(ReaderResult::SingleBlock(data)),
@@ -354,17 +354,17 @@ impl<B: HashTreeBackend + Clone> SimpleHashTreeReader<B> {
             match child.persistent_ref.kind {
                 Kind::TreeLeaf => {
                     out.send(Entry {
-                           hash: hash,
-                           persistent_ref: Some(child.persistent_ref),
-                           level: 0,
-                           payload: None,
-                       })
-                       .unwrap()
+                            hash: hash,
+                            persistent_ref: Some(child.persistent_ref),
+                            level: 0,
+                            payload: None,
+                        })
+                        .unwrap()
                 }
                 Kind::TreeBranch => {
                     let data = self.backend
-                                   .fetch_chunk(&hash, Some(child.persistent_ref.clone()))
-                                   .expect("Invalid hash ref");
+                        .fetch_chunk(&hash, Some(child.persistent_ref.clone()))
+                        .expect("Invalid hash ref");
 
                     let mut new_childs = hash_refs_from_bytes(&data[..]).unwrap();
                     new_childs.reverse();
@@ -375,12 +375,12 @@ impl<B: HashTreeBackend + Clone> SimpleHashTreeReader<B> {
                     };
                     let (child_payload, child_level) = next.list_entries(out.clone());
                     out.send(Entry {
-                           hash: hash,
-                           persistent_ref: Some(child.persistent_ref),
-                           level: child_level,
-                           payload: Some(child_payload),
-                       })
-                       .unwrap();
+                            hash: hash,
+                            persistent_ref: Some(child.persistent_ref),
+                            level: child_level,
+                            payload: Some(child_payload),
+                        })
+                        .unwrap();
 
                     let my_level = 1 + child_level;
                     assert!(level == 1 || level == my_level);
@@ -409,8 +409,8 @@ impl<B: HashTreeBackend + Clone> SimpleHashTreeReader<B> {
             let hash = Hash { bytes: child.hash };
             let kind = child.persistent_ref.kind.clone();
             let data = self.backend
-                           .fetch_chunk(&hash, Some(child.persistent_ref))
-                           .expect("Invalid hash ref");
+                .fetch_chunk(&hash, Some(child.persistent_ref))
+                .expect("Invalid hash ref");
 
             match kind {
                 Kind::TreeLeaf => return Some(data),
@@ -552,7 +552,7 @@ mod tests {
             let (hash, hash_ref) = ht.hash();
 
             let mut tree_it = SimpleHashTreeReader::open(backend, &hash, Some(hash_ref))
-                                  .expect("tree not found");
+                .expect("tree not found");
 
             if chunks_count == 0 {
                 // An empty tree is a tree with a single empty chunk (as opposed to no chunks).
@@ -586,7 +586,7 @@ mod tests {
         let (hash, hash_ref) = ht.hash();
 
         let mut it = SimpleHashTreeReader::open(backend, &hash, Some(hash_ref))
-                         .expect("tree not found");
+            .expect("tree not found");
 
         assert_eq!(Some(block), it.next());
         assert_eq!(0, it.count());
@@ -604,7 +604,7 @@ mod tests {
         let (hash, hash_ref) = ht.hash();
 
         let mut it = SimpleHashTreeReader::open(backend, &hash, Some(hash_ref))
-                         .expect("tree not found");
+            .expect("tree not found");
         assert_eq!(Some(block), it.next());
         assert_eq!(0, it.count());
     }
@@ -627,7 +627,7 @@ mod tests {
         let (hash, hash_ref) = ht.hash();
 
         let mut it = SimpleHashTreeReader::open(backend.clone(), &hash, Some(hash_ref))
-                         .expect("tree not found");
+            .expect("tree not found");
 
         for block in blocks {
             assert_eq!(Some(&block), it.next().as_ref());
@@ -657,7 +657,7 @@ mod tests {
         let (hash, hash_ref) = ht.hash();
 
         let it = SimpleHashTreeReader::open(backend, &hash, Some(hash_ref))
-                     .expect("tree not found");
+            .expect("tree not found");
 
         for (i, chunk) in it.enumerate() {
             bytes[0] = (i + 1) as u8;
@@ -684,7 +684,7 @@ mod tests {
         }
 
         let it = SimpleHashTreeReader::open(backend, &hash, Some(hash_ref))
-                     .expect("tree not found");
+            .expect("tree not found");
 
         for (i, chunk) in it.enumerate() {
             bytes[0] = (i + 1) as u8;

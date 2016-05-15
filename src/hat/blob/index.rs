@@ -95,10 +95,10 @@ impl InternalBlobIndex {
         use super::schema::blobs::dsl::*;
 
         let id_opt = blobs.select(max(id).nullable())
-                          .first::<Option<i64>>(&self.conn)
-                          .optional()
-                          .expect("Error querying blobs")
-                          .and_then(|x| x);
+            .first::<Option<i64>>(&self.conn)
+            .optional()
+            .expect("Error querying blobs")
+            .and_then(|x| x);
 
         self.next_id = 1 + id_opt.unwrap_or(0);
     }
@@ -175,10 +175,10 @@ impl InternalBlobIndex {
     fn find_id(&mut self, name_: &[u8]) -> Option<i64> {
         use super::schema::blobs::dsl::*;
         blobs.filter(name.eq(name_))
-             .select(id)
-             .first::<i64>(&self.conn)
-             .optional()
-             .expect("Error reading blob")
+            .select(id)
+            .first::<i64>(&self.conn)
+            .optional()
+            .expect("Error reading blob")
     }
 
     fn tag(&mut self, tag_: tags::Tag, target: Option<&BlobDesc>) {
@@ -216,16 +216,16 @@ impl InternalBlobIndex {
     fn list_by_tag(&mut self, tag_: tags::Tag) -> Vec<BlobDesc> {
         use super::schema::blobs::dsl::*;
         blobs.filter(tag.eq(tag_ as i32))
-             .load::<schema::Blob>(&self.conn)
-             .expect("Error listing blobs")
-             .into_iter()
-             .map(|blob_| {
-                 BlobDesc {
-                     id: blob_.id,
-                     name: blob_.name,
-                 }
-             })
-             .collect()
+            .load::<schema::Blob>(&self.conn)
+            .expect("Error listing blobs")
+            .into_iter()
+            .map(|blob_| {
+                BlobDesc {
+                    id: blob_.id,
+                    name: blob_.name,
+                }
+            })
+            .collect()
     }
 }
 

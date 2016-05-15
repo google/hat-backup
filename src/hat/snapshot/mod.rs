@@ -128,20 +128,20 @@ impl InternalSnapshotIndex {
         use self::schema::family::dsl::*;
 
         family.filter(name.eq(name_))
-              .select(id)
-              .first::<i64>(&self.conn)
-              .optional()
-              .expect("Error reading family")
+            .select(id)
+            .first::<i64>(&self.conn)
+            .optional()
+            .expect("Error reading family")
     }
 
     fn delete_snapshot(&self, info: Info) {
         use self::schema::snapshots::dsl::*;
 
         let count = diesel::delete(snapshots.find(info.unique_id)
-                                            .filter(family_id.eq(info.family_id))
-                                            .filter(snapshot_id.eq(info.snapshot_id)))
-                        .execute(&self.conn)
-                        .expect("Error deleting snapshots");
+                .filter(family_id.eq(info.family_id))
+                .filter(snapshot_id.eq(info.snapshot_id)))
+            .execute(&self.conn)
+            .expect("Error deleting snapshots");
         assert!(count <= 1);
     }
 
@@ -168,11 +168,11 @@ impl InternalSnapshotIndex {
         use diesel::expression::max;
 
         snapshots.filter(family_id.eq(family_id_))
-                 .select(max(snapshot_id).nullable())
-                 .first::<Option<i64>>(&self.conn)
-                 .optional()
-                 .expect("Error reading latest snapshot id")
-                 .and_then(|x| x)
+            .select(max(snapshot_id).nullable())
+            .first::<Option<i64>>(&self.conn)
+            .optional()
+            .expect("Error reading latest snapshot id")
+            .and_then(|x| x)
     }
 
     fn get_snapshot_info(&mut self,
@@ -183,12 +183,12 @@ impl InternalSnapshotIndex {
         use self::schema::family::dsl::{family, name};
 
         let row_opt = snapshots.inner_join(family)
-                               .filter(name.eq(family_name_))
-                               .filter(snapshot_id.eq(snapshot_id_))
-                               .select((id, tag, family_id, snapshot_id, msg, hash, tree_ref))
-                               .first::<self::schema::Snapshot>(&self.conn)
-                               .optional()
-                               .expect("Error reading snapshot info");
+            .filter(name.eq(family_name_))
+            .filter(snapshot_id.eq(snapshot_id_))
+            .select((id, tag, family_id, snapshot_id, msg, hash, tree_ref))
+            .first::<self::schema::Snapshot>(&self.conn)
+            .optional()
+            .expect("Error reading snapshot info");
 
         row_opt.map(|snap| {
             (Info {
@@ -262,10 +262,10 @@ impl InternalSnapshotIndex {
             use self::schema::snapshots::dsl::*;
 
             let row_opt = snapshots.filter(family_id.eq(family_id_))
-                                   .order(snapshot_id.desc())
-                                   .first::<self::schema::Snapshot>(&self.conn)
-                                   .optional()
-                                   .expect("Error reading latest snapshot");
+                .order(snapshot_id.desc())
+                .first::<self::schema::Snapshot>(&self.conn)
+                .optional()
+                .expect("Error reading latest snapshot");
 
             row_opt.map(|snap| {
                 (Info {
@@ -284,20 +284,22 @@ impl InternalSnapshotIndex {
         use self::schema::snapshots::dsl::*;
         use self::schema::family::dsl::family;
         let rows = match skip_tag {
-                       None =>
-                snapshots.inner_join(family)
-                         .load::<(self::schema::Snapshot, self::schema::Family)>(&self.conn),
-                       Some(skip) =>
-                snapshots.inner_join(family)
-                         .filter(tag.ne(skip as i32))
-                         .load::<(self::schema::Snapshot, self::schema::Family)>(&self.conn),
-                   }
-                   .unwrap();
+                None => {
+                    snapshots.inner_join(family)
+                        .load::<(self::schema::Snapshot, self::schema::Family)>(&self.conn)
+                }
+                Some(skip) => {
+                    snapshots.inner_join(family)
+                        .filter(tag.ne(skip as i32))
+                        .load::<(self::schema::Snapshot, self::schema::Family)>(&self.conn)
+                }
+            }
+            .unwrap();
 
         rows.into_iter()
             .map(|(snap, fam)| {
                 let status = tags::tag_from_num(snap.tag as i64)
-                                 .map_or(WorkStatus::CommitComplete, tag_to_work_status);
+                    .map_or(WorkStatus::CommitComplete, tag_to_work_status);
                 let hash_ = snap.hash.and_then(|bytes| {
                     if bytes.is_empty() {
                         None
@@ -373,7 +375,9 @@ impl SnapshotIndex {
         SnapshotIndex::new_with_shutdown(":memory:", shutdown)
     }
 
-    pub fn new_with_shutdown(path: &str, shutdown: Option<i64>) -> Result<SnapshotIndex, IndexError> {
+    pub fn new_with_shutdown(path: &str,
+                             shutdown: Option<i64>)
+                             -> Result<SnapshotIndex, IndexError> {
         let index = try!(InternalSnapshotIndex::new(path));
         Ok(SnapshotIndex(Arc::new(Mutex::new((index, shutdown)))))
     }

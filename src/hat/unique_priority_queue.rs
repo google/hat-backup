@@ -80,7 +80,7 @@ impl<P: Clone + Ord, K: Clone + Ord, V> UniquePriorityQueue<P, K, V> {
 
     pub fn pop_min_if_complete(&mut self) -> Option<(P, K, V)> {
         let min_opt = self.priority
-                          .pop_min_when(|_k, min| min.0 == Status::Ready && min.2.is_some());
+            .pop_min_when(|_k, min| min.0 == Status::Ready && min.2.is_some());
         min_opt.map(|(p, (_status, k, v_opt))| {
             let v = v_opt.unwrap();
             self.key_to_priority.remove(&k);
