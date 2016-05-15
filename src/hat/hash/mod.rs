@@ -568,8 +568,9 @@ impl HashIndex {
     pub fn fetch_persistent_ref(&self, hash: &Hash) -> Result<Option<blob::ChunkRef>, MsgError> {
         assert!(!hash.bytes.is_empty());
         match self.lock().0.locate(hash) {
-            Some(ref queue_entry) if queue_entry.persistent_ref.is_none() => 
-                Err(MsgError::RetryError(From::from("Persistent reference not yet ready."))),
+            Some(ref queue_entry) if queue_entry.persistent_ref.is_none() => {
+                Err(MsgError::RetryError(From::from("Persistent reference not yet ready.")))
+            }
             Some(queue_entry) => Ok(Some(queue_entry.persistent_ref.expect("persistent_ref"))),
             None => Ok(None),
         }

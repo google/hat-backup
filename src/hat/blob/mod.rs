@@ -542,8 +542,9 @@ pub mod tests {
             let mut ids = Vec::new();
             for chunk in chunks.iter() {
                 match bs_p.send_reply(Msg::Store(chunk.to_owned(),
-                                                 Kind::TreeLeaf,
-                                                 Box::new(move |_| {}))).unwrap() {
+                                           Kind::TreeLeaf,
+                                           Box::new(move |_| {})))
+                    .unwrap() {
                     Reply::StoreOk(id) => {
                         ids.push((id, chunk));
                     }
@@ -588,8 +589,9 @@ pub mod tests {
             let mut ids = Vec::new();
             for chunk in chunks.iter() {
                 match bs_p.send_reply(Msg::Store(chunk.to_owned(),
-                                                 Kind::TreeLeaf,
-                                                 Box::new(move |_| {}))).unwrap() {
+                                           Kind::TreeLeaf,
+                                           Box::new(move |_| {})))
+                    .unwrap() {
                     Reply::StoreOk(id) => {
                         ids.push((id, chunk));
                     }

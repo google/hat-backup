@@ -193,7 +193,8 @@ fn list_snapshot(backend: &key::HashStoreBackend,
                  out: &mpsc::Sender<hash::Hash>,
                  family: &Family,
                  dir_hash: &hash::Hash,
-                 dir_ref: blob::ChunkRef) -> Result<(), HatError> {
+                 dir_ref: blob::ChunkRef)
+                 -> Result<(), HatError> {
     for (entry, hash, pref) in try!(family.fetch_dir_data(dir_hash, dir_ref, backend.clone())) {
         if entry.data_hash.is_some() {
             // File.
@@ -419,10 +420,10 @@ impl<B: 'static + blob::StoreBackend + Clone + Send> HatRc<B> {
         let (register_sender, register_receiver) = mpsc::channel();
         let (recover_sender, recover_receiver) = mpsc::channel();
         let (final_payload, final_level) = try!(self.recover_dir_ref(&family,
-                                                                hash,
-                                                                dir_ref.clone(),
-                                                                register_sender,
-                                                                recover_sender));
+                                                                     hash,
+                                                                     dir_ref.clone(),
+                                                                     register_sender,
+                                                                     recover_sender));
         // Recover hashes for tree child chunks.
         for entry in recover_receiver {
             try!(recover_entry(&self.hash_index, &self.blob_store, entry));
@@ -467,12 +468,14 @@ impl<B: 'static + blob::StoreBackend + Clone + Send> HatRc<B> {
                        register_out: mpsc::Sender<hash::Entry>,
                        recover_out: mpsc::Sender<hash::Entry>)
                        -> Result<(Option<Vec<u8>>, i64), HatError> {
-        fn recover_tree<B: hash::tree::HashTreeBackend<Err=key::MsgError> + Clone>(backend: B,
-                                                                hash: &hash::Hash,
-                                                                pref: blob::ChunkRef,
-                                                                out: mpsc::Sender<hash::Entry>)
-                                                                -> Result<(Option<Vec<u8>>, i64), HatError> {
-            match try!(hash::tree::SimpleHashTreeReader::open(backend, &hash, Some(pref))).unwrap() {
+        fn recover_tree<B: hash::tree::HashTreeBackend<Err = key::MsgError> + Clone>
+            (backend: B,
+             hash: &hash::Hash,
+             pref: blob::ChunkRef,
+             out: mpsc::Sender<hash::Entry>)
+             -> Result<(Option<Vec<u8>>, i64), HatError> {
+            match try!(hash::tree::SimpleHashTreeReader::open(backend, &hash, Some(pref)))
+                .unwrap() {
                 hash::tree::ReaderResult::Empty |
                 hash::tree::ReaderResult::SingleBlock(..) => Ok((None, 0)),
                 hash::tree::ReaderResult::Tree(mut reader) => {
@@ -487,16 +490,16 @@ impl<B: 'static + blob::StoreBackend + Clone + Send> HatRc<B> {
                 Some(..) => {
                     // Entry is a data leaf. Read the hash tree.
                     try!(recover_tree(self.hash_backend.clone(),
-                                 &hash,
-                                 pref.clone(),
-                                 recover_out.clone()))
+                                      &hash,
+                                      pref.clone(),
+                                      recover_out.clone()))
                 }
                 None => {
                     try!(self.recover_dir_ref(&family,
-                                         &hash,
-                                         pref.clone(),
-                                         register_out.clone(),
-                                         recover_out.clone()))
+                                              &hash,
+                                              pref.clone(),
+                                              register_out.clone(),
+                                              recover_out.clone()))
                 }
             };
             // We register the top hash with the GC (tree nodes are inferred).
@@ -741,7 +744,10 @@ impl<B: 'static + blob::StoreBackend + Clone + Send> HatRc<B> {
         }
     }
 
-    pub fn checkout_in_dir(&self, family_name: String, output_dir: PathBuf) -> Result<(), HatError> {
+    pub fn checkout_in_dir(&self,
+                           family_name: String,
+                           output_dir: PathBuf)
+                           -> Result<(), HatError> {
         // Extract latest snapshot info:
         let (_info, dir_hash, dir_ref) = match self.snapshot_index.latest(&family_name) {
             Some((i, h, Some(r))) => (i, h, r),
@@ -762,7 +768,8 @@ impl<B: 'static + blob::StoreBackend + Clone + Send> HatRc<B> {
                         family: &Family,
                         output: &mut PathBuf,
                         dir_hash: &hash::Hash,
-                        dir_ref: blob::ChunkRef) -> Result<(), HatError> {
+                        dir_ref: blob::ChunkRef)
+                        -> Result<(), HatError> {
         fs::create_dir_all(&output).unwrap();
         for (entry, hash, pref) in
             try!(family.fetch_dir_data(dir_hash, dir_ref, self.hash_backend.clone())) {
@@ -773,9 +780,10 @@ impl<B: 'static + blob::StoreBackend + Clone + Send> HatRc<B> {
 
             if entry.data_hash.is_some() {
                 let mut fd = fs::File::create(&output).unwrap();
-                let tree_opt = try!(hash::tree::SimpleHashTreeReader::open(self.hash_backend.clone(),
-                                                                      &hash,
-                                                                      Some(pref)));
+                let tree_opt = try!(hash::tree::SimpleHashTreeReader::open(self.hash_backend
+                                                                               .clone(),
+                                                                           &hash,
+                                                                           Some(pref)));
                 if let Some(tree) = tree_opt {
                     family.write_file_chunks(&mut fd, tree);
                 }
@@ -823,7 +831,8 @@ impl<B: 'static + blob::StoreBackend + Clone + Send> HatRc<B> {
                           &sender,
                           &local_family,
                           &local_dir_hash,
-                          dir_ref).unwrap();
+                          dir_ref)
+                .unwrap();
             drop(sender);
 
             let (id_sender, id_receiver) = mpsc::channel();
@@ -1223,7 +1232,7 @@ impl Family {
         }
     }
 
-    pub fn fetch_dir_data<HTB: hash::tree::HashTreeBackend<Err=key::MsgError> + Clone>
+    pub fn fetch_dir_data<HTB: hash::tree::HashTreeBackend<Err = key::MsgError> + Clone>
         (&self,
          dir_hash: &hash::Hash,
          dir_ref: blob::ChunkRef,

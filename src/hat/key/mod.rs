@@ -134,7 +134,7 @@ impl Store {
         try!(self.blob_store.send_reply(blob::Msg::Flush));
         self.hash_index.flush();
         try!(self.index.flush());
-        
+
         Ok(())
     }
 
@@ -166,7 +166,9 @@ impl HashStoreBackend {
         }
     }
 
-    fn fetch_chunk_from_persistent_ref(&mut self, chunk_ref: blob::ChunkRef) -> Result<Option<Vec<u8>>, MsgError> {
+    fn fetch_chunk_from_persistent_ref(&mut self,
+                                       chunk_ref: blob::ChunkRef)
+                                       -> Result<Option<Vec<u8>>, MsgError> {
         match try!(self.blob_store.send_reply(blob::Msg::Retrieve(chunk_ref))) {
             blob::Reply::RetrieveOk(chunk) => Ok(Some(chunk)),
             _ => Ok(None),
@@ -202,7 +204,9 @@ impl HashTreeBackend for HashStoreBackend {
         }))
     }
 
-    fn fetch_persistent_ref(&mut self, hash: &hash::Hash) -> Result<Option<blob::ChunkRef>, MsgError> {
+    fn fetch_persistent_ref(&mut self,
+                            hash: &hash::Hash)
+                            -> Result<Option<blob::ChunkRef>, MsgError> {
         assert!(!hash.bytes.is_empty());
         loop {
             match self.hash_index.fetch_persistent_ref(hash) {
@@ -240,7 +244,7 @@ impl HashTreeBackend for HashStoreBackend {
             hash::ReserveResult::HashKnown => {
                 // Someone came before us: piggyback on their result.
                 Ok(try!(self.fetch_persistent_ref(hash))
-                      .expect("Could not find persistent_ref for known chunk."))
+                    .expect("Could not find persistent_ref for known chunk."))
             }
             hash::ReserveResult::ReserveOk => {
                 // We came first: this data-chunk is ours to process.
