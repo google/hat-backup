@@ -164,9 +164,9 @@ impl InternalHashIndex {
         use self::schema::hashes::dsl::*;
 
         let result_opt = hashes.filter(hash.eq(&hash_.bytes))
-                               .first::<schema::Hash>(&self.conn)
-                               .optional()
-                               .expect("Error querying hashes");
+            .first::<schema::Hash>(&self.conn)
+            .optional()
+            .expect("Error querying hashes");
         result_opt.map(|result| {
             let payload_ = result.payload.and_then(|b| {
                 if b.is_empty() {
@@ -200,9 +200,9 @@ impl InternalHashIndex {
         use self::schema::hashes::dsl::*;
 
         let result_opt = hashes.find(id_)
-                               .first::<schema::Hash>(&self.conn)
-                               .optional()
-                               .expect("Error querying hashes");
+            .first::<schema::Hash>(&self.conn)
+            .optional()
+            .expect("Error querying hashes");
 
         result_opt.map(|result| {
             Entry {
@@ -231,8 +231,8 @@ impl InternalHashIndex {
         use diesel::expression::max;
 
         let id_opt = hashes.select(max(id).nullable())
-                           .first::<Option<i64>>(&self.conn)
-                           .expect("Error selecting max hash id");
+            .first::<Option<i64>>(&self.conn)
+            .expect("Error selecting max hash id");
 
         self.id_counter = CumulativeCounter::new(id_opt.unwrap_or(0));
     }
@@ -331,10 +331,10 @@ impl InternalHashIndex {
         use self::schema::hashes::dsl::*;
 
         let tag_opt = hashes.find(id_)
-                            .select(tag)
-                            .first::<i64>(&self.conn)
-                            .optional()
-                            .expect("Error querying hash tag");
+            .select(tag)
+            .first::<i64>(&self.conn)
+            .optional()
+            .expect("Error querying hash tag");
 
         tag_opt.and_then(tags::tag_from_num)
     }
@@ -346,20 +346,20 @@ impl InternalHashIndex {
         use self::schema::hashes::dsl::*;
 
         hashes.filter(tag.eq(tag_))
-              .order(height.desc())
-              .select(id)
-              .load::<i64>(&self.conn)
-              .expect("Error listing hashes")
+            .order(height.desc())
+            .select(id)
+            .load::<i64>(&self.conn)
+            .expect("Error listing hashes")
     }
 
     fn read_gc_data(&mut self, hash_id_: i64, family_id_: i64) -> GcData {
         use self::schema::gc_metadata::dsl::*;
 
         let result_opt = gc_metadata.filter(hash_id.eq(hash_id_))
-                                    .filter(family_id.eq(family_id_))
-                                    .first::<schema::GcMetadata>(&self.conn)
-                                    .optional()
-                                    .expect("Error querying GC metadata");
+            .filter(family_id.eq(family_id_))
+            .first::<schema::GcMetadata>(&self.conn)
+            .optional()
+            .expect("Error querying GC metadata");
         match result_opt {
             None => {
                 GcData {
@@ -380,10 +380,10 @@ impl InternalHashIndex {
         use self::schema::gc_metadata::dsl::*;
 
         let count = diesel::update(gc_metadata.filter(hash_id.eq(hash_id_))
-                                              .filter(family_id.eq(family_id_)))
-                        .set((gc_int.eq(data.num), gc_vec.eq(&data.bytes)))
-                        .execute(&self.conn)
-                        .expect("Error updating GC metadata");
+                .filter(family_id.eq(family_id_)))
+            .set((gc_int.eq(data.num), gc_vec.eq(&data.bytes)))
+            .execute(&self.conn)
+            .expect("Error updating GC metadata");
         assert!(count <= 1);
 
         if count == 0 {
@@ -421,9 +421,9 @@ impl InternalHashIndex {
         use self::schema::gc_metadata::dsl::*;
 
         let hash_ids_ = gc_metadata.filter(family_id.eq(family_id_))
-                                   .select(hash_id)
-                                   .load::<i64>(&self.conn)
-                                   .expect("Error loading GC metadata");
+            .select(hash_id)
+            .load::<i64>(&self.conn)
+            .expect("Error loading GC metadata");
 
         for hash_id_ in hash_ids_ {
             let f = fns.next().expect("Failed to recv update function");
@@ -435,7 +435,7 @@ impl InternalHashIndex {
         use self::schema::gc_metadata::dsl::*;
 
         diesel::delete(gc_metadata.filter(hash_id.eq(hash_id_))
-                                  .filter(family_id.eq(family_id_)))
+                .filter(family_id.eq(family_id_)))
             .execute(&self.conn)
             .expect("Error deleting GC metadata");
     }
@@ -455,37 +455,37 @@ impl InternalHashIndex {
     fn list(&mut self) -> Vec<Entry> {
         use self::schema::hashes::dsl::*;
         hashes.load::<schema::Hash>(&self.conn)
-              .expect("Error listing hashes")
-              .into_iter()
-              .map(|hash_| {
-                  Entry {
-                      hash: Hash { bytes: hash_.hash },
-                      level: hash_.height,
-                      payload: hash_.payload.and_then(|p| {
-                          if p.is_empty() {
-                              None
-                          } else {
-                              Some(p)
-                          }
-                      }),
-                      persistent_ref: hash_.blob_ref.and_then(|b| {
-                          if b.is_empty() {
-                              None
-                          } else {
-                              Some(blob::ChunkRef::from_bytes(&mut &b[..]).unwrap())
-                          }
-                      }),
-                  }
-              })
-              .collect()
+            .expect("Error listing hashes")
+            .into_iter()
+            .map(|hash_| {
+                Entry {
+                    hash: Hash { bytes: hash_.hash },
+                    level: hash_.height,
+                    payload: hash_.payload.and_then(|p| {
+                        if p.is_empty() {
+                            None
+                        } else {
+                            Some(p)
+                        }
+                    }),
+                    persistent_ref: hash_.blob_ref.and_then(|b| {
+                        if b.is_empty() {
+                            None
+                        } else {
+                            Some(blob::ChunkRef::from_bytes(&mut &b[..]).unwrap())
+                        }
+                    }),
+                }
+            })
+            .collect()
     }
 
     fn delete(&mut self, id_: i64) {
         {
             use self::schema::hashes::dsl::*;
             let hash_count = diesel::delete(hashes.find(id_))
-                                 .execute(&self.conn)
-                                 .expect("Error deleting hash");
+                .execute(&self.conn)
+                .expect("Error deleting hash");
             assert!(hash_count <= 1);
         }
 

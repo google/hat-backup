@@ -149,12 +149,12 @@ impl SafeMemoryBackend {
     fn list_snapshot_refs(&self, info: snapshot::Info) -> mpsc::Receiver<Id> {
         let (sender, receiver) = mpsc::channel();
         let refs = self.backend
-                       .lock()
-                       .unwrap()
-                       .snapshot_refs
-                       .get(&info.unique_id)
-                       .unwrap_or(&vec![])
-                       .clone();
+            .lock()
+            .unwrap()
+            .snapshot_refs
+            .get(&info.unique_id)
+            .unwrap_or(&vec![])
+            .clone();
         refs.iter().map(|id| sender.send(*id)).last();
 
         receiver
@@ -186,15 +186,15 @@ impl GcBackend for SafeMemoryBackend {
 
     fn get_data(&self, hash_id: Id, family_id: Id) -> Result<GcData, Self::Err> {
         Ok(self.backend
-               .lock()
-               .unwrap()
-               .gc_data
-               .get(&(hash_id, family_id))
-               .unwrap_or(&GcData {
-                   num: 0,
-                   bytes: vec![],
-               })
-               .clone())
+            .lock()
+            .unwrap()
+            .gc_data
+            .get(&(hash_id, family_id))
+            .unwrap_or(&GcData {
+                num: 0,
+                bytes: vec![],
+            })
+            .clone())
     }
 
     fn update_data<F: UpdateFn>(&mut self,
@@ -318,9 +318,9 @@ pub fn gc_test<GC, F>(snapshots: Vec<Vec<u8>>, mk_gc: F, gc_type: GcType)
         let (sender, receiver) = mpsc::channel();
         gc.list_unused_ids(sender).unwrap();
         receiver.iter()
-                .filter(|i: &i64| refs.contains(&(*i as u8)))
-                .map(|i| panic!("ID prematurely deleted by GC: {}", i))
-                .last();
+            .filter(|i: &i64| refs.contains(&(*i as u8)))
+            .map(|i| panic!("ID prematurely deleted by GC: {}", i))
+            .last();
         // Deregister snapshot.
         let last = backend.list_snapshot_refs(infos[i].clone()).iter().last().unwrap();
         let refs = backend.list_snapshot_refs(infos[i].clone());

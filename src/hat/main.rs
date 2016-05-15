@@ -114,35 +114,31 @@ fn main() {
 
     // Create valid arguments
     let matches = App::new("hat")
-                      .version(&format!("v{}", crate_version!())[..])
-                      .about("Create backup snapshots")
-                      .arg_from_usage("--license 'Display the license'")
-                      .subcommand(SubCommand::with_name("snapshot")
-                                      .about("Create a snapshot")
-                                      .args_from_usage(arg_template))
-                      .subcommand(SubCommand::with_name("checkout")
-                                      .about("Checkout a snapshot")
-                                      .args_from_usage(arg_template))
-                      .subcommand(SubCommand::with_name("commit")
-                                      .about("Commit a snapshot")
-                                      .arg_from_usage("<NAME> 'Name of the snapshot'"))
-                      .subcommand(SubCommand::with_name("meta-commit")
-                                      .about("Commit snapshot metadata (required for recover \
-                                              command"))
-                      .subcommand(SubCommand::with_name("recover")
-                                      .about("Recover list of commit'ed snapshots"))
-                      .subcommand(SubCommand::with_name("delete")
-                                      .about("Delete a snapshot")
-                                      .args_from_usage("<NAME> 'Name of the snapshot family'
+        .version(&format!("v{}", crate_version!())[..])
+        .about("Create backup snapshots")
+        .arg_from_usage("--license 'Display the license'")
+        .subcommand(SubCommand::with_name("snapshot")
+            .about("Create a snapshot")
+            .args_from_usage(arg_template))
+        .subcommand(SubCommand::with_name("checkout")
+            .about("Checkout a snapshot")
+            .args_from_usage(arg_template))
+        .subcommand(SubCommand::with_name("commit")
+            .about("Commit a snapshot")
+            .arg_from_usage("<NAME> 'Name of the snapshot'"))
+        .subcommand(SubCommand::with_name("meta-commit")
+            .about("Commit snapshot metadata (required for recover command"))
+        .subcommand(SubCommand::with_name("recover").about("Recover list of commit'ed snapshots"))
+        .subcommand(SubCommand::with_name("delete")
+            .about("Delete a snapshot")
+            .args_from_usage("<NAME> 'Name of the snapshot family'
                                                         \
-                                                        <ID> 'The snapshot id to delete'"))
-                      .subcommand(SubCommand::with_name("gc")
-                                      .about("Garbage collect: identify and remove unused data \
-                                              blocks.")
-                                      .args_from_usage("-p --pretend 'Do not modify any data'"))
-                      .subcommand(SubCommand::with_name("resume")
-                                      .about("Resume previous failed command."))
-                      .get_matches();
+                              <ID> 'The snapshot id to delete'"))
+        .subcommand(SubCommand::with_name("gc")
+            .about("Garbage collect: identify and remove unused data blocks.")
+            .args_from_usage("-p --pretend 'Do not modify any data'"))
+        .subcommand(SubCommand::with_name("resume").about("Resume previous failed command."))
+        .get_matches();
 
     // Check for license flag
     if matches.is_present("license") {
@@ -165,10 +161,10 @@ fn main() {
 
             let backend = blob::FileBackend::new(blob_dir()).unwrap();
             let hat = hat::Hat::open_repository(PathBuf::from("repo"), backend, MAX_BLOB_SIZE)
-                          .unwrap();
+                .unwrap();
 
             let family = hat.open_family(name.clone())
-                            .expect(&format!("Could not open family '{}'", name));
+                .expect(&format!("Could not open family '{}'", name));
 
             family.snapshot_dir(PathBuf::from(path));
             family.flush().unwrap();
@@ -181,21 +177,21 @@ fn main() {
 
             let backend = blob::FileBackend::new(blob_dir()).unwrap();
             let hat = hat::Hat::open_repository(PathBuf::from("repo"), backend, MAX_BLOB_SIZE)
-                          .unwrap();
+                .unwrap();
 
             hat.checkout_in_dir(name.clone(), PathBuf::from(path));
         }
         ("meta-commit", Some(_cmd)) => {
             let backend = blob::FileBackend::new(blob_dir()).unwrap();
             let mut hat = hat::Hat::open_repository(PathBuf::from("repo"), backend, MAX_BLOB_SIZE)
-                              .unwrap();
+                .unwrap();
 
             hat.meta_commit();
         }
         ("recover", Some(_cmd)) => {
             let backend = blob::FileBackend::new(blob_dir()).unwrap();
             let mut hat = hat::Hat::open_repository(PathBuf::from("repo"), backend, MAX_BLOB_SIZE)
-                              .unwrap();
+                .unwrap();
 
             hat.recover().unwrap();
         }
@@ -204,7 +200,7 @@ fn main() {
 
             let backend = blob::FileBackend::new(blob_dir()).unwrap();
             let mut hat = hat::Hat::open_repository(PathBuf::from("repo"), backend, MAX_BLOB_SIZE)
-                              .unwrap();
+                .unwrap();
 
             hat.commit_by_name(name, None).unwrap();
         }
@@ -214,14 +210,14 @@ fn main() {
 
             let backend = blob::FileBackend::new(blob_dir()).unwrap();
             let mut hat = hat::Hat::open_repository(PathBuf::from("repo"), backend, MAX_BLOB_SIZE)
-                              .unwrap();
+                .unwrap();
 
             hat.deregister_by_name(name, id.parse::<i64>().unwrap()).unwrap();
         }
         ("gc", Some(_cmd)) => {
             let backend = blob::FileBackend::new(blob_dir()).unwrap();
             let mut hat = hat::Hat::open_repository(PathBuf::from("repo"), backend, MAX_BLOB_SIZE)
-                              .unwrap();
+                .unwrap();
             let (deleted_hashes, live_blobs) = hat.gc().unwrap();
             println!("Deleted hashes: {:?}", deleted_hashes);
             println!("Live data blobs after deletion: {:?}", live_blobs);

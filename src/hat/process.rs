@@ -120,10 +120,10 @@ impl<Msg: 'static + Send, Reply: 'static + Send> Process<Msg, Reply> {
             // fork handler
             let mut handle_msg = |msg, rep: mpsc::Sender<Reply>| {
                 my_handler.handle(msg,
-                                  Box::new(move |r| {
-                                      rep.send(r).expect("Message reply was ignored");
-                                  }))
-                          .expect("Process encountered unrecoverable error");
+                            Box::new(move |r| {
+                                rep.send(r).expect("Message reply was ignored");
+                            }))
+                    .expect("Process encountered unrecoverable error");
             };
             match shutdown_after {
                 Some(msg_count) => {
