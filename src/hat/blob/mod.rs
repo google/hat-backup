@@ -14,6 +14,7 @@
 
 //! Combines data chunks into larger blobs to be stored externally.
 
+use std::borrow::Cow;
 use std::collections::BTreeMap;
 
 use std::fs;
@@ -49,12 +50,17 @@ error_type! {
         },
         Index(IndexError) {
             cause;
-        }
+        },
+        Message(Cow<'static, str>) {
+            desc (e) &**e;
+            from (s: &'static str) s.into();
+            from (s: String) s.into();
+        },
     }
 }
 
 
-pub type StoreProcess = Process<Msg, Reply>;
+pub type StoreProcess = Process<Msg, Result<Reply, MsgError>>;
 
 pub trait StoreBackend {
     fn store(&mut self, name: &[u8], data: &[u8]) -> Result<(), String>;
@@ -348,10 +354,22 @@ impl<B: StoreBackend> Store<B> {
     }
 }
 
-impl<B: StoreBackend> MsgHandler<Msg, Reply> for Store<B> {
+impl<B: StoreBackend> MsgHandler<Msg, Result<Reply, MsgError>> for Store<B> {
     type Err = MsgError;
 
-    fn handle(&mut self, msg: Msg, reply: Box<Fn(Reply)>) -> Result<(), MsgError> {
+    fn handle(&mut self,
+              msg: Msg,
+              reply: Box<Fn(Result<Reply, MsgError>)>)
+              -> Result<(), MsgError> {
+        let reply_ok = |x| {
+            reply(Ok(x));
+            Ok(())
+        };
+        let reply_err = |e| {
+            reply(Err(e));
+            Ok(())
+        };
+
         match msg {
             Msg::Store(mut chunk, kind, callback) => {
                 if chunk.is_empty() {
@@ -363,8 +381,7 @@ impl<B: StoreBackend> MsgHandler<Msg, Reply> for Store<B> {
                     };
                     let cb_id = id.clone();
                     thread::spawn(move || callback.call(cb_id));
-                    reply(Reply::StoreOk(id));
-                    return Ok(());
+                    return reply_ok(Reply::StoreOk(id));
                 }
 
                 let id = ChunkRef {
@@ -379,35 +396,36 @@ impl<B: StoreBackend> MsgHandler<Msg, Reply> for Store<B> {
                 drop(chunk);  // now empty.
 
                 // To avoid unnecessary blocking, we reply with the ID *before* possibly flushing.
-                reply(Reply::StoreOk(id));
+                reply(Ok(Reply::StoreOk(id)));
 
                 // Flushing can be expensive, so try not block on it.
                 self.maybe_flush();
+
+                Ok(())
             }
             Msg::Retrieve(id) => {
                 if id.offset == 0 && id.length == 0 {
-                    reply(Reply::RetrieveOk(vec![]));
-                    return Ok(());
+                    return reply_ok(Reply::RetrieveOk(vec![]));
                 }
                 let blob = self.backend_read(&id.blob_id[..]);
                 let chunk = &blob[id.offset..id.offset + id.length];
-                reply(Reply::RetrieveOk(chunk.to_vec()));
+
+                reply_ok(Reply::RetrieveOk(chunk.to_vec()))
             }
             Msg::StoreNamed(name, data) => {
                 self.backend.store(name.as_bytes(), &data[..]).ok();
-                reply(Reply::StoreNamedOk(name));
+                reply_ok(Reply::StoreNamedOk(name))
             }
             Msg::RetrieveNamed(name) => {
-                reply(Reply::RetrieveOk(self.backend_read(name.as_bytes())));
+                reply_ok(Reply::RetrieveOk(self.backend_read(name.as_bytes())))
             }
             Msg::Recover(chunk) => {
                 if chunk.offset == 0 && chunk.length == 0 {
                     // This chunk is empty, so there is no blob to recover.
-                    reply(Reply::RecoverOk);
-                    return Ok(());
+                    return reply_ok(Reply::RecoverOk);
                 }
                 self.blob_index.recover(chunk.blob_id);
-                reply(Reply::RecoverOk);
+                reply_ok(Reply::RecoverOk)
             }
             Msg::Tag(chunk, tag) => {
                 self.blob_index.tag(&BlobDesc {
@@ -415,31 +433,28 @@ impl<B: StoreBackend> MsgHandler<Msg, Reply> for Store<B> {
                                         name: chunk.blob_id,
                                     },
                                     tag);
-                reply(Reply::Ok);
+                reply_ok(Reply::Ok)
             }
             Msg::TagAll(tag) => {
                 self.blob_index.tag_all(tag);
-                reply(Reply::Ok);
+                reply_ok(Reply::Ok)
             }
             Msg::DeleteByTag(tag) => {
                 let blobs = self.blob_index.list_by_tag(tag);
                 for b in blobs.iter() {
-                    match self.backend.delete(&b.name) {
-                        Ok(_) => (),
-                        Err(e) => println!("Could not delete {}: {}", b.name.to_hex(), e),
+                    if let Err(e) = self.backend.delete(&b.name) {
+                        return reply_err(From::from(e));
                     }
                 }
                 self.blob_index.delete_by_tag(tag);
-                reply(Reply::Ok);
+                reply_ok(Reply::Ok)
             }
             Msg::Flush => {
                 self.flush();
                 self.blob_index.flush();
-                reply(Reply::FlushOk);
+                reply_ok(Reply::FlushOk)
             }
         }
-
-        Ok(())
     }
 }
 
@@ -527,8 +542,9 @@ pub mod tests {
             let mut ids = Vec::new();
             for chunk in chunks.iter() {
                 match bs_p.send_reply(Msg::Store(chunk.to_owned(),
-                                                 Kind::TreeLeaf,
-                                                 Box::new(move |_| {}))) {
+                                           Kind::TreeLeaf,
+                                           Box::new(move |_| {})))
+                    .unwrap() {
                     Reply::StoreOk(id) => {
                         ids.push((id, chunk));
                     }
@@ -536,7 +552,7 @@ pub mod tests {
                 }
             }
 
-            assert_eq!(bs_p.send_reply(Msg::Flush), Reply::FlushOk);
+            assert_eq!(bs_p.send_reply(Msg::Flush).unwrap(), Reply::FlushOk);
 
             // Non-empty chunks must be in the backend now:
             for &(ref id, chunk) in ids.iter() {
@@ -550,7 +566,7 @@ pub mod tests {
 
             // All chunks must be available through the blob store:
             for &(ref id, chunk) in ids.iter() {
-                match bs_p.send_reply(Msg::Retrieve(id.clone())) {
+                match bs_p.send_reply(Msg::Retrieve(id.clone())).unwrap() {
                     Reply::RetrieveOk(found_chunk) => assert_eq!(found_chunk, chunk.to_owned()),
                     _ => panic!("Unexpected reply from blob store."),
                 }
@@ -573,16 +589,17 @@ pub mod tests {
             let mut ids = Vec::new();
             for chunk in chunks.iter() {
                 match bs_p.send_reply(Msg::Store(chunk.to_owned(),
-                                                 Kind::TreeLeaf,
-                                                 Box::new(move |_| {}))) {
+                                           Kind::TreeLeaf,
+                                           Box::new(move |_| {})))
+                    .unwrap() {
                     Reply::StoreOk(id) => {
                         ids.push((id, chunk));
                     }
                     _ => panic!("Unexpected reply from blob store."),
                 }
-                assert_eq!(bs_p.send_reply(Msg::Flush), Reply::FlushOk);
+                assert_eq!(bs_p.send_reply(Msg::Flush).unwrap(), Reply::FlushOk);
                 let &(ref id, chunk) = ids.last().unwrap();
-                assert_eq!(bs_p.send_reply(Msg::Retrieve(id.clone())),
+                assert_eq!(bs_p.send_reply(Msg::Retrieve(id.clone())).unwrap(),
                            Reply::RetrieveOk(chunk.clone()));
             }
 
@@ -598,7 +615,7 @@ pub mod tests {
 
             // All chunks must be available through the blob store:
             for &(ref id, chunk) in ids.iter() {
-                match bs_p.send_reply(Msg::Retrieve(id.clone())) {
+                match bs_p.send_reply(Msg::Retrieve(id.clone())).unwrap() {
                     Reply::RetrieveOk(found_chunk) => assert_eq!(found_chunk, chunk.to_owned()),
                     _ => panic!("Unexpected reply from blob store."),
                 }
