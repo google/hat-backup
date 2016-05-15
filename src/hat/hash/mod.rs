@@ -14,6 +14,7 @@
 
 //! Local state for known hashes and their external location (blob reference).
 
+use std::borrow::Cow;
 use std::sync::{Arc, Mutex, MutexGuard};
 use time::Duration;
 
@@ -49,6 +50,9 @@ error_type! {
         },
         SqlExecute(diesel::result::Error) {
             cause;
+        },
+        RetryError(Cow<'static, str>) {
+            desc (e) &**e;
         },
     }
 }
@@ -111,7 +115,6 @@ pub struct Entry {
     pub persistent_ref: Option<blob::ChunkRef>,
 }
 
-pub struct RetryError;
 pub enum ReserveResult {
     HashKnown,
     ReserveOk,
@@ -562,10 +565,11 @@ impl HashIndex {
     }
 
     /// Locate the persistent reference (external blob reference) for this `Hash`.
-    pub fn fetch_persistent_ref(&self, hash: &Hash) -> Result<Option<blob::ChunkRef>, RetryError> {
+    pub fn fetch_persistent_ref(&self, hash: &Hash) -> Result<Option<blob::ChunkRef>, MsgError> {
         assert!(!hash.bytes.is_empty());
         match self.lock().0.locate(hash) {
-            Some(ref queue_entry) if queue_entry.persistent_ref.is_none() => Err(RetryError),
+            Some(ref queue_entry) if queue_entry.persistent_ref.is_none() => 
+                Err(MsgError::RetryError(From::from("Persistent reference not yet ready."))),
             Some(queue_entry) => Ok(Some(queue_entry.persistent_ref.expect("persistent_ref"))),
             None => Ok(None),
         }

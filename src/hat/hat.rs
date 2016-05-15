@@ -193,17 +193,18 @@ fn list_snapshot(backend: &key::HashStoreBackend,
                  out: &mpsc::Sender<hash::Hash>,
                  family: &Family,
                  dir_hash: &hash::Hash,
-                 dir_ref: blob::ChunkRef) {
-    for (entry, hash, pref) in family.fetch_dir_data(dir_hash, dir_ref, backend.clone()) {
+                 dir_ref: blob::ChunkRef) -> Result<(), HatError> {
+    for (entry, hash, pref) in try!(family.fetch_dir_data(dir_hash, dir_ref, backend.clone())) {
         if entry.data_hash.is_some() {
             // File.
             out.send(hash).unwrap();
         } else {
             // Directory.
             out.send(hash.clone()).unwrap();
-            list_snapshot(backend, out, family, &hash, pref);
+            try!(list_snapshot(backend, out, family, &hash, pref));
         }
     }
+    Ok(())
 }
 
 impl<B: 'static + blob::StoreBackend + Clone + Send> HatRc<B> {
@@ -325,7 +326,7 @@ impl<B: 'static + blob::StoreBackend + Clone + Send> HatRc<B> {
         })
     }
 
-    pub fn meta_commit(&mut self) {
+    pub fn meta_commit(&mut self) -> Result<(), HatError> {
         let all_snapshots = self.snapshot_index.list_all();
 
         // TODO(jos): use a hash tree for this listing.
@@ -348,15 +349,15 @@ impl<B: 'static + blob::StoreBackend + Clone + Send> HatRc<B> {
         capnp::serialize_packed::write_message(&mut listing, &message).unwrap();
 
         // TODO(jos): make sure this operation is atomic or resumable.
-        match self.blob_store.send_reply(blob::Msg::StoreNamed("root".to_owned(), listing)) {
-            blob::Reply::StoreNamedOk(_) => (),
+        match try!(self.blob_store.send_reply(blob::Msg::StoreNamed("root".to_owned(), listing))) {
+            blob::Reply::StoreNamedOk(_) => Ok(()),
             _ => panic!("Invalid reply from blob store"),
-        };
+        }
     }
 
     pub fn recover(&mut self) -> Result<(), HatError> {
-        let root = match self.blob_store
-            .send_reply(blob::Msg::RetrieveNamed("root".to_owned())) {
+        let root = match try!(self.blob_store
+            .send_reply(blob::Msg::RetrieveNamed("root".to_owned()))) {
             blob::Reply::RetrieveOk(r) => r,
             _ => return Err(From::from("Could not read root file")),
         };
@@ -398,7 +399,7 @@ impl<B: 'static + blob::StoreBackend + Clone + Send> HatRc<B> {
             let pref = entry.persistent_ref.clone().unwrap();
 
             // Make sure we have the blob described.
-            match blobs.send_reply(blob::Msg::Recover(pref.clone())) {
+            match try!(blobs.send_reply(blob::Msg::Recover(pref.clone()))) {
                 blob::Reply::RecoverOk => (),
                 _ => return Err(From::from("Failed to add recovered blob")),
             }
@@ -417,11 +418,11 @@ impl<B: 'static + blob::StoreBackend + Clone + Send> HatRc<B> {
             .expect(&format!("Could not open family '{}'", family_name));
         let (register_sender, register_receiver) = mpsc::channel();
         let (recover_sender, recover_receiver) = mpsc::channel();
-        let (final_payload, final_level) = self.recover_dir_ref(&family,
+        let (final_payload, final_level) = try!(self.recover_dir_ref(&family,
                                                                 hash,
                                                                 dir_ref.clone(),
                                                                 register_sender,
-                                                                recover_sender);
+                                                                recover_sender));
         // Recover hashes for tree child chunks.
         for entry in recover_receiver {
             try!(recover_entry(&self.hash_index, &self.blob_store, entry));
@@ -439,7 +440,7 @@ impl<B: 'static + blob::StoreBackend + Clone + Send> HatRc<B> {
         });
 
         try!(self.gc.register(info.clone(), id_receiver));
-        self.flush_blob_store();
+        try!(self.flush_blob_store());
 
         // Recover final root hash for the snapshot.
         try!(recover_entry(&self.hash_index,
@@ -465,37 +466,37 @@ impl<B: 'static + blob::StoreBackend + Clone + Send> HatRc<B> {
                        dir_ref: blob::ChunkRef,
                        register_out: mpsc::Sender<hash::Entry>,
                        recover_out: mpsc::Sender<hash::Entry>)
-                       -> (Option<Vec<u8>>, i64) {
-        fn recover_tree<B: hash::tree::HashTreeBackend + Clone>(backend: B,
+                       -> Result<(Option<Vec<u8>>, i64), HatError> {
+        fn recover_tree<B: hash::tree::HashTreeBackend<Err=key::MsgError> + Clone>(backend: B,
                                                                 hash: &hash::Hash,
                                                                 pref: blob::ChunkRef,
                                                                 out: mpsc::Sender<hash::Entry>)
-                                                                -> (Option<Vec<u8>>, i64) {
-            match hash::tree::SimpleHashTreeReader::open(backend, &hash, Some(pref)).unwrap() {
+                                                                -> Result<(Option<Vec<u8>>, i64), HatError> {
+            match try!(hash::tree::SimpleHashTreeReader::open(backend, &hash, Some(pref))).unwrap() {
                 hash::tree::ReaderResult::Empty |
-                hash::tree::ReaderResult::SingleBlock(..) => (None, 0),
+                hash::tree::ReaderResult::SingleBlock(..) => Ok((None, 0)),
                 hash::tree::ReaderResult::Tree(mut reader) => {
-                    let (payload, level) = reader.list_entries(out);
-                    (Some(payload), level)
+                    let (payload, level) = try!(reader.list_entries(out));
+                    Ok((Some(payload), level))
                 }
             }
         }
         for (file, hash, pref) in
-            family.fetch_dir_data(dir_hash, dir_ref.clone(), self.hash_backend.clone()) {
+            try!(family.fetch_dir_data(dir_hash, dir_ref.clone(), self.hash_backend.clone())) {
             let (payload, level) = match file.data_hash {
                 Some(..) => {
                     // Entry is a data leaf. Read the hash tree.
-                    recover_tree(self.hash_backend.clone(),
+                    try!(recover_tree(self.hash_backend.clone(),
                                  &hash,
                                  pref.clone(),
-                                 recover_out.clone())
+                                 recover_out.clone()))
                 }
                 None => {
-                    self.recover_dir_ref(&family,
+                    try!(self.recover_dir_ref(&family,
                                          &hash,
                                          pref.clone(),
                                          register_out.clone(),
-                                         recover_out.clone())
+                                         recover_out.clone()))
                 }
             };
             // We register the top hash with the GC (tree nodes are inferred).
@@ -678,7 +679,7 @@ impl<B: 'static + blob::StoreBackend + Clone + Send> HatRc<B> {
 
         // Push any remaining data to external storage.
         // This also flushes our hashes from the memory index, so we can tag them.
-        self.flush_blob_store();
+        try!(self.flush_blob_store());
 
         // Tag 2:
         // We update the snapshot entry with the tree hash, which we then register.
@@ -730,17 +731,17 @@ impl<B: 'static + blob::StoreBackend + Clone + Send> HatRc<B> {
     }
 
     pub fn flush_snapshot_index(&self) {
-        self.snapshot_index.flush()
+        self.snapshot_index.flush();
     }
 
-    pub fn flush_blob_store(&self) {
-        match self.blob_store.send_reply(blob::Msg::Flush) {
-            blob::Reply::FlushOk => (),
+    pub fn flush_blob_store(&self) -> Result<(), HatError> {
+        match try!(self.blob_store.send_reply(blob::Msg::Flush)) {
+            blob::Reply::FlushOk => Ok(()),
             _ => panic!("Invalid reply from blob store"),
         }
     }
 
-    pub fn checkout_in_dir(&self, family_name: String, output_dir: PathBuf) {
+    pub fn checkout_in_dir(&self, family_name: String, output_dir: PathBuf) -> Result<(), HatError> {
         // Extract latest snapshot info:
         let (_info, dir_hash, dir_ref) = match self.snapshot_index.latest(&family_name) {
             Some((i, h, Some(r))) => (i, h, r),
@@ -754,17 +755,17 @@ impl<B: 'static + blob::StoreBackend + Clone + Send> HatRc<B> {
             .expect(&format!("Could not open family '{}'", family_name));
 
         let mut output_dir = output_dir;
-        self.checkout_dir_ref(&family, &mut output_dir, &dir_hash, dir_ref);
+        self.checkout_dir_ref(&family, &mut output_dir, &dir_hash, dir_ref)
     }
 
     fn checkout_dir_ref(&self,
                         family: &Family,
                         output: &mut PathBuf,
                         dir_hash: &hash::Hash,
-                        dir_ref: blob::ChunkRef) {
+                        dir_ref: blob::ChunkRef) -> Result<(), HatError> {
         fs::create_dir_all(&output).unwrap();
         for (entry, hash, pref) in
-            family.fetch_dir_data(dir_hash, dir_ref, self.hash_backend.clone()) {
+            try!(family.fetch_dir_data(dir_hash, dir_ref, self.hash_backend.clone())) {
             assert!(entry.name.len() > 0);
 
             output.push(str::from_utf8(&entry.name[..]).unwrap());
@@ -772,17 +773,18 @@ impl<B: 'static + blob::StoreBackend + Clone + Send> HatRc<B> {
 
             if entry.data_hash.is_some() {
                 let mut fd = fs::File::create(&output).unwrap();
-                let tree_opt = hash::tree::SimpleHashTreeReader::open(self.hash_backend.clone(),
+                let tree_opt = try!(hash::tree::SimpleHashTreeReader::open(self.hash_backend.clone(),
                                                                       &hash,
-                                                                      Some(pref));
+                                                                      Some(pref)));
                 if let Some(tree) = tree_opt {
                     family.write_file_chunks(&mut fd, tree);
                 }
             } else {
-                self.checkout_dir_ref(family, output, &hash, pref);
+                try!(self.checkout_dir_ref(family, output, &hash, pref));
             }
             output.pop();
         }
+        Ok(())
     }
 
     pub fn deregister_by_name(&mut self,
@@ -821,7 +823,7 @@ impl<B: 'static + blob::StoreBackend + Clone + Send> HatRc<B> {
                           &sender,
                           &local_family,
                           &local_dir_hash,
-                          dir_ref);
+                          dir_ref).unwrap();
             drop(sender);
 
             let (id_sender, id_receiver) = mpsc::channel();
@@ -892,7 +894,7 @@ impl<B: 'static + blob::StoreBackend + Clone + Send> HatRc<B> {
         self.hash_index.flush();
         // Mark used blobs.
         let entries = self.hash_index.list();
-        match self.blob_store.send_reply(blob::Msg::TagAll(tags::Tag::InProgress)) {
+        match try!(self.blob_store.send_reply(blob::Msg::TagAll(tags::Tag::InProgress))) {
             blob::Reply::Ok => (),
             _ => panic!("Unexpected reply from blob store."),
         }
@@ -900,22 +902,22 @@ impl<B: 'static + blob::StoreBackend + Clone + Send> HatRc<B> {
         for entry in entries.into_iter() {
             if let Some(pref) = entry.persistent_ref {
                 live_blobs += 1;
-                match self.blob_store.send_reply(blob::Msg::Tag(pref, tags::Tag::Reserved)) {
+                match try!(self.blob_store.send_reply(blob::Msg::Tag(pref, tags::Tag::Reserved))) {
                     blob::Reply::Ok => (),
                     _ => panic!("Unexpected reply from blob store."),
                 }
             }
         }
         // Anything still marked "in progress" is not referenced by any hash.
-        match self.blob_store.send_reply(blob::Msg::DeleteByTag(tags::Tag::InProgress)) {
+        match try!(self.blob_store.send_reply(blob::Msg::DeleteByTag(tags::Tag::InProgress))) {
             blob::Reply::Ok => (),
             _ => panic!("Unexpected reply from blob store."),
         }
-        match self.blob_store.send_reply(blob::Msg::TagAll(tags::Tag::Done)) {
+        match try!(self.blob_store.send_reply(blob::Msg::TagAll(tags::Tag::Done))) {
             blob::Reply::Ok => (),
             _ => panic!("Unexpected reply from blob store."),
         }
-        match self.blob_store.send_reply(blob::Msg::Flush) {
+        match try!(self.blob_store.send_reply(blob::Msg::Flush)) {
             blob::Reply::FlushOk => (),
             _ => panic!("Unexpected reply from blob store."),
         }
@@ -1173,7 +1175,7 @@ impl Family {
         Err(From::from("Unexpected reply from key store"))
     }
 
-  fn write_file_chunks<HTB: hash::tree::HashTreeBackend + Clone>(
+  fn write_file_chunks<HTB: hash::tree::HashTreeBackend<Err=key::MsgError> + Clone>(
     &self, fd: &mut fs::File, tree: hash::tree::ReaderResult<HTB>)
   {
         for chunk in tree {
@@ -1201,7 +1203,7 @@ impl Family {
                 Some(read_fn) => {
                     // This is a file, write it
                     let mut fd = fs::File::create(&path).unwrap();
-                    if let Some(tree) = read_fn.init() {
+                    if let Some(tree) = try!(read_fn.init()) {
                         self.write_file_chunks(&mut fd, tree);
                     }
                 }
@@ -1221,14 +1223,14 @@ impl Family {
         }
     }
 
-    pub fn fetch_dir_data<HTB: hash::tree::HashTreeBackend + Clone>
+    pub fn fetch_dir_data<HTB: hash::tree::HashTreeBackend<Err=key::MsgError> + Clone>
         (&self,
          dir_hash: &hash::Hash,
          dir_ref: blob::ChunkRef,
          backend: HTB)
-         -> Vec<(key::Entry, hash::Hash, blob::ChunkRef)> {
+         -> Result<Vec<(key::Entry, hash::Hash, blob::ChunkRef)>, HatError> {
         let mut out = Vec::new();
-        let it = hash::tree::SimpleHashTreeReader::open(backend, dir_hash, Some(dir_ref))
+        let it = try!(hash::tree::SimpleHashTreeReader::open(backend, dir_hash, Some(dir_ref)))
             .expect("unable to open dir");
 
         for chunk in it {
@@ -1294,7 +1296,7 @@ impl Family {
             }
         }
 
-        out
+        Ok(out)
     }
 
     pub fn commit(&mut self,
@@ -1303,7 +1305,7 @@ impl Family {
         let mut top_tree = self.key_store.hash_tree_writer();
         try!(self.commit_to_tree(&mut top_tree, None, hash_ch));
 
-        Ok(top_tree.hash())
+        Ok(try!(top_tree.hash()))
     }
 
     pub fn commit_to_tree(&mut self,
@@ -1371,7 +1373,7 @@ impl Family {
                         let mut inner_tree = self.key_store.hash_tree_writer();
                         try!(self.commit_to_tree(&mut inner_tree, entry.id, hash_ch.clone()));
                         // Store a reference for the sub-tree in our tree:
-                        let (dir_hash, dir_ref) = inner_tree.hash();
+                        let (dir_hash, dir_ref) = try!(inner_tree.hash());
 
                         let mut hash_ref_msg = capnp::message::Builder::new_default();
                         let mut hash_ref_root =
@@ -1397,7 +1399,7 @@ impl Family {
             } else {
                 let mut buf = vec![];
                 try!(capnp::serialize_packed::write_message(&mut buf, &file_block_msg));
-                tree.append(buf);
+                try!(tree.append(buf));
             }
         }
 
@@ -1471,7 +1473,7 @@ mod tests {
 
         fam.flush().unwrap();
         hat.commit(&fam, None).unwrap();
-        hat.meta_commit();
+        hat.meta_commit().unwrap();
 
         let (deleted, live) = hat.gc().unwrap();
         assert_eq!(deleted, 0);
@@ -1487,7 +1489,7 @@ mod tests {
 
         fam.flush().unwrap();
         hat.commit(&fam, None).unwrap();
-        hat.meta_commit();
+        hat.meta_commit().unwrap();
 
         let (deleted, live) = hat.gc().unwrap();
         assert_eq!(deleted, 0);
@@ -1510,7 +1512,7 @@ mod tests {
 
         fam.flush().unwrap();
         hat.commit(&fam, None).unwrap();
-        hat.meta_commit();
+        hat.meta_commit().unwrap();
 
         let (deleted, live) = hat.gc().unwrap();
         assert_eq!(deleted, 0);
@@ -1598,7 +1600,7 @@ mod tests {
                             ("name3", vec![2; 1000000])]);
         fam.flush().unwrap();
         hat.commit(&fam, None).unwrap();
-        hat.meta_commit();
+        hat.meta_commit().unwrap();
 
         let (deleted, live1) = hat.gc().unwrap();
         assert_eq!(deleted, 0);
@@ -1639,7 +1641,7 @@ mod tests {
 
         fam.flush().unwrap();
         hat.commit(&fam, None).unwrap();
-        hat.meta_commit();
+        hat.meta_commit().unwrap();
     }
 }
 

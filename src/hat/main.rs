@@ -179,14 +179,14 @@ fn main() {
             let hat = hat::Hat::open_repository(PathBuf::from("repo"), backend, MAX_BLOB_SIZE)
                 .unwrap();
 
-            hat.checkout_in_dir(name.clone(), PathBuf::from(path));
+            hat.checkout_in_dir(name.clone(), PathBuf::from(path)).unwrap();
         }
         ("meta-commit", Some(_cmd)) => {
             let backend = blob::FileBackend::new(blob_dir()).unwrap();
             let mut hat = hat::Hat::open_repository(PathBuf::from("repo"), backend, MAX_BLOB_SIZE)
                 .unwrap();
 
-            hat.meta_commit();
+            hat.meta_commit().unwrap();
         }
         ("recover", Some(_cmd)) => {
             let backend = blob::FileBackend::new(blob_dir()).unwrap();

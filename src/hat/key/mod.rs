@@ -68,7 +68,7 @@ pub struct HashTreeReaderInitializer {
 }
 
 impl HashTreeReaderInitializer {
-    pub fn init(self) -> Option<ReaderResult<HashStoreBackend>> {
+    pub fn init(self) -> Result<Option<ReaderResult<HashStoreBackend>>, MsgError> {
         let backend = HashStoreBackend::new(self.hash_index, self.blob_store);
         SimpleHashTreeReader::open(backend, &self.hash, self.persistent_ref)
     }
@@ -131,10 +131,10 @@ impl Store {
     }
 
     pub fn flush(&mut self) -> Result<(), MsgError> {
-        self.blob_store.send_reply(blob::Msg::Flush);
+        try!(self.blob_store.send_reply(blob::Msg::Flush));
         self.hash_index.flush();
         try!(self.index.flush());
-
+        
         Ok(())
     }
 
@@ -158,36 +158,38 @@ impl HashStoreBackend {
         }
     }
 
-    fn fetch_chunk_from_hash(&mut self, hash: &hash::Hash) -> Option<Vec<u8>> {
+    fn fetch_chunk_from_hash(&mut self, hash: &hash::Hash) -> Result<Option<Vec<u8>>, MsgError> {
         assert!(!hash.bytes.is_empty());
-        match self.hash_index.fetch_persistent_ref(hash) {
-            Ok(Some(chunk_ref)) => self.fetch_chunk_from_persistent_ref(chunk_ref),
-            _ => None,  // TODO: Do we need to distinguish `missing` from `unknown ref`?
+        match try!(self.hash_index.fetch_persistent_ref(hash)) {
+            Some(chunk_ref) => self.fetch_chunk_from_persistent_ref(chunk_ref),
+            _ => Ok(None),  // TODO: Do we need to distinguish `missing` from `unknown ref`?
         }
     }
 
-    fn fetch_chunk_from_persistent_ref(&mut self, chunk_ref: blob::ChunkRef) -> Option<Vec<u8>> {
-        match self.blob_store.send_reply(blob::Msg::Retrieve(chunk_ref)) {
-            blob::Reply::RetrieveOk(chunk) => Some(chunk),
-            _ => None,
+    fn fetch_chunk_from_persistent_ref(&mut self, chunk_ref: blob::ChunkRef) -> Result<Option<Vec<u8>>, MsgError> {
+        match try!(self.blob_store.send_reply(blob::Msg::Retrieve(chunk_ref))) {
+            blob::Reply::RetrieveOk(chunk) => Ok(Some(chunk)),
+            _ => Ok(None),
         }
     }
 }
 
 impl HashTreeBackend for HashStoreBackend {
+    type Err = MsgError;
+
     fn fetch_chunk(&mut self,
                    hash: &hash::Hash,
                    persistent_ref: Option<blob::ChunkRef>)
-                   -> Option<Vec<u8>> {
+                   -> Result<Option<Vec<u8>>, MsgError> {
         assert!(!hash.bytes.is_empty());
 
         let data_opt = if let Some(r) = persistent_ref {
-            self.fetch_chunk_from_persistent_ref(r)
+            try!(self.fetch_chunk_from_persistent_ref(r))
         } else {
-            self.fetch_chunk_from_hash(&hash)
+            try!(self.fetch_chunk_from_hash(&hash))
         };
 
-        data_opt.and_then(|data| {
+        Ok(data_opt.and_then(|data| {
             let actual_hash = hash::Hash::new(&data[..]);
             if *hash == actual_hash {
                 Some(data)
@@ -197,24 +199,25 @@ impl HashTreeBackend for HashStoreBackend {
                        hash);
                 None
             }
-        })
+        }))
     }
 
-    fn fetch_persistent_ref(&mut self, hash: &hash::Hash) -> Option<blob::ChunkRef> {
+    fn fetch_persistent_ref(&mut self, hash: &hash::Hash) -> Result<Option<blob::ChunkRef>, MsgError> {
         assert!(!hash.bytes.is_empty());
         loop {
             match self.hash_index.fetch_persistent_ref(hash) {
-                Ok(Some(r)) => return Some(r), // done
-                Ok(None) => return None, // done
-                Err(hash::RetryError) => (),  // continue loop
+                Ok(Some(r)) => return Ok(Some(r)), // done
+                Ok(None) => return Ok(None), // done
+                Err(hash::MsgError::RetryError(_msg)) => (),  // continue loop
+                Err(err) => return Err(From::from(err)),
             }
         }
     }
 
-    fn fetch_payload(&mut self, hash: &hash::Hash) -> Option<Vec<u8>> {
+    fn fetch_payload(&mut self, hash: &hash::Hash) -> Result<Option<Vec<u8>>, MsgError> {
         match self.hash_index.fetch_payload(hash) {
-            Some(p) => p, // done
-            None => None, // done
+            Some(p) => Ok(p), // done
+            None => Ok(None), // done
         }
     }
 
@@ -223,7 +226,7 @@ impl HashTreeBackend for HashStoreBackend {
                     level: i64,
                     payload: Option<Vec<u8>>,
                     chunk: Vec<u8>)
-                    -> blob::ChunkRef {
+                    -> Result<blob::ChunkRef, MsgError> {
         assert!(!hash.bytes.is_empty());
 
         let mut hash_entry = hash::Entry {
@@ -236,8 +239,8 @@ impl HashTreeBackend for HashStoreBackend {
         match self.hash_index.reserve(hash_entry.clone()) {
             hash::ReserveResult::HashKnown => {
                 // Someone came before us: piggyback on their result.
-                return self.fetch_persistent_ref(hash)
-                    .expect("Could not find persistent_ref for known chunk.");
+                Ok(try!(self.fetch_persistent_ref(hash))
+                      .expect("Could not find persistent_ref for known chunk."))
             }
             hash::ReserveResult::ReserveOk => {
                 // We came first: this data-chunk is ours to process.
@@ -252,16 +255,16 @@ impl HashTreeBackend for HashStoreBackend {
                 } else {
                     blob::Kind::TreeBranch
                 };
-                match self.blob_store.send_reply(blob::Msg::Store(chunk, kind, callback)) {
+                match try!(self.blob_store.send_reply(blob::Msg::Store(chunk, kind, callback))) {
                     blob::Reply::StoreOk(chunk_ref) => {
                         hash_entry.persistent_ref = Some(chunk_ref.clone());
                         self.hash_index.update_reserved(hash_entry);
-                        return chunk_ref;
+                        Ok(chunk_ref)
                     }
-                    _ => panic!("Unexpected reply from BlobStore."),
-                };
+                    _ => Err(From::from("Unexpected reply for message Store from BlobStore.")),
+                }
             }
-        };
+        }
     }
 }
 
@@ -371,7 +374,7 @@ impl<IT: Iterator<Item = Vec<u8>>> MsgHandler<Msg<IT>, Result<Reply, MsgError>> 
                 let mut bytes_read = 0u64;
                 for chunk in it_opt.unwrap() {
                     bytes_read += chunk.len() as u64;
-                    tree.append(chunk);
+                    try!(tree.append(chunk));
                 }
 
                 // Warn the user if we did not read the expected size:
@@ -380,7 +383,7 @@ impl<IT: Iterator<Item = Vec<u8>>> MsgHandler<Msg<IT>, Result<Reply, MsgError>> 
                 });
 
                 // Get top tree hash:
-                let (hash, persistent_ref) = tree.hash();
+                let (hash, persistent_ref) = try!(tree.hash());
 
                 // Update hash in key index.
                 // It is OK that this has is not yet valid, as we check hashes at snapshot time.
@@ -556,7 +559,7 @@ mod tests {
 
                     match dir.file.data {
                         Some(ref original) => {
-                            let it = match tree_data.expect("has data").init() {
+                            let it = match tree_data.expect("has data").init().unwrap() {
                                 None => panic!("No data."),
                                 Some(it) => it,
                             };
