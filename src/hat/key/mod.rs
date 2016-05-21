@@ -56,7 +56,7 @@ error_type! {
 }
 
 
-pub type StoreProcess<IT> = Process<Msg<IT>, Result<Reply, MsgError>>;
+pub type StoreProcess<IT> = Process<Msg<IT>, Reply, MsgError>;
 
 pub type DirElem = (Entry, Option<blob::ChunkRef>, Option<HashTreeReaderInitializer>);
 
@@ -286,7 +286,7 @@ fn file_size_warning(name: &[u8], wanted: u64, got: u64) {
     }
 }
 
-impl<IT: Iterator<Item = Vec<u8>>> MsgHandler<Msg<IT>, Result<Reply, MsgError>> for Store {
+impl<IT: Iterator<Item = Vec<u8>>> MsgHandler<Msg<IT>, Reply> for Store {
     type Err = MsgError;
 
     fn handle(&mut self,
