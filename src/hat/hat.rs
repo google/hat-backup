@@ -93,40 +93,40 @@ impl gc::GcBackend for GcBackend {
     type Err = HatError;
 
     fn get_data(&self, hash_id: gc::Id, family_id: gc::Id) -> Result<hash::GcData, Self::Err> {
-        Ok(self.hash_index.read_gc_data(hash_id, family_id))
+        Ok(try!(self.hash_index.read_gc_data(hash_id, family_id)))
     }
     fn update_data<F: hash::UpdateFn>(&mut self,
                                       hash_id: gc::Id,
                                       family_id: gc::Id,
                                       f: F)
                                       -> Result<hash::GcData, Self::Err> {
-        Ok(self.hash_index.update_gc_data(hash_id, family_id, f))
+        Ok(try!(self.hash_index.update_gc_data(hash_id, family_id, f)))
     }
     fn update_all_data_by_family<F: hash::UpdateFn, I: Iterator<Item = F>>
         (&mut self,
          family_id: gc::Id,
          fns: I)
          -> Result<(), Self::Err> {
-        self.hash_index.update_family_gc_data(family_id, fns);
+        try!(self.hash_index.update_family_gc_data(family_id, fns));
         Ok(())
     }
 
     fn get_tag(&self, hash_id: gc::Id) -> Result<Option<tags::Tag>, Self::Err> {
-        Ok(self.hash_index.get_tag(hash_id))
+        Ok(try!(self.hash_index.get_tag(hash_id)))
     }
 
     fn set_tag(&mut self, hash_id: gc::Id, tag: tags::Tag) -> Result<(), Self::Err> {
-        self.hash_index.set_tag(hash_id, tag);
+        try!(self.hash_index.set_tag(hash_id, tag));
         Ok(())
     }
 
     fn set_all_tags(&mut self, tag: tags::Tag) -> Result<(), Self::Err> {
-        self.hash_index.set_all_tags(tag);
+        try!(self.hash_index.set_all_tags(tag));
         Ok(())
     }
 
     fn reverse_refs(&self, hash_id: gc::Id) -> Result<Vec<gc::Id>, Self::Err> {
-        let entry = match self.hash_index.get_hash(hash_id) {
+        let entry = match try!(self.hash_index.get_hash(hash_id)) {
             Some(entry) => entry,
             None => panic!("HashNotKnown in hash index."),
         };
@@ -134,26 +134,25 @@ impl gc::GcBackend for GcBackend {
             return Ok(Vec::new());
         }
 
-        Ok(hash::tree::decode_metadata_refs(&entry.payload.unwrap())
-            .into_iter()
-            .map(|bytes| {
-                match self.hash_index.get_id(&hash::Hash { bytes: bytes }) {
-                    Some(id) => id,
-                    None => panic!("HashNotKnown in hash index."),
-                }
-            })
-            .collect())
+        let mut out = vec![];
+        for hash_bytes in hash::tree::decode_metadata_refs(&entry.payload.unwrap()) {
+            match try!(self.hash_index.get_id(&hash::Hash { bytes: hash_bytes })) {
+                Some(id) => out.push(id),
+                None => panic!("HashNotKnown in hash index."),
+            }
+        }
+        Ok(out)
     }
 
     fn list_ids_by_tag(&self, tag: tags::Tag) -> Result<mpsc::Receiver<i64>, Self::Err> {
         let (sender, receiver) = mpsc::channel();
-        self.hash_index.get_ids_by_tag(tag as i64).iter().map(|i| sender.send(*i)).last();
+        try!(self.hash_index.get_ids_by_tag(tag as i64)).iter().map(|i| sender.send(*i)).last();
 
         Ok(receiver)
     }
 
     fn manual_commit(&mut self) -> Result<(), Self::Err> {
-        self.hash_index.manual_commit();
+        try!(self.hash_index.manual_commit());
         Ok(())
     }
 }
@@ -405,14 +404,14 @@ impl<B: 'static + blob::StoreBackend + Clone + Send> HatRc<B> {
                 _ => return Err(From::from("Failed to add recovered blob")),
             }
             // Now insert the hash information if needed.
-            match hashes.reserve(entry) {
-                hash::ReserveResult::HashKnown => return Ok(hashes.get_id(&hash).unwrap()),
+            match try!(hashes.reserve(entry)) {
+                hash::ReserveResult::HashKnown => return Ok(try!(hashes.get_id(&hash)).unwrap()),
                 hash::ReserveResult::ReserveOk => (),
             }
             // Commit hash.
-            hashes.commit(&hash, pref);
+            try!(hashes.commit(&hash, pref));
 
-            Ok(hashes.get_id(&hash).unwrap())
+            Ok(try!(hashes.get_id(&hash)).unwrap())
         }
 
         let family = self.open_family(family_name.clone())
@@ -453,7 +452,7 @@ impl<B: 'static + blob::StoreBackend + Clone + Send> HatRc<B> {
                                payload: final_payload,
                            }));
 
-        let final_id = self.hash_index.get_id(hash).unwrap();
+        let final_id = try!(self.hash_index.get_id(hash)).unwrap();
         try!(self.gc.register_final(info.clone(), final_id));
 
         try!(self.commit_finalize(&family, info, hash));
@@ -525,8 +524,8 @@ impl<B: 'static + blob::StoreBackend + Clone + Send> HatRc<B> {
                     let done_hash_opt = match &snapshot.hash {
                         &None => None,
                         &Some(ref h) => {
-                            let status_res = self.hash_index
-                                .get_id(h)
+                            let status_res = try!(self.hash_index
+                                    .get_id(h))
                                 .map(|id| self.gc.status(id));
                             let status_opt = match status_res {
                                 None => None,
@@ -592,8 +591,8 @@ impl<B: 'static + blob::StoreBackend + Clone + Send> HatRc<B> {
                 }
                 snapshot::WorkStatus::DeleteInProgress => {
                     let hash = snapshot.hash.expect("Snapshot has no hash");
-                    let hash_id = self.hash_index
-                        .get_id(&hash)
+                    let hash_id = try!(self.hash_index
+                            .get_id(&hash))
                         .expect("Snapshot hash not recognized");
                     let status = try!(self.gc.status(hash_id));
                     match status {
@@ -614,8 +613,8 @@ impl<B: 'static + blob::StoreBackend + Clone + Send> HatRc<B> {
                 }
                 snapshot::WorkStatus::DeleteComplete => {
                     let hash = snapshot.hash.expect("Snapshot has no hash");
-                    let hash_id = self.hash_index
-                        .get_id(&hash)
+                    let hash_id = try!(self.hash_index
+                            .get_id(&hash))
                         .expect("Snapshot hash not recognized");
                     try!(self.deregister_finalize_by_name(snapshot.family_name,
                                                           snapshot.info,
@@ -665,7 +664,7 @@ impl<B: 'static + blob::StoreBackend + Clone + Send> HatRc<B> {
         let local_hash_index = self.hash_index.clone();
         thread::spawn(move || {
             for hash in hash_receiver.iter() {
-                hash_id_sender.send(local_hash_index.get_id(&hash).unwrap()).unwrap();
+                hash_id_sender.send(local_hash_index.get_id(&hash).unwrap().unwrap()).unwrap();
             }
         });
 
@@ -694,7 +693,7 @@ impl<B: 'static + blob::StoreBackend + Clone + Send> HatRc<B> {
         // At this point, the GC should still be able to either resume or rollback safely.
         // After a successful flush, all GC work is done.
         // The GC must be able to tell if it has completed or not.
-        let hash_id = self.hash_index.get_id(&hash).unwrap();
+        let hash_id = try!(self.hash_index.get_id(&hash)).unwrap();
         try!(self.gc.register_final(snap_info.clone(), hash_id));
         try!(family.flush());
         try!(self.commit_finalize(family, snap_info, &hash));
@@ -722,7 +721,7 @@ impl<B: 'static + blob::StoreBackend + Clone + Send> HatRc<B> {
         self.snapshot_index.ready_commit(&snap_info);
         self.flush_snapshot_index();
 
-        let hash_id = self.hash_index.get_id(hash).unwrap();
+        let hash_id = try!(self.hash_index.get_id(hash)).unwrap();
         try!(self.gc.register_cleanup(snap_info.clone(), hash_id));
         try!(family.flush());
 
@@ -837,20 +836,20 @@ impl<B: 'static + blob::StoreBackend + Clone + Send> HatRc<B> {
 
             let (id_sender, id_receiver) = mpsc::channel();
             for hash in receiver.iter() {
-                match local_hash_index.get_id(&hash) {
+                match local_hash_index.get_id(&hash).unwrap() {
                     Some(id) => id_sender.send(id).unwrap(),
                     None => panic!("Unexpected reply from hash index."),
                 }
             }
-            match local_hash_index.get_id(&local_dir_hash) {
+            match local_hash_index.get_id(&local_dir_hash).unwrap() {
                 Some(id) => id_sender.send(id).unwrap(),
                 None => panic!("Unexpected reply from hash index."),
             }
             id_receiver
         };
 
-        let final_ref = self.hash_index
-            .get_id(&dir_hash)
+        let final_ref = try!(self.hash_index
+                .get_id(&dir_hash))
             .expect("Snapshot hash does not exist");
         try!(self.gc.deregister(info.clone(), final_ref, listing));
         try!(family.flush());
@@ -898,11 +897,11 @@ impl<B: 'static + blob::StoreBackend + Clone + Send> HatRc<B> {
         try!(self.gc.list_unused_ids(sender));
         for id in receiver.iter() {
             deleted_hashes += 1;
-            self.hash_index.delete(id);
+            try!(self.hash_index.delete(id));
         }
-        self.hash_index.flush();
+        try!(self.hash_index.flush());
         // Mark used blobs.
-        let entries = self.hash_index.list();
+        let entries = try!(self.hash_index.list());
         match try!(self.blob_store.send_reply(blob::Msg::TagAll(tags::Tag::InProgress))) {
             blob::Reply::Ok => (),
             _ => panic!("Unexpected reply from blob store."),

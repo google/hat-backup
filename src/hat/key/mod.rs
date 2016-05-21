@@ -132,7 +132,7 @@ impl Store {
 
     pub fn flush(&mut self) -> Result<(), MsgError> {
         try!(self.blob_store.send_reply(blob::Msg::Flush));
-        self.hash_index.flush();
+        try!(self.hash_index.flush());
         try!(self.index.flush());
 
         Ok(())
@@ -219,7 +219,7 @@ impl HashTreeBackend for HashStoreBackend {
     }
 
     fn fetch_payload(&mut self, hash: &hash::Hash) -> Result<Option<Vec<u8>>, MsgError> {
-        match self.hash_index.fetch_payload(hash) {
+        match try!(self.hash_index.fetch_payload(hash)) {
             Some(p) => Ok(p), // done
             None => Ok(None), // done
         }
@@ -240,7 +240,7 @@ impl HashTreeBackend for HashStoreBackend {
             persistent_ref: None,
         };
 
-        match self.hash_index.reserve(hash_entry.clone()) {
+        match try!(self.hash_index.reserve(hash_entry.clone())) {
             hash::ReserveResult::HashKnown => {
                 // Someone came before us: piggyback on their result.
                 Ok(try!(self.fetch_persistent_ref(hash))
@@ -252,7 +252,7 @@ impl HashTreeBackend for HashStoreBackend {
 
                 let local_hash = hash.clone();
                 let callback = Box::new(move |chunk_ref: blob::ChunkRef| {
-                    local_hash_index.commit(&local_hash, chunk_ref);
+                    local_hash_index.commit(&local_hash, chunk_ref).unwrap();
                 });
                 let kind = if level == 0 {
                     blob::Kind::TreeLeaf
@@ -262,7 +262,7 @@ impl HashTreeBackend for HashStoreBackend {
                 match try!(self.blob_store.send_reply(blob::Msg::Store(chunk, kind, callback))) {
                     blob::Reply::StoreOk(chunk_ref) => {
                         hash_entry.persistent_ref = Some(chunk_ref.clone());
-                        self.hash_index.update_reserved(hash_entry);
+                        try!(self.hash_index.update_reserved(hash_entry));
                         Ok(chunk_ref)
                     }
                     _ => Err(From::from("Unexpected reply for message Store from BlobStore.")),
@@ -338,7 +338,7 @@ impl<IT: Iterator<Item = Vec<u8>>> MsgHandler<Msg<IT>, Result<Reply, MsgError>> 
                                        org_entry.created == entry.created => {
                         if chunk_it_opt.is_some() && entry.data_hash.is_some() {
                             let hash = hash::Hash { bytes: entry.data_hash.clone().unwrap() };
-                            if self.hash_index.hash_exists(&hash) {
+                            if try!(self.hash_index.hash_exists(&hash)) {
                                 // Short-circuit: We have the data.
                                 return reply_ok(Reply::Id(entry.id.unwrap()));
                             }
