@@ -35,5 +35,5 @@ install:
 
 script:
   - cargo build --verbose
-  - cargo test --verbose
+  - RUST_LOG=error cargo test --verbose
   - cargo doc
