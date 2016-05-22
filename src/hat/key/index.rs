@@ -74,7 +74,7 @@ pub struct Entry {
 }
 
 #[derive(Clone)]
-pub struct KeyIndex(Arc<Mutex<(InternalKeyIndex, Option<i64>)>>);
+pub struct KeyIndex(Arc<Mutex<InternalKeyIndex>>);
 
 pub struct InternalKeyIndex {
     conn: SqliteConnection,
@@ -287,41 +287,27 @@ impl InternalKeyIndex {
 
 impl KeyIndex {
     pub fn new(path: &str) -> Result<KeyIndex, IndexError> {
-        KeyIndex::new_with_poison(path, None)
-    }
-
-    pub fn new_for_testing(poison: Option<i64>) -> Result<KeyIndex, IndexError> {
-        KeyIndex::new_with_poison(":memory:", poison)
-    }
-
-    pub fn new_with_poison(path: &str, poison: Option<i64>) -> Result<KeyIndex, IndexError> {
         let index = try!(InternalKeyIndex::new(path));
-        Ok(KeyIndex(Arc::new(Mutex::new((index, poison)))))
+        Ok(KeyIndex(Arc::new(Mutex::new(index))))
     }
 
-    fn lock(&self) -> MutexGuard<(InternalKeyIndex, Option<i64>)> {
-        let mut guard = self.0.lock().expect("index-process has failed");
+    pub fn new_for_testing() -> Result<KeyIndex, IndexError> {
+        KeyIndex::new(":memory:")
+    }
 
-        match &mut guard.1 {
-            &mut None => (),
-            &mut Some(0) => panic!("No more requests for this index process"),
-            &mut Some(ref mut n) => {
-                *n -= 1;
-            }
-        }
-
-        guard
+    fn lock(&self) -> MutexGuard<InternalKeyIndex> {
+        self.0.lock().expect("index-process has failed")
     }
 
     pub fn insert(&self, entry: Entry) -> Result<Entry, IndexError> {
-        self.lock().0.insert(entry)
+        self.lock().insert(entry)
     }
 
     pub fn lookup(&self,
                   parent_: Option<u64>,
                   name_: Vec<u8>)
                   -> Result<Option<Entry>, IndexError> {
-        self.lock().0.lookup(parent_, name_)
+        self.lock().lookup(parent_, name_)
     }
 
     pub fn update_data_hash(&self,
@@ -329,16 +315,16 @@ impl KeyIndex {
                             hash_opt: Option<hash::Hash>,
                             persistent_ref_opt: Option<blob::ChunkRef>)
                             -> Result<(), IndexError> {
-        self.lock().0.update_data_hash(entry, hash_opt, persistent_ref_opt)
+        self.lock().update_data_hash(entry, hash_opt, persistent_ref_opt)
     }
 
     pub fn list_dir(&self,
                     parent_opt: Option<u64>)
                     -> Result<Vec<(Entry, Option<blob::ChunkRef>)>, IndexError> {
-        self.lock().0.list_dir(parent_opt)
+        self.lock().list_dir(parent_opt)
     }
 
     pub fn flush(&self) -> Result<(), IndexError> {
-        self.lock().0.flush()
+        self.lock().flush()
     }
 }

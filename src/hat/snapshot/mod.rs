@@ -79,7 +79,7 @@ pub struct InternalSnapshotIndex {
 }
 
 #[derive(Clone)]
-pub struct SnapshotIndex(Arc<Mutex<(InternalSnapshotIndex, Option<i64>)>>);
+pub struct SnapshotIndex(Arc<Mutex<InternalSnapshotIndex>>);
 
 
 fn tag_to_work_status(tag: tags::Tag) -> WorkStatus {
@@ -368,54 +368,40 @@ impl InternalSnapshotIndex {
 
 impl SnapshotIndex {
     pub fn new(path: &str) -> Result<SnapshotIndex, IndexError> {
-        SnapshotIndex::new_with_poison(path, None)
-    }
-
-    pub fn new_for_testing(poison: Option<i64>) -> Result<SnapshotIndex, IndexError> {
-        SnapshotIndex::new_with_poison(":memory:", poison)
-    }
-
-    pub fn new_with_poison(path: &str, poison: Option<i64>) -> Result<SnapshotIndex, IndexError> {
         let index = try!(InternalSnapshotIndex::new(path));
-        Ok(SnapshotIndex(Arc::new(Mutex::new((index, poison)))))
+        Ok(SnapshotIndex(Arc::new(Mutex::new(index))))
     }
 
-    fn lock(&self) -> MutexGuard<(InternalSnapshotIndex, Option<i64>)> {
-        let mut guard = self.0.lock().expect("index-process has failed");
+    pub fn new_for_testing() -> Result<SnapshotIndex, IndexError> {
+        SnapshotIndex::new(":memory:")
+    }
 
-        match &mut guard.1 {
-            &mut None => (),
-            &mut Some(0) => panic!("No more requests for this index process"),
-            &mut Some(ref mut n) => {
-                *n -= 1;
-            }
-        }
-
-        guard
+    fn lock(&self) -> MutexGuard<InternalSnapshotIndex> {
+        self.0.lock().expect("index-process has failed")
     }
 
     pub fn reserve(&self, family: String) -> Info {
-        self.lock().0.reserve_snapshot(family)
+        self.lock().reserve_snapshot(family)
     }
 
     /// Update existing snapshot.
     pub fn update(&self, snapshot: &Info, hash: &hash::Hash, tree_ref: &blob::ChunkRef) {
-        self.lock().0.update(snapshot, "anonymous", hash, tree_ref);
+        self.lock().update(snapshot, "anonymous", hash, tree_ref);
     }
 
     /// ReadyCommit.
     pub fn ready_commit(&self, snapshot: &Info) {
-        self.lock().0.set_tag(snapshot, tags::Tag::Complete)
+        self.lock().set_tag(snapshot, tags::Tag::Complete)
     }
 
     /// Register a new snapshot by its family name, hash and persistent reference.
     pub fn commit(&self, snapshot: &Info) {
-        self.lock().0.set_tag(snapshot, tags::Tag::Done)
+        self.lock().set_tag(snapshot, tags::Tag::Done)
     }
 
     /// Extract latest snapshot data for family.
     pub fn latest(&self, name: &str) -> Option<(Info, hash::Hash, Option<blob::ChunkRef>)> {
-        self.lock().0.latest_snapshot(name)
+        self.lock().latest_snapshot(name)
     }
 
     /// Lookup exact snapshot info from family and snapshot id.
@@ -423,37 +409,37 @@ impl SnapshotIndex {
                   name: &str,
                   id: i64)
                   -> Option<(Info, hash::Hash, Option<blob::ChunkRef>)> {
-        self.lock().0.get_snapshot_info(name, id)
+        self.lock().get_snapshot_info(name, id)
     }
 
     /// We are deleting this snapshot.
     pub fn will_delete(&self, snapshot: &Info) {
-        self.lock().0.set_tag(snapshot, tags::Tag::WillDelete)
+        self.lock().set_tag(snapshot, tags::Tag::WillDelete)
     }
 
     /// We are ready to delete of this snapshot.
     pub fn ready_delete(&self, snapshot: &Info) {
-        self.lock().0.set_tag(snapshot, tags::Tag::ReadyDelete)
+        self.lock().set_tag(snapshot, tags::Tag::ReadyDelete)
     }
 
     /// Delete snapshot.
     pub fn delete(&self, snapshot: Info) {
-        self.lock().0.delete_snapshot(snapshot)
+        self.lock().delete_snapshot(snapshot)
     }
 
     /// List incomplete snapshots (either committing or deleting).
     pub fn list_not_done(&self) -> Vec<Status> {
-        self.lock().0.list_all(Some(tags::Tag::Done) /* not_tag */)
+        self.lock().list_all(Some(tags::Tag::Done) /* not_tag */)
     }
 
     /// List all snapshots.
     pub fn list_all(&self) -> Vec<Status> {
-        self.lock().0.list_all(None)
+        self.lock().list_all(None)
     }
 
     /// Flush the hash index to clear internal buffers and commit the underlying database.
     pub fn flush(&self) {
-        self.lock().0.flush()
+        self.lock().flush()
     }
 
     /// Recover snapshot information.
@@ -464,6 +450,6 @@ impl SnapshotIndex {
                    hash: &[u8],
                    tree_ref: &blob::ChunkRef,
                    work_opt: Option<WorkStatus>) {
-        self.lock().0.recover(snapshot_id, family_name, msg, hash, tree_ref, work_opt)
+        self.lock().recover(snapshot_id, family_name, msg, hash, tree_ref, work_opt)
     }
 }

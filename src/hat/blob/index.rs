@@ -61,7 +61,7 @@ pub struct InternalBlobIndex {
 }
 
 #[derive(Clone)]
-pub struct BlobIndex(Arc<Mutex<(InternalBlobIndex, Option<i64>)>>);
+pub struct BlobIndex(Arc<Mutex<InternalBlobIndex>>);
 
 
 impl InternalBlobIndex {
@@ -231,73 +231,59 @@ impl InternalBlobIndex {
 
 impl BlobIndex {
     pub fn new(path: &str) -> Result<BlobIndex, IndexError> {
-        BlobIndex::new_with_poison(path, None)
-    }
-
-    pub fn new_for_testing(poison: Option<i64>) -> Result<BlobIndex, IndexError> {
-        BlobIndex::new_with_poison(":memory:", poison)
-    }
-
-    pub fn new_with_poison(path: &str, poison: Option<i64>) -> Result<BlobIndex, IndexError> {
         let index = try!(InternalBlobIndex::new(path));
-        Ok(BlobIndex(Arc::new(Mutex::new((index, poison)))))
+        Ok(BlobIndex(Arc::new(Mutex::new(index))))
     }
 
-    fn lock(&self) -> MutexGuard<(InternalBlobIndex, Option<i64>)> {
-        let mut guard = self.0.lock().expect("index-process has failed");
+    pub fn new_for_testing() -> Result<BlobIndex, IndexError> {
+        BlobIndex::new(":memory:")
+    }
 
-        match &mut guard.1 {
-            &mut None => (),
-            &mut Some(0) => panic!("No more requests for this index process"),
-            &mut Some(ref mut n) => {
-                *n -= 1;
-            }
-        }
-
-        guard
+    fn lock(&self) -> MutexGuard<InternalBlobIndex> {
+        self.0.lock().expect("index-process has failed")
     }
 
     /// Reserve an internal `BlobDesc` for a new blob.
     pub fn reserve(&self) -> BlobDesc {
-        self.lock().0.reserve()
+        self.lock().reserve()
     }
 
     /// Report that this blob is in the process of being committed to persistent storage. If a
     /// blob is in this state when the system starts up, it may or may not exist in the persistent
     /// storage, but **should not** be referenced elsewhere, and is therefore safe to delete.
     pub fn in_air(&self, blob: &BlobDesc) {
-        self.lock().0.in_air(&blob)
+        self.lock().in_air(&blob)
     }
 
     /// Report that this blob has been fully committed to persistent storage. We can now use its
     /// reference internally. Only committed blobs are considered "safe to use".
     pub fn commit_done(&self, blob: &BlobDesc) {
-        self.lock().0.commit_blob(blob)
+        self.lock().commit_blob(blob)
     }
 
     /// Reinstall blob recovered by from external storage.
     /// Creates a new blob by a known external name.
     pub fn recover(&self, name: Vec<u8>) -> BlobDesc {
-        self.lock().0.recover(name)
+        self.lock().recover(name)
     }
 
     pub fn tag(&self, blob: &BlobDesc, tag: tags::Tag) {
-        self.lock().0.tag(tag, Some(blob))
+        self.lock().tag(tag, Some(blob))
     }
 
     pub fn tag_all(&self, tag: tags::Tag) {
-        self.lock().0.tag(tag, None)
+        self.lock().tag(tag, None)
     }
 
     pub fn list_by_tag(&self, tag: tags::Tag) -> Vec<BlobDesc> {
-        self.lock().0.list_by_tag(tag)
+        self.lock().list_by_tag(tag)
     }
 
     pub fn delete_by_tag(&self, tag: tags::Tag) {
-        self.lock().0.delete_by_tag(tag)
+        self.lock().delete_by_tag(tag)
     }
 
     pub fn flush(&self) {
-        self.lock().0.new_transaction()
+        self.lock().new_transaction()
     }
 }

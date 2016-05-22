@@ -253,8 +253,8 @@ impl<B: 'static + blob::StoreBackend + Clone + Send> HatRc<B> {
         // If provided, we cycle the possible poison values to give every process one.
         let mut poison = poison_after.iter().cycle();
 
-        let si_p = snapshot::SnapshotIndex::new_for_testing(poison.next().cloned()).unwrap();
-        let bi_p = blob::BlobIndex::new_for_testing(poison.next().cloned()).unwrap();
+        let si_p = snapshot::SnapshotIndex::new_for_testing().unwrap();
+        let bi_p = blob::BlobIndex::new_for_testing().unwrap();
         let hi_p = hash::HashIndex::new_for_testing(poison.next().cloned()).unwrap();
 
         let local_blob_index = bi_p.clone();
@@ -310,7 +310,7 @@ impl<B: 'static + blob::StoreBackend + Clone + Send> HatRc<B> {
             None => ":memory:".to_string(),
         };
 
-        let ki_p = try!(key::KeyIndex::new_with_poison(&key_index_path, poison_after));
+        let ki_p = try!(key::KeyIndex::new(&key_index_path));
 
         let local_ks = key::Store::new(ki_p.clone(),
                                        self.hash_index.clone(),
