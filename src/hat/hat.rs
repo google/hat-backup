@@ -1424,6 +1424,8 @@ impl Family {
 mod tests {
     use super::*;
 
+    use quickcheck;
+
     use blob::StoreBackend;
     use blob::tests::MemoryBackend;
     use key;
@@ -1638,25 +1640,30 @@ mod tests {
 
     #[test]
     fn poisoned_process_does_not_panic() {
-        // TODO: Upgrade to proper error handling so we can test resuming.
+        // TODO: Upgrade to proper error handling so we can enable commit.
 
-        let poison = vec![10];
-        let (_, mut hat, fam) = setup_family(Some(poison));
+        fn prop(poison_after: u8) -> bool {
+            let poison = vec![poison_after as i64];
+            let (_, mut hat, fam) = setup_family(Some(poison));
 
-        let mut run_until_error = || {
-            try!(snapshot_files(&fam,
-                                vec![("name1", vec![0; 1000000]),
-                                     ("name2", vec![1; 1000000]),
-                                     ("name3", vec![2; 1000000])]));
+            let mut run_until_error = || {
+                try!(snapshot_files(&fam,
+                                    vec![("name1", vec![0; 1000000]),
+                                         ("name2", vec![1; 1000000]),
+                                         ("name3", vec![2; 1000000])]));
 
-            try!(fam.flush());
-            try!(hat.commit(&fam, None));
-            try!(hat.meta_commit());
+                try!(fam.flush());
+                // try!(hat.commit(&fam, None));
+                // try!(hat.meta_commit());
 
-            Ok(())
+                Ok(())
+            };
+
+            let _: Result<(), HatError> = run_until_error();
+            true  // no panics.
         };
 
-        let _: Result<(), HatError> = run_until_error();
+        quickcheck::quickcheck(prop as fn(u8) -> bool);
     }
 }
 
