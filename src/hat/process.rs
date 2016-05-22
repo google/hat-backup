@@ -135,29 +135,38 @@ impl<Msg: 'static + Send, Reply: 'static + Send, E> Process<Msg, Reply, E> {
                     Ok(()) => assert_eq!(*did_reply.lock().unwrap(), true),
                     Err(e) => {
                         if *did_reply.lock().expect("Message reply ignored") {
-                            panic!("Process encountered unrecoverable error: {:?}", e);
+                            return Err(format!("Encountered unrecoverable error: {:?}", e));
                         } else {
-                            rep.send(Err(e)).expect("Message reply ignored")
+                            rep.send(Err(e)).expect("Message reply ignored");
                         }
                     }
                 }
+
+                Ok(())
             };
-            match shutdown_after {
-                Some(msg_count) => {
-                    for _ in 0..msg_count {
-                        if let Ok((msg, rep)) = receiver.recv() {
-                            handle_msg(msg, rep)
-                        } else {
-                            break;  // Shutting down.
+            let mut do_loop = || {
+                match shutdown_after {
+                    Some(msg_count) => {
+                        for _ in 0..msg_count {
+                            if let Ok((msg, rep)) = receiver.recv() {
+                                try!(handle_msg(msg, rep))
+                            } else {
+                                return Ok(());  // Clean shutdown.
+                            }
+                        }
+                        return Err("Process has reached message limit".to_string());
+                    }
+                    None => {
+                        while let Ok((msg, rep)) = receiver.recv() {
+                            try!(handle_msg(msg, rep))
                         }
                     }
-                }
-                None => {
-                    while let Ok((msg, rep)) = receiver.recv() {
-                        handle_msg(msg, rep)
-                    }
-                }
+                };
+                Ok(())
             };
+            if let Err(e) = do_loop() {
+                error!("Shutting down process: {:?}", e);
+            }
         });
 
         Ok(())
@@ -166,10 +175,15 @@ impl<Msg: 'static + Send, Reply: 'static + Send, E> Process<Msg, Reply, E> {
     /// Synchronous send.
     ///
     /// Will always wait for a reply from the receiving `process`.
-    pub fn send_reply(&self, msg: Msg) -> Result<Reply, E> {
+    pub fn send_reply(&self, msg: Msg) -> Result<Reply, E> where E: From<String> {
         let (sender, receiver) = mpsc::channel();
-        self.sender.send((msg, sender)).ok();
+        if let Err(e) = self.sender.send((msg, sender)) {
+            return Err(From::from("Could not send message: process is dead".to_string()));
+        }
 
-        receiver.recv().expect("Failed to get reply for msg")
+        match receiver.recv() {
+            Err(e) => Err(From::from("Could not read reply: process has died".to_string())),
+            Ok(reply) => reply,
+        }
     }
 }
