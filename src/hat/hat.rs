@@ -664,7 +664,10 @@ impl<B: 'static + blob::StoreBackend + Clone + Send> HatRc<B> {
         let local_hash_index = self.hash_index.clone();
         thread::spawn(move || {
             for hash in hash_receiver.iter() {
-                hash_id_sender.send(local_hash_index.get_id(&hash).unwrap().unwrap()).unwrap();
+                hash_id_sender.send(local_hash_index.get_id(&hash)
+                        .expect("Hash index failed")
+                        .expect("Hash not found"))
+                    .expect("Channel failed");
             }
         });
 
@@ -693,7 +696,7 @@ impl<B: 'static + blob::StoreBackend + Clone + Send> HatRc<B> {
         // At this point, the GC should still be able to either resume or rollback safely.
         // After a successful flush, all GC work is done.
         // The GC must be able to tell if it has completed or not.
-        let hash_id = try!(self.hash_index.get_id(&hash)).unwrap();
+        let hash_id = try!(self.hash_index.get_id(&hash)).expect("Hash does not exist");
         try!(self.gc.register_final(snap_info.clone(), hash_id));
         try!(family.flush());
         try!(self.commit_finalize(family, snap_info, &hash));
@@ -721,7 +724,7 @@ impl<B: 'static + blob::StoreBackend + Clone + Send> HatRc<B> {
         self.snapshot_index.ready_commit(&snap_info);
         self.flush_snapshot_index();
 
-        let hash_id = try!(self.hash_index.get_id(hash)).unwrap();
+        let hash_id = try!(self.hash_index.get_id(hash)).expect("Hash does not exist");
         try!(self.gc.register_cleanup(snap_info.clone(), hash_id));
         try!(family.flush());
 
@@ -836,12 +839,12 @@ impl<B: 'static + blob::StoreBackend + Clone + Send> HatRc<B> {
 
             let (id_sender, id_receiver) = mpsc::channel();
             for hash in receiver.iter() {
-                match local_hash_index.get_id(&hash).unwrap() {
+                match local_hash_index.get_id(&hash).expect("Hash index failed") {
                     Some(id) => id_sender.send(id).unwrap(),
                     None => panic!("Unexpected reply from hash index."),
                 }
             }
-            match local_hash_index.get_id(&local_dir_hash).unwrap() {
+            match local_hash_index.get_id(&local_dir_hash).expect("Hash index failed") {
                 Some(id) => id_sender.send(id).unwrap(),
                 None => panic!("Unexpected reply from hash index."),
             }

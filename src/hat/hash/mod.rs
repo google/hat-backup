@@ -531,8 +531,15 @@ impl HashIndex {
         Ok(HashIndex(Arc::new(Mutex::new((index, shutdown)))))
     }
 
+    fn lock_ignore_shutdown(&self) -> Result<MutexGuard<(InternalHashIndex, Option<i64>)>, MsgError> {
+        match self.0.lock() {
+            Err(_) => return Err(From::from("Unable to lock mutex: poisoned")),
+            Ok(lock) => Ok(lock),
+        }
+    }
+
     fn lock(&self) -> Result<MutexGuard<(InternalHashIndex, Option<i64>)>, MsgError> {
-        let mut guard = self.0.lock().expect("index-process has failed");
+        let mut guard = try!(self.lock_ignore_shutdown());
 
         match &mut guard.1 {
             &mut None => (),
@@ -609,8 +616,10 @@ impl HashIndex {
     /// A `Hash` is committed when it has been `finalized` in the external storage. `Commit`
     /// includes the persistent reference that the content is available at.
     pub fn commit(&self, hash: &Hash, persistent_ref: blob::ChunkRef) -> Result<(), MsgError> {
+        // Ignore shutdown setup since commit is often triggered by callbacks with no error
+        // handling options.
         assert!(!hash.bytes.is_empty());
-        try!(self.lock()).0.commit(hash, persistent_ref);
+        try!(self.lock_ignore_shutdown()).0.commit(hash, persistent_ref);
         Ok(())
     }
 

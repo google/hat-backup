@@ -60,7 +60,7 @@ error_type! {
 }
 
 
-pub type StoreProcess = Process<Msg, Result<Reply, MsgError>>;
+pub type StoreProcess = Process<Msg, Reply, MsgError>;
 
 pub trait StoreBackend {
     fn store(&mut self, name: &[u8], data: &[u8]) -> Result<(), String>;
@@ -354,7 +354,7 @@ impl<B: StoreBackend> Store<B> {
     }
 }
 
-impl<B: StoreBackend> MsgHandler<Msg, Result<Reply, MsgError>> for Store<B> {
+impl<B: StoreBackend> MsgHandler<Msg, Reply> for Store<B> {
     type Err = MsgError;
 
     fn handle(&mut self,

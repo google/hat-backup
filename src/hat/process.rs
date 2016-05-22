@@ -52,18 +52,18 @@
 
 use std::fmt;
 use std::thread;
-use std::sync::mpsc;
+use std::sync::{mpsc, Arc, Mutex};
 
 
-pub struct Process<Msg, Reply> {
-    sender: mpsc::SyncSender<(Msg, mpsc::Sender<Reply>)>,
+pub struct Process<Msg, Reply, E> {
+    sender: mpsc::SyncSender<(Msg, mpsc::Sender<Result<Reply, E>>)>,
     shutdown_after: Option<i64>,
 }
 
 /// When cloning a `process` we clone the input-channel, allowing multiple threads to share the same
 /// `process`.
-impl<Msg: Send, Reply: Send> Clone for Process<Msg, Reply> {
-    fn clone(&self) -> Process<Msg, Reply> {
+impl<Msg: Send, Reply: Send, E> Clone for Process<Msg, Reply, E> {
+    fn clone(&self) -> Process<Msg, Reply, E> {
         Process {
             sender: self.sender.clone(),
             shutdown_after: None,
@@ -74,25 +74,28 @@ impl<Msg: Send, Reply: Send> Clone for Process<Msg, Reply> {
 pub trait MsgHandler<Msg, Reply> {
     type Err;
 
-    fn handle(&mut self, msg: Msg, callback: Box<Fn(Reply)>) -> Result<(), Self::Err>;
+    fn handle(&mut self,
+              msg: Msg,
+              callback: Box<Fn(Result<Reply, Self::Err>)>)
+              -> Result<(), Self::Err>;
 }
 
-impl<Msg: 'static + Send, Reply: 'static + Send> Process<Msg, Reply> {
+impl<Msg: 'static + Send, Reply: 'static + Send, E> Process<Msg, Reply, E> {
     /// Create and start a new process using `handler`.
-    pub fn new<H, F>(handler_proc: F) -> Result<Process<Msg, Reply>, H::Err>
-        where H: 'static + MsgHandler<Msg, Reply> + Send,
-              H::Err: From<mpsc::RecvError> + fmt::Debug,
-              F: FnOnce() -> Result<H, H::Err>
+    pub fn new<H, F>(handler_proc: F) -> Result<Process<Msg, Reply, E>, E>
+        where H: 'static + MsgHandler<Msg, Reply, Err = E> + Send,
+              E: 'static + From<mpsc::RecvError> + fmt::Debug + Send,
+              F: FnOnce() -> Result<H, E>
     {
         Process::new_with_shutdown(handler_proc, None)
     }
 
     pub fn new_with_shutdown<H, F>(handler_proc: F,
                                    shutdown_after: Option<i64>)
-                                   -> Result<Process<Msg, Reply>, H::Err>
-        where H: 'static + MsgHandler<Msg, Reply> + Send,
-              H::Err: From<mpsc::RecvError> + fmt::Debug,
-              F: FnOnce() -> Result<H, H::Err>
+                                   -> Result<Process<Msg, Reply, E>, E>
+        where H: 'static + MsgHandler<Msg, Reply, Err = E> + Send,
+              E: 'static + From<mpsc::RecvError> + fmt::Debug + Send,
+              F: FnOnce() -> Result<H, E>
     {
         let (sender, receiver) = mpsc::sync_channel(10);
         let p = Process {
@@ -107,23 +110,37 @@ impl<Msg: 'static + Send, Reply: 'static + Send> Process<Msg, Reply> {
 
 
     fn start<H, F>(&self,
-                   receiver: mpsc::Receiver<(Msg, mpsc::Sender<Reply>)>,
+                   receiver: mpsc::Receiver<(Msg, mpsc::Sender<Result<Reply, E>>)>,
                    handler_proc: F)
-                   -> Result<(), H::Err>
-        where H: 'static + MsgHandler<Msg, Reply> + Send,
-              H::Err: From<mpsc::RecvError> + fmt::Debug,
-              F: FnOnce() -> Result<H, H::Err>
+                   -> Result<(), E>
+        where H: 'static + MsgHandler<Msg, Reply, Err = E> + Send,
+              E: 'static + From<mpsc::RecvError> + fmt::Debug + Send,
+              F: FnOnce() -> Result<H, E>
     {
         let shutdown_after = self.shutdown_after;
         let mut my_handler = try!(handler_proc());
         thread::spawn(move || {
             // fork handler
-            let mut handle_msg = |msg, rep: mpsc::Sender<Reply>| {
-                my_handler.handle(msg,
-                            Box::new(move |r| {
-                                rep.send(r).expect("Message reply was ignored");
-                            }))
-                    .expect("Process encountered unrecoverable error");
+            let mut handle_msg = |msg, rep: mpsc::Sender<Result<Reply, E>>| {
+                let did_reply = Arc::new(Mutex::new(false));
+                let local_did_reply = did_reply.clone();
+                let local_rep = rep.clone();
+                let ret = my_handler.handle(msg,
+                                            Box::new(move |r| {
+                                                *local_did_reply.lock().unwrap() = true;
+                                                local_rep.send(r)
+                                                    .expect("Message reply ignored");
+                                            }));
+                match ret {
+                    Ok(()) => assert_eq!(*did_reply.lock().unwrap(), true),
+                    Err(e) => {
+                        if *did_reply.lock().expect("Message reply ignored") {
+                            panic!("Process encountered unrecoverable error: {:?}", e);
+                        } else {
+                            rep.send(Err(e)).expect("Message reply ignored")
+                        }
+                    }
+                }
             };
             match shutdown_after {
                 Some(msg_count) => {
@@ -149,7 +166,7 @@ impl<Msg: 'static + Send, Reply: 'static + Send> Process<Msg, Reply> {
     /// Synchronous send.
     ///
     /// Will always wait for a reply from the receiving `process`.
-    pub fn send_reply(&self, msg: Msg) -> Reply {
+    pub fn send_reply(&self, msg: Msg) -> Result<Reply, E> {
         let (sender, receiver) = mpsc::channel();
         self.sender.send((msg, sender)).ok();
 
