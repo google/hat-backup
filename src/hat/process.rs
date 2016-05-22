@@ -172,7 +172,7 @@ impl<Msg: 'static + Send, Reply: 'static + Send, E> Process<Msg, Reply, E> {
             };
             while let Err(e) = do_loop() {
                 *poisoned.lock().unwrap() = true;  // This process is in a polluted state.
-                error!("Poisoned process: {:?}", e);
+                warn!("Poisoned process: {:?}", e);
             }
         });
 
