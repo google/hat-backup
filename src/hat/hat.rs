@@ -1464,13 +1464,13 @@ mod tests {
         }
     }
 
-    fn snapshot_files(family: &Family, files: Vec<(&str, Vec<u8>)>) {
+    fn snapshot_files(family: &Family, files: Vec<(&str, Vec<u8>)>) -> Result<(), HatError> {
         for (name, contents) in files {
-            family.snapshot_direct(entry(name.bytes().collect()),
+            try!(family.snapshot_direct(entry(name.bytes().collect()),
                                  false,
-                                 Some(FileIterator::from_bytes(contents)))
-                .unwrap();
+                                 Some(FileIterator::from_bytes(contents))));
         }
+        Ok(())
     }
 
     #[test]
