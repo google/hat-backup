@@ -1638,21 +1638,26 @@ mod tests {
     }
 
     #[test]
-    #[should_panic]
-    fn shutdown_early_panics() {
+    fn poisoned_process_does_not_panic() {
         // TODO: Upgrade to proper error handling so we can test resuming.
 
-        let shutdown = vec![10];
-        let (_, mut hat, fam) = setup_family(Some(shutdown));
+        let poison = vec![10];
+        let (_, mut hat, fam) = setup_family(Some(poison));
 
-        snapshot_files(&fam,
-                       vec![("name1", vec![0; 1000000]),
-                            ("name2", vec![1; 1000000]),
-                            ("name3", vec![2; 1000000])]);
+        let mut run_until_error = || {
+            try!(snapshot_files(&fam,
+                           vec![("name1", vec![0; 1000000]),
+                                ("name2", vec![1; 1000000]),
+                                ("name3", vec![2; 1000000])]));
 
-        fam.flush().unwrap();
-        hat.commit(&fam, None).unwrap();
-        hat.meta_commit().unwrap();
+            try!(fam.flush());
+            try!(hat.commit(&fam, None));
+            try!(hat.meta_commit());
+
+            Ok(())
+        };
+
+        let _: Result<(), HatError> = run_until_error();
     }
 }
 
