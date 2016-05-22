@@ -248,23 +248,23 @@ impl<B: 'static + blob::StoreBackend + Clone + Send> HatRc<B> {
     #[cfg(test)]
     pub fn new_for_testing(backend: B,
                            max_blob_size: usize,
-                           shutdown_after: &[i64])
+                           poison_after: &[i64])
                            -> Result<HatRc<B>, HatError> {
-        // If provided, we cycle the possible shutdown values to give every process one.
-        let mut shutdown = shutdown_after.iter().cycle();
+        // If provided, we cycle the possible poison values to give every process one.
+        let mut poison = poison_after.iter().cycle();
 
-        let si_p = snapshot::SnapshotIndex::new_for_testing(shutdown.next().cloned()).unwrap();
-        let bi_p = blob::BlobIndex::new_for_testing(shutdown.next().cloned()).unwrap();
-        let hi_p = hash::HashIndex::new_for_testing(shutdown.next().cloned()).unwrap();
+        let si_p = snapshot::SnapshotIndex::new_for_testing(poison.next().cloned()).unwrap();
+        let bi_p = blob::BlobIndex::new_for_testing(poison.next().cloned()).unwrap();
+        let hi_p = hash::HashIndex::new_for_testing(poison.next().cloned()).unwrap();
 
         let local_blob_index = bi_p.clone();
         let local_backend = backend.clone();
-        let bs_p = Process::new_with_shutdown(move || {
-                                                  blob::Store::new(local_blob_index,
-                                                                   local_backend,
-                                                                   max_blob_size)
-                                              },
-                                              shutdown.next().cloned())
+        let bs_p = Process::new_with_poison(move || {
+                                                blob::Store::new(local_blob_index,
+                                                                 local_backend,
+                                                                 max_blob_size)
+                                            },
+                                            poison.next().cloned())
             .unwrap();
 
         let gc_backend = GcBackend { hash_index: hi_p.clone() };
@@ -293,13 +293,13 @@ impl<B: 'static + blob::StoreBackend + Clone + Send> HatRc<B> {
     }
 
     pub fn open_family(&self, name: String) -> Result<Family, HatError> {
-        self.open_family_with_shutdown(name, None)
+        self.open_family_with_poison(name, None)
     }
 
-    pub fn open_family_with_shutdown(&self,
-                                     name: String,
-                                     shutdown_after: Option<i64>)
-                                     -> Result<Family, HatError> {
+    pub fn open_family_with_poison(&self,
+                                   name: String,
+                                   poison_after: Option<i64>)
+                                   -> Result<Family, HatError> {
         // We setup a standard pipeline of processes:
         // key::Store -> key::Index
         //            -> hash::Index
@@ -310,12 +310,12 @@ impl<B: 'static + blob::StoreBackend + Clone + Send> HatRc<B> {
             None => ":memory:".to_string(),
         };
 
-        let ki_p = try!(key::KeyIndex::new_with_shutdown(&key_index_path, shutdown_after));
+        let ki_p = try!(key::KeyIndex::new_with_poison(&key_index_path, poison_after));
 
         let local_ks = key::Store::new(ki_p.clone(),
                                        self.hash_index.clone(),
                                        self.blob_store.clone());
-        let ks_p = try!(Process::new_with_shutdown(move || local_ks, shutdown_after));
+        let ks_p = try!(Process::new_with_poison(move || local_ks, poison_after));
 
         let ks = try!(key::Store::new(ki_p, self.hash_index.clone(), self.blob_store.clone()));
 
@@ -1429,21 +1429,20 @@ mod tests {
     use key;
 
     pub fn setup_hat<B: Clone + Send + StoreBackend + 'static>(backend: B,
-                                                               shutdown_after: &[i64])
+                                                               poison_after: &[i64])
                                                                -> HatRc<B> {
         let max_blob_size = 1024 * 1024;
-        Hat::new_for_testing(backend, max_blob_size, shutdown_after).unwrap()
+        Hat::new_for_testing(backend, max_blob_size, poison_after).unwrap()
     }
 
-    fn setup_family(shutdown_after: Option<Vec<i64>>)
-                    -> (MemoryBackend, HatRc<MemoryBackend>, Family) {
-        let shutdown = shutdown_after.unwrap_or(vec![]);
+    fn setup_family(poison_after: Option<Vec<i64>>) -> (MemoryBackend, HatRc<MemoryBackend>, Family) {
+        let poison = poison_after.unwrap_or(vec![]);
 
         let backend = MemoryBackend::new();
-        let hat = setup_hat(backend.clone(), &shutdown[..]);
+        let hat = setup_hat(backend.clone(), &poison[..]);
 
         let family = "familyname".to_string();
-        let fam = hat.open_family_with_shutdown(family.clone(), shutdown.last().cloned()).unwrap();
+        let fam = hat.open_family_with_poison(family.clone(), poison.last().cloned()).unwrap();
 
         (backend, hat, fam)
     }
@@ -1467,8 +1466,8 @@ mod tests {
     fn snapshot_files(family: &Family, files: Vec<(&str, Vec<u8>)>) -> Result<(), HatError> {
         for (name, contents) in files {
             try!(family.snapshot_direct(entry(name.bytes().collect()),
-                                 false,
-                                 Some(FileIterator::from_bytes(contents))));
+                                        false,
+                                        Some(FileIterator::from_bytes(contents))));
         }
         Ok(())
     }
@@ -1618,8 +1617,8 @@ mod tests {
         assert!(live1 > 0);
 
         // Create a new hat to wipe the index states.
-        let shutdown = vec![];
-        let mut hat2 = setup_hat(backend.clone(), &shutdown[..]);
+        let poison = vec![];
+        let mut hat2 = setup_hat(backend.clone(), &poison[..]);
 
         // Recover index states.
         hat2.recover().unwrap();

@@ -231,16 +231,16 @@ impl InternalBlobIndex {
 
 impl BlobIndex {
     pub fn new(path: &str) -> Result<BlobIndex, IndexError> {
-        BlobIndex::new_with_shutdown(path, None)
+        BlobIndex::new_with_poison(path, None)
     }
 
-    pub fn new_for_testing(shutdown: Option<i64>) -> Result<BlobIndex, IndexError> {
-        BlobIndex::new_with_shutdown(":memory:", shutdown)
+    pub fn new_for_testing(poison: Option<i64>) -> Result<BlobIndex, IndexError> {
+        BlobIndex::new_with_poison(":memory:", poison)
     }
 
-    pub fn new_with_shutdown(path: &str, shutdown: Option<i64>) -> Result<BlobIndex, IndexError> {
+    pub fn new_with_poison(path: &str, poison: Option<i64>) -> Result<BlobIndex, IndexError> {
         let index = try!(InternalBlobIndex::new(path));
-        Ok(BlobIndex(Arc::new(Mutex::new((index, shutdown)))))
+        Ok(BlobIndex(Arc::new(Mutex::new((index, poison)))))
     }
 
     fn lock(&self) -> MutexGuard<(InternalBlobIndex, Option<i64>)> {

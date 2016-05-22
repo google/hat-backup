@@ -368,18 +368,16 @@ impl InternalSnapshotIndex {
 
 impl SnapshotIndex {
     pub fn new(path: &str) -> Result<SnapshotIndex, IndexError> {
-        SnapshotIndex::new_with_shutdown(path, None)
+        SnapshotIndex::new_with_poison(path, None)
     }
 
-    pub fn new_for_testing(shutdown: Option<i64>) -> Result<SnapshotIndex, IndexError> {
-        SnapshotIndex::new_with_shutdown(":memory:", shutdown)
+    pub fn new_for_testing(poison: Option<i64>) -> Result<SnapshotIndex, IndexError> {
+        SnapshotIndex::new_with_poison(":memory:", poison)
     }
 
-    pub fn new_with_shutdown(path: &str,
-                             shutdown: Option<i64>)
-                             -> Result<SnapshotIndex, IndexError> {
+    pub fn new_with_poison(path: &str, poison: Option<i64>) -> Result<SnapshotIndex, IndexError> {
         let index = try!(InternalSnapshotIndex::new(path));
-        Ok(SnapshotIndex(Arc::new(Mutex::new((index, shutdown)))))
+        Ok(SnapshotIndex(Arc::new(Mutex::new((index, poison)))))
     }
 
     fn lock(&self) -> MutexGuard<(InternalSnapshotIndex, Option<i64>)> {

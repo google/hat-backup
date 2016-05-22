@@ -89,12 +89,12 @@ impl<Msg: 'static + Send, Reply: 'static + Send, E> Process<Msg, Reply, E> {
               E: 'static + From<mpsc::RecvError> + fmt::Debug + Send,
               F: FnOnce() -> Result<H, E>
     {
-        Process::new_with_shutdown(handler_proc, None)
+        Process::new_with_poison(handler_proc, None)
     }
 
-    pub fn new_with_shutdown<H, F>(handler_proc: F,
-                                   poison_after: Option<i64>)
-                                   -> Result<Process<Msg, Reply, E>, E>
+    pub fn new_with_poison<H, F>(handler_proc: F,
+                                 poison_after: Option<i64>)
+                                 -> Result<Process<Msg, Reply, E>, E>
         where H: 'static + MsgHandler<Msg, Reply, Err = E> + Send,
               E: 'static + From<mpsc::RecvError> + fmt::Debug + Send,
               F: FnOnce() -> Result<H, E>
@@ -170,11 +170,9 @@ impl<Msg: 'static + Send, Reply: 'static + Send, E> Process<Msg, Reply, E> {
                 };
                 Ok(())
             };
-            loop {
-                if let Err(e) = do_loop() {
-                    *poisoned.lock().unwrap() = true;  // This process is in a polluted state.
-                    error!("Poisoned process: {:?}", e);
-                } else { break }
+            while let Err(e) = do_loop() {
+                *poisoned.lock().unwrap() = true;  // This process is in a polluted state.
+                error!("Poisoned process: {:?}", e);
             }
         });
 
@@ -184,7 +182,9 @@ impl<Msg: 'static + Send, Reply: 'static + Send, E> Process<Msg, Reply, E> {
     /// Synchronous send.
     ///
     /// Will always wait for a reply from the receiving `process`.
-    pub fn send_reply(&self, msg: Msg) -> Result<Reply, E> where E: From<String> {
+    pub fn send_reply(&self, msg: Msg) -> Result<Reply, E>
+        where E: From<String>
+    {
         let (sender, receiver) = mpsc::channel();
 
         if *self.poisoned.lock().unwrap() {

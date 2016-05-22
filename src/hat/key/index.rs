@@ -287,16 +287,16 @@ impl InternalKeyIndex {
 
 impl KeyIndex {
     pub fn new(path: &str) -> Result<KeyIndex, IndexError> {
-        KeyIndex::new_with_shutdown(path, None)
+        KeyIndex::new_with_poison(path, None)
     }
 
-    pub fn new_for_testing(shutdown: Option<i64>) -> Result<KeyIndex, IndexError> {
-        KeyIndex::new_with_shutdown(":memory:", shutdown)
+    pub fn new_for_testing(poison: Option<i64>) -> Result<KeyIndex, IndexError> {
+        KeyIndex::new_with_poison(":memory:", poison)
     }
 
-    pub fn new_with_shutdown(path: &str, shutdown: Option<i64>) -> Result<KeyIndex, IndexError> {
+    pub fn new_with_poison(path: &str, poison: Option<i64>) -> Result<KeyIndex, IndexError> {
         let index = try!(InternalKeyIndex::new(path));
-        Ok(KeyIndex(Arc::new(Mutex::new((index, shutdown)))))
+        Ok(KeyIndex(Arc::new(Mutex::new((index, poison)))))
     }
 
     fn lock(&self) -> MutexGuard<(InternalKeyIndex, Option<i64>)> {
