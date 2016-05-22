@@ -57,7 +57,8 @@ use std::sync::{mpsc, Arc, Mutex};
 
 pub struct Process<Msg, Reply, E> {
     sender: mpsc::SyncSender<(Msg, mpsc::Sender<Result<Reply, E>>)>,
-    shutdown_after: Option<i64>,
+    poison_after: Option<i64>,
+    poisoned: Arc<Mutex<bool>>,
 }
 
 /// When cloning a `process` we clone the input-channel, allowing multiple threads to share the same
@@ -66,7 +67,8 @@ impl<Msg: Send, Reply: Send, E> Clone for Process<Msg, Reply, E> {
     fn clone(&self) -> Process<Msg, Reply, E> {
         Process {
             sender: self.sender.clone(),
-            shutdown_after: None,
+            poison_after: None,
+            poisoned: self.poisoned.clone(),
         }
     }
 }
@@ -91,7 +93,7 @@ impl<Msg: 'static + Send, Reply: 'static + Send, E> Process<Msg, Reply, E> {
     }
 
     pub fn new_with_shutdown<H, F>(handler_proc: F,
-                                   shutdown_after: Option<i64>)
+                                   poison_after: Option<i64>)
                                    -> Result<Process<Msg, Reply, E>, E>
         where H: 'static + MsgHandler<Msg, Reply, Err = E> + Send,
               E: 'static + From<mpsc::RecvError> + fmt::Debug + Send,
@@ -100,7 +102,8 @@ impl<Msg: 'static + Send, Reply: 'static + Send, E> Process<Msg, Reply, E> {
         let (sender, receiver) = mpsc::sync_channel(10);
         let p = Process {
             sender: sender,
-            shutdown_after: shutdown_after,
+            poison_after: poison_after,
+            poisoned: Arc::new(Mutex::new(false)),
         };
 
         try!(p.start(receiver, handler_proc));
@@ -117,8 +120,11 @@ impl<Msg: 'static + Send, Reply: 'static + Send, E> Process<Msg, Reply, E> {
               E: 'static + From<mpsc::RecvError> + fmt::Debug + Send,
               F: FnOnce() -> Result<H, E>
     {
-        let shutdown_after = self.shutdown_after;
+        let poison_after = self.poison_after;
         let mut my_handler = try!(handler_proc());
+
+        let poisoned = self.poisoned.clone();
+
         thread::spawn(move || {
             // fork handler
             let mut handle_msg = |msg, rep: mpsc::Sender<Result<Reply, E>>| {
@@ -145,7 +151,7 @@ impl<Msg: 'static + Send, Reply: 'static + Send, E> Process<Msg, Reply, E> {
                 Ok(())
             };
             let mut do_loop = || {
-                match shutdown_after {
+                match poison_after {
                     Some(msg_count) => {
                         for _ in 0..msg_count {
                             if let Ok((msg, rep)) = receiver.recv() {
@@ -164,8 +170,11 @@ impl<Msg: 'static + Send, Reply: 'static + Send, E> Process<Msg, Reply, E> {
                 };
                 Ok(())
             };
-            if let Err(e) = do_loop() {
-                error!("Shutting down process: {:?}", e);
+            loop {
+                if let Err(e) = do_loop() {
+                    *poisoned.lock().unwrap() = true;  // This process is in a polluted state.
+                    error!("Poisoned process: {:?}", e);
+                } else { break }
             }
         });
 
@@ -177,12 +186,17 @@ impl<Msg: 'static + Send, Reply: 'static + Send, E> Process<Msg, Reply, E> {
     /// Will always wait for a reply from the receiving `process`.
     pub fn send_reply(&self, msg: Msg) -> Result<Reply, E> where E: From<String> {
         let (sender, receiver) = mpsc::channel();
+
+        if *self.poisoned.lock().unwrap() {
+            return Err(From::from("Refusing to forward message to poisoned process".to_string()));
+        }
+
         if let Err(e) = self.sender.send((msg, sender)) {
             return Err(From::from("Could not send message: process is dead".to_string()));
         }
 
         match receiver.recv() {
-            Err(e) => Err(From::from("Could not read reply: process has died".to_string())),
+            Err(e) => Err(From::from("Could not read reply".to_string())),
             Ok(reply) => reply,
         }
     }
