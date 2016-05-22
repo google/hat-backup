@@ -296,7 +296,7 @@ impl<B: StoreBackend> Store<B> {
 
     #[cfg(test)]
     pub fn new_for_testing(backend: B, max_blob_size: usize) -> Result<Store<B>, MsgError> {
-        let bi_p = try!(index::BlobIndex::new_for_testing(None));
+        let bi_p = try!(index::BlobIndex::new_for_testing());
         let mut bs = Store {
             backend: backend,
             blob_index: bi_p,

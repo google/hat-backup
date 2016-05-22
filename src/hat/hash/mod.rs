@@ -519,19 +519,19 @@ impl InternalHashIndex {
 
 impl HashIndex {
     pub fn new(path: &str) -> Result<HashIndex, MsgError> {
-        HashIndex::new_with_shutdown(path, None)
+        HashIndex::new_with_poison(path, None)
     }
 
-    pub fn new_for_testing(shutdown: Option<i64>) -> Result<HashIndex, MsgError> {
-        HashIndex::new_with_shutdown(":memory:", shutdown)
+    pub fn new_for_testing(poison: Option<i64>) -> Result<HashIndex, MsgError> {
+        HashIndex::new_with_poison(":memory:", poison)
     }
 
-    pub fn new_with_shutdown(path: &str, shutdown: Option<i64>) -> Result<HashIndex, MsgError> {
+    pub fn new_with_poison(path: &str, poison: Option<i64>) -> Result<HashIndex, MsgError> {
         let index = try!(InternalHashIndex::new(path));
-        Ok(HashIndex(Arc::new(Mutex::new((index, shutdown)))))
+        Ok(HashIndex(Arc::new(Mutex::new((index, poison)))))
     }
 
-    fn lock_ignore_shutdown(&self) -> Result<MutexGuard<(InternalHashIndex, Option<i64>)>, MsgError> {
+    fn lock_ignore_poison(&self) -> Result<MutexGuard<(InternalHashIndex, Option<i64>)>, MsgError> {
         match self.0.lock() {
             Err(_) => return Err(From::from("Unable to lock mutex: poisoned")),
             Ok(lock) => Ok(lock),
@@ -539,7 +539,7 @@ impl HashIndex {
     }
 
     fn lock(&self) -> Result<MutexGuard<(InternalHashIndex, Option<i64>)>, MsgError> {
-        let mut guard = try!(self.lock_ignore_shutdown());
+        let mut guard = try!(self.lock_ignore_poison());
 
         match &mut guard.1 {
             &mut None => (),
@@ -616,10 +616,10 @@ impl HashIndex {
     /// A `Hash` is committed when it has been `finalized` in the external storage. `Commit`
     /// includes the persistent reference that the content is available at.
     pub fn commit(&self, hash: &Hash, persistent_ref: blob::ChunkRef) -> Result<(), MsgError> {
-        // Ignore shutdown setup since commit is often triggered by callbacks with no error
+        // Ignore poison setup since commit is often triggered by callbacks with no error
         // handling options.
         assert!(!hash.bytes.is_empty());
-        try!(self.lock_ignore_shutdown()).0.commit(hash, persistent_ref);
+        try!(self.lock_ignore_poison()).0.commit(hash, persistent_ref);
         Ok(())
     }
 
