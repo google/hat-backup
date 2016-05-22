@@ -1646,9 +1646,9 @@ mod tests {
 
         let mut run_until_error = || {
             try!(snapshot_files(&fam,
-                           vec![("name1", vec![0; 1000000]),
-                                ("name2", vec![1; 1000000]),
-                                ("name3", vec![2; 1000000])]));
+                                vec![("name1", vec![0; 1000000]),
+                                     ("name2", vec![1; 1000000]),
+                                     ("name3", vec![2; 1000000])]));
 
             try!(fam.flush());
             try!(hat.commit(&fam, None));
