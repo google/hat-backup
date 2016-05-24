@@ -10,7 +10,7 @@ path = "src/hat/main.rs"
 
 [build-dependencies]
 capnpc = "*"
-syntex = "*"
+syntex = "0.31.0"
 
 [dependencies]
 capnp = "*"
