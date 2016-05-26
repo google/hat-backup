@@ -1481,7 +1481,7 @@ mod tests {
         snapshot_files(&fam,
                        vec![("name1", vec![0; 1000000]),
                             ("name2", vec![1; 1000000]),
-                            ("name3", vec![2; 1000000])]);
+                            ("name3", vec![2; 1000000])]).unwrap();
 
         fam.flush().unwrap();
         hat.commit(&fam, None).unwrap();
@@ -1497,7 +1497,7 @@ mod tests {
         let (_, mut hat, fam) = setup_family(None);
 
         let names: Vec<String> = (0..3000).map(|i| format!("name-{}", i)).collect();
-        snapshot_files(&fam, names.iter().map(|n| (n.as_str(), vec![])).collect());
+        snapshot_files(&fam, names.iter().map(|n| (n.as_str(), vec![])).collect()).unwrap();
 
         fam.flush().unwrap();
         hat.commit(&fam, None).unwrap();
@@ -1547,12 +1547,12 @@ mod tests {
                          ("file5", "block2".bytes().collect())];
 
         // Insert hashes.
-        snapshot_files(&fam, files.clone());
+        snapshot_files(&fam, files.clone()).unwrap();
         fam.flush().unwrap();
 
         // Reuse hashes.
-        snapshot_files(&fam, files.clone());
-        snapshot_files(&fam, files.clone());
+        snapshot_files(&fam, files.clone()).unwrap();
+        snapshot_files(&fam, files.clone()).unwrap();
         fam.flush().unwrap();
 
         // No commit, so GC removes all the new hashes.
@@ -1561,7 +1561,7 @@ mod tests {
         assert_eq!(live, 0);
 
         // Update index and reinsert hashes.
-        snapshot_files(&fam, files.clone());
+        snapshot_files(&fam, files.clone()).unwrap();
         fam.flush().unwrap();
 
         // Commit.
@@ -1571,7 +1571,7 @@ mod tests {
         assert!(live > 0);
 
         // Inserting again does not increase number of hashes.
-        snapshot_files(&fam, files.clone());
+        snapshot_files(&fam, files.clone()).unwrap();
         fam.flush().unwrap();
         let (deleted2, live2) = hat.gc().unwrap();
         assert_eq!(live2, live);
@@ -1591,7 +1591,7 @@ mod tests {
         snapshot_files(&fam,
                        vec![("name1", vec![0; 1000000]),
                             ("name2", vec![1; 1000000]),
-                            ("name3", vec![2; 1000000])]);
+                            ("name3", vec![2; 1000000])]).unwrap();
 
         fam.flush().unwrap();
 
@@ -1609,7 +1609,7 @@ mod tests {
         snapshot_files(&fam,
                        vec![("name1", vec![0; 1000000]),
                             ("name2", vec![1; 1000000]),
-                            ("name3", vec![2; 1000000])]);
+                            ("name3", vec![2; 1000000])]).unwrap();
         fam.flush().unwrap();
         hat.commit(&fam, None).unwrap();
         hat.meta_commit().unwrap();
@@ -1644,9 +1644,9 @@ mod tests {
 
         fn prop(poison_after: u8) -> bool {
             let poison = vec![poison_after as i64];
-            let (_, mut hat, fam) = setup_family(Some(poison));
+            let (_, _, fam) = setup_family(Some(poison));
 
-            let mut run_until_error = || {
+            let run_until_error = || {
                 try!(snapshot_files(&fam,
                                     vec![("name1", vec![0; 1000000]),
                                          ("name2", vec![1; 1000000]),
