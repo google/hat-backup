@@ -192,11 +192,11 @@ impl<Msg: 'static + Send, Reply: 'static + Send, E> Process<Msg, Reply, E> {
         }
 
         if let Err(e) = self.sender.send((msg, sender)) {
-            return Err(From::from("Could not send message: process is dead".to_string()));
+            return Err(From::from(format!("Could not send message: process is dead: {}", e)));
         }
 
         match receiver.recv() {
-            Err(e) => Err(From::from("Could not read reply".to_string())),
+            Err(e) => Err(From::from(format!("Could not read reply: {}", e))),
             Ok(reply) => reply,
         }
     }
