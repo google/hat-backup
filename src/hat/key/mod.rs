@@ -289,23 +289,24 @@ fn file_size_warning(name: &[u8], wanted: u64, got: u64) {
 impl<IT: Iterator<Item = Vec<u8>>> MsgHandler<Msg<IT>, Reply> for Store {
     type Err = MsgError;
 
-    fn handle<F: Fn(Result<Reply, MsgError>)>(&mut self,
-                                              msg: Msg<IT>,
-                                              reply: F)
-                                              -> Result<(), MsgError> {
-        let reply_ok = |x| {
-            reply(Ok(x));
+    fn handle<F: FnOnce(Result<Reply, MsgError>)>(&mut self,
+                                                  msg: Msg<IT>,
+                                                  reply: F)
+                                                  -> Result<(), MsgError> {
+        macro_rules! reply_ok(($x:expr) => {{
+            reply(Ok($x));
             Ok(())
-        };
-        let reply_err = |e| {
-            reply(Err(e));
+        }});
+
+        macro_rules! reply_err(($x:expr) => {{
+            reply(Err($x));
             Ok(())
-        };
+        }});
 
         match msg {
             Msg::Flush => {
                 try!(self.flush());
-                reply_ok(Reply::FlushOk)
+                reply_ok!(Reply::FlushOk)
             }
 
             Msg::ListDir(parent) => {
@@ -324,9 +325,9 @@ impl<IT: Iterator<Item = Vec<u8>>> MsgHandler<Msg<IT>, Reply> for Store {
 
                             my_entries.push((entry, persistent_ref, open_fn));
                         }
-                        reply_ok(Reply::ListResult(my_entries))
+                        reply_ok!(Reply::ListResult(my_entries))
                     }
-                    Err(e) => reply_err(From::from(e)),
+                    Err(e) => reply_err!(From::from(e)),
                 }
             }
 
@@ -340,11 +341,11 @@ impl<IT: Iterator<Item = Vec<u8>>> MsgHandler<Msg<IT>, Reply> for Store {
                             let hash = hash::Hash { bytes: entry.data_hash.clone().unwrap() };
                             if try!(self.hash_index.hash_exists(&hash)) {
                                 // Short-circuit: We have the data.
-                                return reply_ok(Reply::Id(entry.id.unwrap()));
+                                return reply_ok!(Reply::Id(entry.id.unwrap()));
                             }
                         } else if chunk_it_opt.is_none() && entry.data_hash.is_none() {
                             // Short-circuit: No data needed.
-                            return reply_ok(Reply::Id(entry.id.unwrap()));
+                            return reply_ok!(Reply::Id(entry.id.unwrap()));
                         }
                         // Our stored entry is incomplete.
                         Entry { id: entry.id, ..org_entry }

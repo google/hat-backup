@@ -76,10 +76,10 @@ impl<Msg: Send, Reply: Send, E> Clone for Process<Msg, Reply, E> {
 pub trait MsgHandler<Msg, Reply> {
     type Err;
 
-    fn handle<F: Fn(Result<Reply, Self::Err>)>(&mut self,
-                                               msg: Msg,
-                                               callback: F)
-                                               -> Result<(), Self::Err>;
+    fn handle<F: FnOnce(Result<Reply, Self::Err>)>(&mut self,
+                                                   msg: Msg,
+                                                   callback: F)
+                                                   -> Result<(), Self::Err>;
 }
 
 impl<Msg: 'static + Send, Reply: 'static + Send, E> Process<Msg, Reply, E> {

@@ -357,18 +357,19 @@ impl<B: StoreBackend> Store<B> {
 impl<B: StoreBackend> MsgHandler<Msg, Reply> for Store<B> {
     type Err = MsgError;
 
-    fn handle<F: Fn(Result<Reply, MsgError>)>(&mut self,
-                                              msg: Msg,
-                                              reply: F)
-                                              -> Result<(), MsgError> {
-        let reply_ok = |x| {
-            reply(Ok(x));
+    fn handle<F: FnOnce(Result<Reply, MsgError>)>(&mut self,
+                                                  msg: Msg,
+                                                  reply: F)
+                                                  -> Result<(), MsgError> {
+        macro_rules! reply_ok(($x:expr) => {{
+            reply(Ok($x));
             Ok(())
-        };
-        let reply_err = |e| {
-            reply(Err(e));
+        }});
+
+        macro_rules! reply_err(($x:expr) => {{
+            reply(Err($x));
             Ok(())
-        };
+        }});
 
         match msg {
             Msg::Store(mut chunk, kind, callback) => {
@@ -381,7 +382,7 @@ impl<B: StoreBackend> MsgHandler<Msg, Reply> for Store<B> {
                     };
                     let cb_id = id.clone();
                     thread::spawn(move || callback.call(cb_id));
-                    return reply_ok(Reply::StoreOk(id));
+                    return reply_ok!(Reply::StoreOk(id));
                 }
 
                 let id = ChunkRef {
@@ -405,27 +406,27 @@ impl<B: StoreBackend> MsgHandler<Msg, Reply> for Store<B> {
             }
             Msg::Retrieve(id) => {
                 if id.offset == 0 && id.length == 0 {
-                    return reply_ok(Reply::RetrieveOk(vec![]));
+                    return reply_ok!(Reply::RetrieveOk(vec![]));
                 }
                 let blob = self.backend_read(&id.blob_id[..]);
                 let chunk = &blob[id.offset..id.offset + id.length];
 
-                reply_ok(Reply::RetrieveOk(chunk.to_vec()))
+                reply_ok!(Reply::RetrieveOk(chunk.to_vec()))
             }
             Msg::StoreNamed(name, data) => {
                 self.backend.store(name.as_bytes(), &data[..]).ok();
-                reply_ok(Reply::StoreNamedOk(name))
+                reply_ok!(Reply::StoreNamedOk(name))
             }
             Msg::RetrieveNamed(name) => {
-                reply_ok(Reply::RetrieveOk(self.backend_read(name.as_bytes())))
+                reply_ok!(Reply::RetrieveOk(self.backend_read(name.as_bytes())))
             }
             Msg::Recover(chunk) => {
                 if chunk.offset == 0 && chunk.length == 0 {
                     // This chunk is empty, so there is no blob to recover.
-                    return reply_ok(Reply::RecoverOk);
+                    return reply_ok!(Reply::RecoverOk);
                 }
                 self.blob_index.recover(chunk.blob_id);
-                reply_ok(Reply::RecoverOk)
+                reply_ok!(Reply::RecoverOk)
             }
             Msg::Tag(chunk, tag) => {
                 self.blob_index.tag(&BlobDesc {
@@ -433,26 +434,26 @@ impl<B: StoreBackend> MsgHandler<Msg, Reply> for Store<B> {
                                         name: chunk.blob_id,
                                     },
                                     tag);
-                reply_ok(Reply::Ok)
+                reply_ok!(Reply::Ok)
             }
             Msg::TagAll(tag) => {
                 self.blob_index.tag_all(tag);
-                reply_ok(Reply::Ok)
+                reply_ok!(Reply::Ok)
             }
             Msg::DeleteByTag(tag) => {
                 let blobs = self.blob_index.list_by_tag(tag);
                 for b in blobs.iter() {
                     if let Err(e) = self.backend.delete(&b.name) {
-                        return reply_err(From::from(e));
+                        return reply_err!(From::from(e));
                     }
                 }
                 self.blob_index.delete_by_tag(tag);
-                reply_ok(Reply::Ok)
+                reply_ok!(Reply::Ok)
             }
             Msg::Flush => {
                 self.flush();
                 self.blob_index.flush();
-                reply_ok(Reply::FlushOk)
+                reply_ok!(Reply::FlushOk)
             }
         }
     }
