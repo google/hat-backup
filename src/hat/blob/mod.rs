@@ -357,10 +357,10 @@ impl<B: StoreBackend> Store<B> {
 impl<B: StoreBackend> MsgHandler<Msg, Reply> for Store<B> {
     type Err = MsgError;
 
-    fn handle(&mut self,
-              msg: Msg,
-              reply: Box<Fn(Result<Reply, MsgError>)>)
-              -> Result<(), MsgError> {
+    fn handle<F: Fn(Result<Reply, MsgError>)>(&mut self,
+                                              msg: Msg,
+                                              reply: F)
+                                              -> Result<(), MsgError> {
         let reply_ok = |x| {
             reply(Ok(x));
             Ok(())

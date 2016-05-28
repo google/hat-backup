@@ -289,10 +289,10 @@ fn file_size_warning(name: &[u8], wanted: u64, got: u64) {
 impl<IT: Iterator<Item = Vec<u8>>> MsgHandler<Msg<IT>, Reply> for Store {
     type Err = MsgError;
 
-    fn handle(&mut self,
-              msg: Msg<IT>,
-              reply: Box<Fn(Result<Reply, MsgError>)>)
-              -> Result<(), MsgError> {
+    fn handle<F: Fn(Result<Reply, MsgError>)>(&mut self,
+                                              msg: Msg<IT>,
+                                              reply: F)
+                                              -> Result<(), MsgError> {
         let reply_ok = |x| {
             reply(Ok(x));
             Ok(())
