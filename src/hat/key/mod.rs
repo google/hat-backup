@@ -22,7 +22,6 @@ use hash;
 use hash::tree::{HashTreeBackend, SimpleHashTreeWriter, SimpleHashTreeReader, ReaderResult};
 
 use process::{Process, MsgHandler};
-use util::FnBox;
 
 
 mod schema;
@@ -79,7 +78,7 @@ pub enum Msg<IT> {
     /// Insert a key into the index. If this key has associated data a "chunk-iterator creator"
     /// can be passed along with it. If the data turns out to be unreadable, this iterator proc
     /// can return `None`. Returns `Id` with the new entry ID.
-    Insert(Entry, Option<Box<FnBox<(), Option<IT>>>>),
+    Insert(Entry, Option<Option<IT>>),
 
     /// List a "directory" (aka. a `level`) in the index.
     /// Returns `ListResult` with all the entries under the given parent.
@@ -365,7 +364,7 @@ impl<IT: Iterator<Item = Vec<u8>>> MsgHandler<Msg<IT>, Reply> for Store {
                 let mut tree = self.hash_tree_writer();
 
                 // Check if we have an data source:
-                let it_opt = chunk_it_opt.and_then(|open| open.call(()));
+                let it_opt = chunk_it_opt.and_then(|chunk_it| chunk_it);
                 if it_opt.is_none() {
                     // No data is associated with this entry.
                     try!(self.index.update_data_hash(entry, None, None));
@@ -524,7 +523,7 @@ mod tests {
         let local_file = fs.file.clone();
         let id = match ks_p.send_reply(Msg::Insert(fs.file.key_entry.clone(),
                                     if fs.file.data.is_some() {
-                                        Some(Box::new(move |()| Some(local_file)))
+                                        Some(Some(local_file))
                                     } else {
                                         None
                                     }))
@@ -655,7 +654,7 @@ mod bench {
             };
 
             ks_p.send_reply(Msg::Insert(entry.key_entry.clone(),
-                                        Some(Box::new(move |()| Some(entry)))))
+                                        Some(Some(entry))))
                 .unwrap();
         });
 
@@ -698,7 +697,7 @@ mod bench {
             };
 
             ks_p.send_reply(Msg::Insert(entry.key_entry.clone(),
-                                        Some(Box::new(move |()| Some(entry)))))
+                                        Some(Some(entry))))
                 .unwrap();
         });
 
@@ -731,7 +730,7 @@ mod bench {
                 },
             };
             ks_p.send_reply(Msg::Insert(entry.key_entry.clone(),
-                                        Some(Box::new(move |()| Some(entry)))))
+                                        Some(Some(entry))))
                 .unwrap();
 
             match ks_p.send_reply(Msg::Flush).unwrap() {
@@ -785,7 +784,7 @@ mod bench {
             };
 
             ks_p.send_reply(Msg::Insert(entry.key_entry.clone(),
-                                        Some(Box::new(move |()| Some(entry)))))
+                                        Some(Some(entry))))
                 .unwrap();
 
             match ks_p.send_reply(Msg::Flush).unwrap() {

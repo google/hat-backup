@@ -43,7 +43,6 @@ use listdir;
 use process::Process;
 use snapshot;
 use tags;
-use util::FnBox;
 
 
 error_type! {
@@ -1102,26 +1101,24 @@ impl listdir::PathHandler<Option<u64>> for InsertPathHandler {
                 let is_directory = file_entry.is_directory();
                 let local_root = path;
                 let local_file_entry = file_entry.clone();
-
+                let chunk_it =
+                    if is_directory {
+                        None
+                    } else {
+                        match local_file_entry.file_iterator() {
+                            Err(e) => {
+                                println!("Skipping '{}': {}",
+                                         local_root.display(),
+                                         e.to_string());
+                                Some(None)
+                            }
+                            Ok(it) => Some(Some(it))
+                        }
+                    };
                 match self.key_store
                     .lock()
                     .unwrap()
-                    .send_reply(key::Msg::Insert(file_entry.key_entry,
-                                                 if is_directory {
-                                                     None
-                                                 } else {
-                                                     Some(Box::new(move |()| {
-                            match local_file_entry.file_iterator() {
-                                Err(e) => {
-                                    println!("Skipping '{}': {}",
-                                             local_root.display(),
-                                             e.to_string());
-                                    None
-                                }
-                                Ok(it) => Some(it),
-                            }
-                        }))
-                                                 })) {
+                    .send_reply(key::Msg::Insert(file_entry.key_entry, chunk_it)) {
                     Ok(key::Reply::Id(id)) => {
                         if is_directory {
                             return Some(Some(id));
@@ -1168,12 +1165,12 @@ impl Family {
                            is_directory: bool,
                            contents: Option<FileIterator>)
                            -> Result<(), HatError> {
-        let f = if is_directory {
+        let chunk_it = if is_directory {
             None
         } else {
-            Some(Box::new(move |()| contents) as Box<FnBox<(), _>>)
+            Some(contents)
         };
-        match try!(self.key_store_process.send_reply(key::Msg::Insert(file, f))) {
+        match try!(self.key_store_process.send_reply(key::Msg::Insert(file, chunk_it))) {
             key::Reply::Id(..) => return Ok(()),
             _ => Err(From::from("Unexpected reply from key store")),
         }
