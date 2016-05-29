@@ -35,15 +35,12 @@ use time;
 
 use blob;
 use gc;
-use gc::Gc;
-use gc_rc;
+use gc::{Gc, GcRc};
 use hash;
 use key;
-use listdir;
-use process::Process;
 use snapshot;
 use tags;
-use util::FnBox;
+use util::{self, FnBox, Process};
 
 
 error_type! {
@@ -169,7 +166,7 @@ pub struct Hat<B, G: gc::Gc> {
     max_blob_size: usize,
 }
 
-pub type HatRc<B> = Hat<B, gc_rc::GcRc<GcBackend>>;
+pub type HatRc<B> = Hat<B, GcRc<GcBackend>>;
 
 fn concat_filename(mut a: PathBuf, b: &str) -> String {
     a.push(b);
@@ -1070,7 +1067,7 @@ impl InsertPathHandler {
     }
 }
 
-impl listdir::PathHandler<Option<u64>> for InsertPathHandler {
+impl util::PathHandler<Option<u64>> for InsertPathHandler {
     type DirItem = fs::DirEntry;
     type DirIter = fs::ReadDir;
 
@@ -1160,7 +1157,7 @@ pub struct Family {
 impl Family {
     pub fn snapshot_dir(&self, dir: PathBuf) {
         let handler = InsertPathHandler::new(self.key_store_process.clone());
-        listdir::iterate_recursively((PathBuf::from(&dir), None), &sync::Arc::new(handler));
+        util::iterate_recursively((PathBuf::from(&dir), None), &sync::Arc::new(handler));
     }
 
     pub fn snapshot_direct(&self,

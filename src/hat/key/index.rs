@@ -25,8 +25,7 @@ use time::Duration;
 
 use blob;
 use hash;
-use periodic_timer::PeriodicTimer;
-use util;
+use util::{InfoWriter, PeriodicTimer};
 
 use super::schema;
 
@@ -94,7 +93,7 @@ impl InternalKeyIndex {
         let dir = try!(diesel::migrations::find_migrations_directory());
         try!(diesel::migrations::run_pending_migrations_in_directory(&ki.conn,
                                                                      &dir,
-                                                                     &mut util::InfoWriter));
+                                                                     &mut InfoWriter));
         try!(ki.conn.begin_transaction());
 
         Ok(ki)

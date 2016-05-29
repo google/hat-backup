@@ -12,22 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::io;
-use std::str;
-
-
-pub struct InfoWriter;
-
-impl io::Write for InfoWriter {
-    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        info!("{}", str::from_utf8(&buf[..]).unwrap());
-        Ok(buf.len())
-    }
-    fn flush(&mut self) -> io::Result<()> {
-        Ok(())
-    }
-}
-
 // TODO(idolf): This is a hack until FnBox gets stabilized, see issue
 // rust-lang/rust#28796.  When this issue gets stabilized, remove
 // this and use the the library implementation. Then FnOnce gets a

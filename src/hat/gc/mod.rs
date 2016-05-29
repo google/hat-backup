@@ -22,6 +22,10 @@ use hash::{UpdateFn, GcData};
 use snapshot;
 use tags;
 
+mod noop;
+mod rc;
+pub use self::noop::GcNoop;
+pub use self::rc::GcRc;
 
 pub type Id = i64;
 

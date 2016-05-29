@@ -26,11 +26,8 @@ use libsodium_sys;
 use sodiumoxide::crypto::hash::sha512;
 
 use blob;
-use cumulative_counter::CumulativeCounter;
-use periodic_timer::PeriodicTimer;
+use util::{CumulativeCounter, InfoWriter, PeriodicTimer, UniquePriorityQueue};
 use tags;
-use unique_priority_queue::UniquePriorityQueue;
-use util;
 
 mod schema;
 pub mod tree;
@@ -158,7 +155,7 @@ impl InternalHashIndex {
         let dir = try!(diesel::migrations::find_migrations_directory());
         try!(diesel::migrations::run_pending_migrations_in_directory(&hi.conn,
                                                                      &dir,
-                                                                     &mut util::InfoWriter));
+                                                                     &mut InfoWriter));
 
         try!(hi.conn.begin_transaction());
 

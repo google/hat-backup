@@ -31,9 +31,7 @@ use capnp;
 use root_capnp;
 
 use tags;
-use process::{Process, MsgHandler};
-
-use util::FnBox;
+use util::{FnBox, MsgHandler, Process};
 
 
 mod index;
@@ -464,7 +462,7 @@ impl<B: StoreBackend> MsgHandler<Msg, Reply> for Store<B> {
 pub mod tests {
     use super::*;
 
-    use process::Process;
+    use util::Process;
 
     use std::sync::{Arc, Mutex};
     use std::collections::BTreeMap;

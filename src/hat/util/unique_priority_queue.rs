@@ -15,7 +15,7 @@
 use std::collections::BTreeMap;
 use std::mem;
 
-use ordered_collection::OrderedCollection;
+use super::ordered_collection::OrderedCollection;
 
 
 #[derive(Debug, Clone, PartialEq)]
