@@ -3,7 +3,7 @@ sudo: false
 rust:
   - stable
   - beta
-  - nightly-2016-05-09
+  - nightly-2016-05-27
   - nightly
 matrix:
   allow_failures:
