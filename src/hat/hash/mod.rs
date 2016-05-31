@@ -26,11 +26,8 @@ use libsodium_sys;
 use sodiumoxide::crypto::hash::sha512;
 
 use blob;
-use cumulative_counter::CumulativeCounter;
-use periodic_timer::PeriodicTimer;
+use util::{Counter, InfoWriter, PeriodicTimer, UniquePriorityQueue};
 use tags;
-use unique_priority_queue::UniquePriorityQueue;
-use util;
 
 mod schema;
 pub mod tree;
@@ -135,7 +132,7 @@ struct QueueEntry {
 pub struct InternalHashIndex {
     conn: SqliteConnection,
 
-    id_counter: CumulativeCounter,
+    id_counter: Counter,
 
     queue: UniquePriorityQueue<i64, Vec<u8>, QueueEntry>,
 
@@ -149,7 +146,7 @@ impl InternalHashIndex {
 
         let mut hi = InternalHashIndex {
             conn: conn,
-            id_counter: CumulativeCounter::new(0),
+            id_counter: Counter::new(0),
             queue: UniquePriorityQueue::new(),
             flush_timer: PeriodicTimer::new(Duration::seconds(10)),
             flush_periodically: true,
@@ -158,7 +155,7 @@ impl InternalHashIndex {
         let dir = try!(diesel::migrations::find_migrations_directory());
         try!(diesel::migrations::run_pending_migrations_in_directory(&hi.conn,
                                                                      &dir,
-                                                                     &mut util::InfoWriter));
+                                                                     &mut InfoWriter));
 
         try!(hi.conn.begin_transaction());
 
@@ -241,11 +238,11 @@ impl InternalHashIndex {
             .first::<Option<i64>>(&self.conn)
             .expect("Error selecting max hash id");
 
-        self.id_counter = CumulativeCounter::new(id_opt.unwrap_or(0));
+        self.id_counter = Counter::new(id_opt.unwrap_or(0));
     }
 
     fn next_id(&mut self) -> i64 {
-        self.id_counter.increment()
+        self.id_counter.next()
     }
 
     fn reserve(&mut self, hash_entry: Entry) -> i64 {

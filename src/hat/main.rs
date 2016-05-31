@@ -61,28 +61,15 @@ use std::borrow::ToOwned;
 
 use clap::{App, SubCommand};
 
-
-mod cumulative_counter;
-mod ordered_collection;
-mod periodic_timer;
-mod unique_priority_queue;
+mod util;
 
 mod hat;
-mod listdir;
-mod process;
-
 mod hash;
 mod blob;
-
 mod key;
-
 mod gc;
-mod gc_noop;
-mod gc_rc;
 mod tags;
-
 mod snapshot;
-mod util;
 
 
 pub mod root_capnp {

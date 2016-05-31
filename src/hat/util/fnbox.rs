@@ -12,19 +12,19 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-
-pub struct CumulativeCounter {
-    previous: i64,
+// TODO(idolf): This is a hack until FnBox gets stabilized, see issue
+// rust-lang/rust#28796.  When this issue gets stabilized, remove
+// this and use the the library implementation. Then FnOnce gets a
+// proper implementation, use that.
+//
+pub trait FnBox<A, B>: Send {
+    fn call(self: Box<Self>, args: A) -> B;
 }
 
-
-impl CumulativeCounter {
-    pub fn new(previous: i64) -> CumulativeCounter {
-        CumulativeCounter { previous: previous }
-    }
-
-    pub fn increment(&mut self) -> i64 {
-        self.previous += 1;
-        self.previous
+impl<A, B, F> FnBox<A, B> for F
+    where F: FnOnce(A) -> B + Send
+{
+    fn call(self: Box<F>, args: A) -> B {
+        self(args)
     }
 }

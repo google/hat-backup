@@ -21,8 +21,7 @@ use blob;
 use hash;
 use hash::tree::{HashTreeBackend, SimpleHashTreeWriter, SimpleHashTreeReader, ReaderResult};
 
-use process::{Process, MsgHandler};
-use util::FnBox;
+use util::{FnBox, MsgHandler, Process};
 
 
 mod schema;
@@ -406,7 +405,7 @@ mod tests {
     use super::*;
 
     use blob::tests::MemoryBackend;
-    use process::Process;
+    use util::Process;
 
     use rand::Rng;
     use rand::thread_rng;

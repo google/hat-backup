@@ -12,34 +12,18 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub enum Tag {
-    Done = 0,
-
-    Reserved = 1,
-    InProgress = 2,
-    Complete = 3,
-
-    WillDelete = 4,
-    ReadyDelete = 5,
-    DeleteComplete = 6,
-
-    RecoverInProgress = 7,
+pub struct Counter {
+    previous: i64,
 }
 
-pub fn tag_from_num(n: i64) -> Option<Tag> {
-    match n {
-        0 => Some(Tag::Done),
-        1 => Some(Tag::Reserved),
-        2 => Some(Tag::InProgress),
-        3 => Some(Tag::Complete),
 
-        4 => Some(Tag::WillDelete),
-        5 => Some(Tag::ReadyDelete),
-        6 => Some(Tag::DeleteComplete),
+impl Counter {
+    pub fn new(previous: i64) -> Counter {
+        Counter { previous: previous }
+    }
 
-        7 => Some(Tag::RecoverInProgress),
-
-        _ => None,
+    pub fn next(&mut self) -> i64 {
+        self.previous += 1;
+        self.previous
     }
 }

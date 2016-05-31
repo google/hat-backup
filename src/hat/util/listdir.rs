@@ -42,7 +42,6 @@ pub trait PathHandler<D>: Send + Sync + 'static {
     fn handle_path(&self, &D, PathBuf) -> Option<D>;
 }
 
-
 pub fn iterate_recursively<P: Send + 'static, W: PathHandler<P>>(first: (PathBuf, P),
                                                                  worker: &Arc<W>) {
     let threads = 10;
@@ -107,31 +106,6 @@ pub fn iterate_recursively<P: Send + 'static, W: PathHandler<P>>(first: (PathBuf
                     push_ch_.send(Work::Done).unwrap();
                 });
             }
-        }
-    }
-}
-
-struct PrintPathHandler;
-
-impl Clone for PrintPathHandler {
-    fn clone(&self) -> PrintPathHandler {
-        PrintPathHandler
-    }
-}
-
-impl PathHandler<()> for PrintPathHandler {
-    type DirItem = fs::DirEntry;
-    type DirIter = fs::ReadDir;
-
-    fn read_dir(&self, path: &PathBuf) -> io::Result<Self::DirIter> {
-        fs::read_dir(path)
-    }
-
-    fn handle_path(&self, _: &(), path: PathBuf) -> Option<()> {
-        println!("{}", path.display());
-        match fs::metadata(&path) {
-            Ok(ref m) if m.is_dir() => Some(()),
-            _ => None,
         }
     }
 }

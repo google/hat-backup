@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-
 use std::collections::HashMap;
 use std::fmt;
 use std::mem;
@@ -22,6 +21,10 @@ use hash::{UpdateFn, GcData};
 use snapshot;
 use tags;
 
+mod noop;
+mod rc;
+pub use self::noop::GcNoop;
+pub use self::rc::GcRc;
 
 pub type Id = i64;
 

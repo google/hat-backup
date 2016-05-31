@@ -128,18 +128,16 @@ impl<Msg: 'static + Send, Reply: 'static + Send, E> Process<Msg, Reply, E> {
         thread::spawn(move || {
             // fork handler
             let mut handle_msg = |msg, rep: mpsc::Sender<Result<Reply, E>>| {
-                let did_reply = Arc::new(Mutex::new(false));
-                let local_did_reply = did_reply.clone();
-                let local_rep = rep.clone();
-                let ret = my_handler.handle(msg, move |r| {
-                    *local_did_reply.lock().unwrap() = true;
-                    local_rep.send(r)
+                let mut did_reply = false;
+                let ret = my_handler.handle(msg, |r| {
+                    did_reply = true;
+                    rep.send(r)
                         .expect("Message reply ignored");
                 });
                 match ret {
-                    Ok(()) => assert_eq!(*did_reply.lock().unwrap(), true),
+                    Ok(()) => assert!(did_reply),
                     Err(e) => {
-                        if *did_reply.lock().expect("Message reply ignored") {
+                        if did_reply {
                             return Err(format!("Encountered unrecoverable error: {:?}", e));
                         } else {
                             rep.send(Err(e)).expect("Message reply ignored");
