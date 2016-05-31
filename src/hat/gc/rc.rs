@@ -43,7 +43,7 @@ impl<B: gc::GcBackend> gc::Gc<B> for GcRc<B> {
     }
 
     fn register(&mut self,
-                _snapshot: snapshot::Info,
+                _snapshot: &snapshot::Info,
                 refs: mpsc::Receiver<gc::Id>)
                 -> Result<(), Self::Err> {
         // Start off with a commit to disable automatic commit and run register as one transaction.
@@ -63,7 +63,7 @@ impl<B: gc::GcBackend> gc::Gc<B> for GcRc<B> {
     }
 
     fn register_final(&mut self,
-                      _snapshot: snapshot::Info,
+                      _snapshot: &snapshot::Info,
                       ref_final: gc::Id)
                       -> Result<(), Self::Err> {
         // Increment final counter and tag it as ready.
@@ -79,7 +79,7 @@ impl<B: gc::GcBackend> gc::Gc<B> for GcRc<B> {
     }
 
     fn register_cleanup(&mut self,
-                        _snapshot: snapshot::Info,
+                        _snapshot: &snapshot::Info,
                         ref_final: gc::Id)
                         -> Result<(), Self::Err> {
         // Clear tag of final reference.
@@ -89,7 +89,7 @@ impl<B: gc::GcBackend> gc::Gc<B> for GcRc<B> {
     }
 
     fn deregister<F>(&mut self,
-                     _snapshot: snapshot::Info,
+                     _snapshot: &snapshot::Info,
                      ref_final: gc::Id,
                      refs: F)
                      -> Result<(), Self::Err>

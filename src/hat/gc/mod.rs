@@ -93,17 +93,20 @@ pub trait Gc<B> {
     fn is_exact() -> bool;
 
     fn register(&mut self,
-                snapshot: snapshot::Info,
+                snapshot: &snapshot::Info,
                 refs: mpsc::Receiver<Id>)
                 -> Result<(), Self::Err>;
-    fn register_final(&mut self, snapshot: snapshot::Info, final_ref: Id) -> Result<(), Self::Err>;
+    fn register_final(&mut self,
+                      snapshot: &snapshot::Info,
+                      final_ref: Id)
+                      -> Result<(), Self::Err>;
     fn register_cleanup(&mut self,
-                        snapshot: snapshot::Info,
+                        snapshot: &snapshot::Info,
                         final_ref: Id)
                         -> Result<(), Self::Err>;
 
     fn deregister<F>(&mut self,
-                     snapshot: snapshot::Info,
+                     snapshot: &snapshot::Info,
                      final_ref: Id,
                      refs: F)
                      -> Result<(), Self::Err>
@@ -311,10 +314,10 @@ pub fn gc_test<GC>(snapshots: Vec<Vec<u8>>)
         refs[..refs.len() - 1].iter().map(|id| sender.send(*id as Id)).last();
         drop(sender);
 
-        gc.register(infos[i].clone(), receiver).unwrap();
+        gc.register(&infos[i], receiver).unwrap();
         let last_ref = *refs.iter().last().expect("len() >= 0") as i64;
-        gc.register_final(infos[i].clone(), last_ref).unwrap();
-        gc.register_cleanup(infos[i].clone(), last_ref).unwrap();
+        gc.register_final(&infos[i], last_ref).unwrap();
+        gc.register_cleanup(&infos[i], last_ref).unwrap();
     }
 
     for (i, refs) in snapshots.iter().enumerate() {
@@ -328,7 +331,7 @@ pub fn gc_test<GC>(snapshots: Vec<Vec<u8>>)
         // Deregister snapshot.
         let last = backend.list_snapshot_refs(infos[i].clone()).iter().last().unwrap();
         let refs = backend.list_snapshot_refs(infos[i].clone());
-        gc.deregister(infos[i].clone(), last, || refs).unwrap();
+        gc.deregister(&infos[i], last, || refs).unwrap();
     }
 
     let mut all_refs: Vec<u8> = snapshots.iter().flat_map(|v| v.clone().into_iter()).collect();
@@ -373,22 +376,22 @@ pub fn resume_register_test<GC>()
     };
 
     for n in 1..refs.len() {
-        gc.register(info.clone(), receiver(n)).unwrap();
+        gc.register(&info, receiver(n)).unwrap();
         assert_eq!(gc.status(*refs.last().expect("nonempty")).ok(), Some(None));
         backend.rollback();
     }
 
-    gc.register(info.clone(), receiver(refs.len() - 1)).unwrap();
+    gc.register(&info, receiver(refs.len() - 1)).unwrap();
     let final_ref = *refs.last().expect("nonempty");
-    gc.register_final(info.clone(), final_ref).unwrap();
+    gc.register_final(&info, final_ref).unwrap();
     assert_eq!(gc.status(final_ref).ok(), Some(Some(Status::InProgress)));
-    gc.register_cleanup(info.clone(), final_ref).unwrap();
+    gc.register_cleanup(&info, final_ref).unwrap();
     assert_eq!(gc.status(final_ref).ok(), Some(None));
 
 
     let last = receiver(refs.len()).iter().last().unwrap();
     let receive = receiver(refs.len());
-    gc.deregister(info.clone(), last, move || receive).unwrap();
+    gc.deregister(&info, last, move || receive).unwrap();
 
     let (sender, receiver) = mpsc::channel();
     gc.list_unused_ids(sender).unwrap();
@@ -424,10 +427,10 @@ pub fn resume_deregister_test<GC>()
 
         receiver
     };
-    gc.register(info.clone(), receiver(refs.len() - 1)).unwrap();
+    gc.register(&info, receiver(refs.len() - 1)).unwrap();
     let final_ref = *refs.last().expect("nonempty");
-    gc.register_final(info.clone(), final_ref).unwrap();
-    gc.register_cleanup(info.clone(), final_ref).unwrap();
+    gc.register_final(&info, final_ref).unwrap();
+    gc.register_cleanup(&info, final_ref).unwrap();
 
     backend.manual_commit().unwrap();
     for _ in 1..10 {
@@ -435,11 +438,11 @@ pub fn resume_deregister_test<GC>()
 
         let receive = receiver(refs.len());
 
-        gc.deregister(info.clone(), final_ref, move || receive).unwrap();
+        gc.deregister(&info, final_ref, move || receive).unwrap();
         assert_eq!(gc.status(final_ref).ok(), Some(Some(Status::Complete)));
     }
 
-    gc.register_cleanup(info.clone(), final_ref).unwrap();
+    gc.register_cleanup(&info, final_ref).unwrap();
     assert_eq!(gc.status(final_ref).ok(), Some(None));
 
     let (sender, receiver) = mpsc::channel();

@@ -55,7 +55,7 @@ impl HashRef {
 }
 
 
-pub trait HashTreeBackend {
+pub trait HashTreeBackend: Clone {
     type Err: fmt::Debug;
 
     fn fetch_chunk(&mut self, &Hash, Option<ChunkRef>) -> Result<Option<Vec<u8>>, Self::Err>;
@@ -151,7 +151,7 @@ pub fn decode_metadata_refs(metadata: &[u8]) -> Vec<Vec<u8>> {
 }
 
 
-impl<B: HashTreeBackend + Clone> SimpleHashTreeWriter<B> {
+impl<B: HashTreeBackend> SimpleHashTreeWriter<B> {
     /// Create a new hash-tree to be stored through 'backend' with node order 'order'.
     pub fn new(order: usize, backend: B) -> SimpleHashTreeWriter<B> {
         SimpleHashTreeWriter {
@@ -306,7 +306,7 @@ pub enum ReaderResult<B> {
     Tree(SimpleHashTreeReader<B>),
 }
 
-impl<B: HashTreeBackend + Clone> SimpleHashTreeReader<B> {
+impl<B: HashTreeBackend> SimpleHashTreeReader<B> {
     /// Creates a new `HashTreeReader` that reads through the `backend` the blocks of the hash tree
     /// defined by `root_hash` and `root_ref`.
     pub fn open(mut backend: B,
@@ -426,7 +426,7 @@ impl<B: HashTreeBackend + Clone> SimpleHashTreeReader<B> {
 }
 
 
-impl<B: HashTreeBackend + Clone> Iterator for ReaderResult<B> {
+impl<B: HashTreeBackend> Iterator for ReaderResult<B> {
     type Item = Vec<u8>;
 
     /// Read the next block of the hash-tree.
