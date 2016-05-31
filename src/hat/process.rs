@@ -76,10 +76,10 @@ impl<Msg: Send, Reply: Send, E> Clone for Process<Msg, Reply, E> {
 pub trait MsgHandler<Msg, Reply> {
     type Err;
 
-    fn handle(&mut self,
-              msg: Msg,
-              callback: Box<Fn(Result<Reply, Self::Err>)>)
-              -> Result<(), Self::Err>;
+    fn handle<F: FnOnce(Result<Reply, Self::Err>)>(&mut self,
+                                                   msg: Msg,
+                                                   callback: F)
+                                                   -> Result<(), Self::Err>;
 }
 
 impl<Msg: 'static + Send, Reply: 'static + Send, E> Process<Msg, Reply, E> {
@@ -131,12 +131,11 @@ impl<Msg: 'static + Send, Reply: 'static + Send, E> Process<Msg, Reply, E> {
                 let did_reply = Arc::new(Mutex::new(false));
                 let local_did_reply = did_reply.clone();
                 let local_rep = rep.clone();
-                let ret = my_handler.handle(msg,
-                                            Box::new(move |r| {
-                                                *local_did_reply.lock().unwrap() = true;
-                                                local_rep.send(r)
-                                                    .expect("Message reply ignored");
-                                            }));
+                let ret = my_handler.handle(msg, move |r| {
+                    *local_did_reply.lock().unwrap() = true;
+                    local_rep.send(r)
+                        .expect("Message reply ignored");
+                });
                 match ret {
                     Ok(()) => assert_eq!(*did_reply.lock().unwrap(), true),
                     Err(e) => {
