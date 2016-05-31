@@ -12,17 +12,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-pub struct CumulativeCounter {
+pub struct Counter {
     previous: i64,
 }
 
 
-impl CumulativeCounter {
-    pub fn new(previous: i64) -> CumulativeCounter {
-        CumulativeCounter { previous: previous }
+impl Counter {
+    pub fn new(previous: i64) -> Counter {
+        Counter { previous: previous }
     }
 
-    pub fn increment(&mut self) -> i64 {
+    pub fn next(&mut self) -> i64 {
         self.previous += 1;
         self.previous
     }

@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-mod cumulative_counter;
+mod counter;
 mod fnbox;
 mod infowriter;
 mod listdir;
@@ -21,7 +21,7 @@ mod periodic_timer;
 mod process;
 mod unique_priority_queue;
 
-pub use self::cumulative_counter::CumulativeCounter;
+pub use self::counter::Counter;
 pub use self::fnbox::FnBox;
 pub use self::infowriter::InfoWriter;
 pub use self::listdir::{HasPath, PathHandler, iterate_recursively};
