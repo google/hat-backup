@@ -37,25 +37,6 @@ struct HashRef {
 }
 
 impl HashRef {
-    fn from_bytes(&self, bytes: &mut &[u8]) -> Result<HashRef, capnp::Error> {
-        let reader = try!(capnp::serialize_packed::read_message(bytes,
-                                                           capnp::message::ReaderOptions::new()));
-
-        let root = try!(reader.get_root::<root_capnp::hash_ref::Reader>());
-        Ok(try!(HashRef::read_msg(&root)))
-    }
-
-    fn as_bytes(&self) -> Vec<u8> {
-        let mut message = capnp::message::Builder::new_default();
-        {
-            let mut root = message.init_root::<root_capnp::hash_ref::Builder>();
-            self.populate_msg(root.borrow());
-        }
-        let mut out = Vec::new();
-        capnp::serialize_packed::write_message(&mut out, &message).unwrap();
-        out
-    }
-
     fn populate_msg(&self, msg: root_capnp::hash_ref::Builder) {
         let mut msg = msg;
         msg.set_hash(&self.hash[..]);

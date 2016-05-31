@@ -290,6 +290,7 @@ impl KeyIndex {
         Ok(KeyIndex(Arc::new(Mutex::new(index))))
     }
 
+    #[cfg(test)]
     pub fn new_for_testing() -> Result<KeyIndex, IndexError> {
         KeyIndex::new(":memory:")
     }

@@ -13,24 +13,23 @@
 // limitations under the License.
 
 use std::sync::mpsc;
+use void::Void;
 
 use gc;
-use hat;
 use snapshot;
 
 
-pub struct GcNoop<B> {
-    backend: B,
-}
+pub struct GcNoop;
 
-impl<B: gc::GcBackend> gc::Gc for GcNoop<B> {
-    type Err = hat::HatError;
-    type Backend = B;
+impl<B: gc::GcBackend> gc::Gc<B> for GcNoop {
+    type Err = Void;
 
-    fn new(backend: B) -> GcNoop<B>
-        where B: gc::GcBackend
-    {
-        GcNoop { backend: backend }
+    fn new(_backend: B) -> GcNoop {
+        GcNoop
+    }
+
+    fn is_exact() -> bool {
+        false
     }
 
     fn register(&mut self,
@@ -77,7 +76,5 @@ impl<B: gc::GcBackend> gc::Gc for GcNoop<B> {
 
 #[test]
 fn gc_noop_test() {
-    gc::gc_test::<GcNoop<_>, _>(vec![vec![1], vec![2], vec![1, 2, 3]],
-                                move |backend| gc::Gc::new(backend),
-                                gc::GcType::InExact);
+    gc::gc_test::<GcNoop>(vec![vec![1], vec![2], vec![1, 2, 3]]);
 }

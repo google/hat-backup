@@ -15,7 +15,6 @@
 //! High level Hat API
 
 
-use std::cmp;
 use std::borrow::Cow;
 use std::error::Error;
 use std::fs;
@@ -155,18 +154,16 @@ impl gc::GcBackend for GcBackend {
 }
 
 
-pub struct Hat<B, G: gc::Gc> {
+pub struct Hat<G: gc::Gc<GcBackend>> {
     repository_root: Option<PathBuf>,
     snapshot_index: snapshot::SnapshotIndex,
     blob_store: blob::StoreProcess,
     hash_index: hash::HashIndex,
-    blob_backend: B,
     hash_backend: key::HashStoreBackend,
     gc: G,
-    max_blob_size: usize,
 }
 
-pub type HatRc<B> = Hat<B, GcRc<GcBackend>>;
+pub type HatRc = Hat<GcRc<GcBackend>>;
 
 fn concat_filename(mut a: PathBuf, b: &str) -> String {
     a.push(b);
@@ -204,11 +201,12 @@ fn list_snapshot(backend: &key::HashStoreBackend,
     Ok(())
 }
 
-impl<B: 'static + blob::StoreBackend + Clone + Send> HatRc<B> {
-    pub fn open_repository(repository_root: PathBuf,
-                           backend: B,
-                           max_blob_size: usize)
-                           -> Result<HatRc<B>, HatError> {
+impl HatRc {
+    pub fn open_repository<B: 'static + blob::StoreBackend + Clone + Send>
+        (repository_root: PathBuf,
+         backend: B,
+         max_blob_size: usize)
+         -> Result<HatRc, HatError> {
         let snapshot_index_path = snapshot_index_name(repository_root.clone());
         let blob_index_path = blob_index_name(repository_root.clone());
         let hash_index_path = hash_index_name(repository_root.clone());
@@ -230,10 +228,8 @@ impl<B: 'static + blob::StoreBackend + Clone + Send> HatRc<B> {
             snapshot_index: si_p,
             hash_index: hi_p.clone(),
             blob_store: bs_p.clone(),
-            blob_backend: backend.clone(),
             hash_backend: key::HashStoreBackend::new(hi_p, bs_p),
             gc: gc,
-            max_blob_size: max_blob_size,
         };
 
         // Resume any unfinished commands.
@@ -243,10 +239,11 @@ impl<B: 'static + blob::StoreBackend + Clone + Send> HatRc<B> {
     }
 
     #[cfg(test)]
-    pub fn new_for_testing(backend: B,
-                           max_blob_size: usize,
-                           poison_after: &[i64])
-                           -> Result<HatRc<B>, HatError> {
+    pub fn new_for_testing<B: 'static + blob::StoreBackend + Clone + Send>
+        (backend: B,
+         max_blob_size: usize,
+         poison_after: &[i64])
+         -> Result<HatRc, HatError> {
         // If provided, we cycle the possible poison values to give every process one.
         let mut poison = poison_after.iter().cycle();
 
@@ -272,10 +269,8 @@ impl<B: 'static + blob::StoreBackend + Clone + Send> HatRc<B> {
             snapshot_index: si_p,
             hash_index: hi_p.clone(),
             blob_store: bs_p.clone(),
-            blob_backend: backend.clone(),
             hash_backend: key::HashStoreBackend::new(hi_p, bs_p),
             gc: gc,
-            max_blob_size: max_blob_size,
         };
 
         // Resume any unfinished commands.
@@ -983,9 +978,6 @@ impl FileEntry {
     fn is_symlink(&self) -> bool {
         self.link_path.is_some()
     }
-    fn is_file(&self) -> bool {
-        self.metadata.is_file()
-    }
 }
 
 impl Clone for FileEntry {
@@ -1001,8 +993,8 @@ impl Clone for FileEntry {
 
 pub enum FileIterator {
     File(fs::File),
+    #[cfg(test)]
     Buf(Vec<u8>, usize),
-    Iter(Box<Iterator<Item = Vec<u8>> + Send>),
 }
 
 impl FileIterator {
@@ -1012,13 +1004,9 @@ impl FileIterator {
             Err(e) => Err(e),
         }
     }
+    #[cfg(test)]
     fn from_bytes(contents: Vec<u8>) -> FileIterator {
         FileIterator::Buf(contents, 0)
-    }
-    fn from_iter<I>(i: Box<I>) -> FileIterator
-        where I: Iterator<Item = Vec<u8>> + Send + 'static
-    {
-        FileIterator::Iter(i)
     }
 }
 
@@ -1036,7 +1024,9 @@ impl Iterator for FileIterator {
                     Ok(size) => Some(buf[..size].to_vec()),
                 }
             }
+            #[cfg(test)]
             &mut FileIterator::Buf(ref vec, ref mut pos) => {
+                use std::cmp;
                 if *pos >= vec.len() {
                     None
                 } else {
@@ -1045,7 +1035,6 @@ impl Iterator for FileIterator {
                     Some(next.to_owned())
                 }
             }
-            &mut FileIterator::Iter(ref mut iter) => iter.next(),
         }
     }
 }
@@ -1429,12 +1418,12 @@ mod tests {
 
     pub fn setup_hat<B: Clone + Send + StoreBackend + 'static>(backend: B,
                                                                poison_after: &[i64])
-                                                               -> HatRc<B> {
+                                                               -> HatRc {
         let max_blob_size = 1024 * 1024;
         Hat::new_for_testing(backend, max_blob_size, poison_after).unwrap()
     }
 
-    fn setup_family(poison_after: Option<Vec<i64>>) -> (MemoryBackend, HatRc<MemoryBackend>, Family) {
+    fn setup_family(poison_after: Option<Vec<i64>>) -> (MemoryBackend, HatRc, Family) {
         let poison = poison_after.unwrap_or(vec![]);
 
         let backend = MemoryBackend::new();
@@ -1478,7 +1467,8 @@ mod tests {
         snapshot_files(&fam,
                        vec![("name1", vec![0; 1000000]),
                             ("name2", vec![1; 1000000]),
-                            ("name3", vec![2; 1000000])]).unwrap();
+                            ("name3", vec![2; 1000000])])
+            .unwrap();
 
         fam.flush().unwrap();
         hat.commit(&fam, None).unwrap();
@@ -1588,7 +1578,8 @@ mod tests {
         snapshot_files(&fam,
                        vec![("name1", vec![0; 1000000]),
                             ("name2", vec![1; 1000000]),
-                            ("name3", vec![2; 1000000])]).unwrap();
+                            ("name3", vec![2; 1000000])])
+            .unwrap();
 
         fam.flush().unwrap();
 
@@ -1606,7 +1597,8 @@ mod tests {
         snapshot_files(&fam,
                        vec![("name1", vec![0; 1000000]),
                             ("name2", vec![1; 1000000]),
-                            ("name3", vec![2; 1000000])]).unwrap();
+                            ("name3", vec![2; 1000000])])
+            .unwrap();
         fam.flush().unwrap();
         hat.commit(&fam, None).unwrap();
         hat.meta_commit().unwrap();
@@ -1674,7 +1666,7 @@ mod bench {
 
     use blob;
 
-    fn setup_family() -> (HatRc<blob::tests::DevNullBackend>, Family) {
+    fn setup_family() -> (HatRc, Family) {
         let empty = vec![];
         let backend = blob::tests::DevNullBackend {};
         let hat = setup_hat(backend.clone(), &empty[..]);

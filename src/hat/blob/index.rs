@@ -235,6 +235,7 @@ impl BlobIndex {
         Ok(BlobIndex(Arc::new(Mutex::new(index))))
     }
 
+    #[cfg(test)]
     pub fn new_for_testing() -> Result<BlobIndex, IndexError> {
         BlobIndex::new(":memory:")
     }
