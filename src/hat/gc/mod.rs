@@ -12,10 +12,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#[cfg(test)]
 use std::collections::HashMap;
+#[cfg(test)]
 use std::fmt;
+#[cfg(test)]
 use std::mem;
-use std::sync::{mpsc, Arc, Mutex};
+#[cfg(test)]
+use std::sync::{Arc, Mutex};
+
+use std::sync::mpsc;
 
 use hash::{UpdateFn, GcData};
 use snapshot;
@@ -34,7 +40,6 @@ pub enum Status {
     InProgress,
     Complete,
 }
-
 
 pub trait GcBackend {
     type Err;
@@ -80,11 +85,12 @@ pub fn mark_tree<B>(backend: &mut B, root: Id, tag: tags::Tag) -> Result<(), B::
     Ok(())
 }
 
-pub trait Gc {
+pub trait Gc<B> {
     type Err;
-    type Backend;
 
-    fn new(Self::Backend) -> Self;
+    fn new(B) -> Self;
+
+    fn is_exact() -> bool;
 
     fn register(&mut self,
                 snapshot: snapshot::Info,
@@ -109,6 +115,7 @@ pub trait Gc {
 }
 
 
+#[cfg(test)]
 #[derive(Clone)]
 pub struct MemoryBackend {
     gc_data: HashMap<(Id, Id), GcData>,
@@ -118,6 +125,7 @@ pub struct MemoryBackend {
     commit: Option<Box<MemoryBackend>>,
 }
 
+#[cfg(test)]
 impl MemoryBackend {
     fn new() -> MemoryBackend {
         MemoryBackend {
@@ -130,19 +138,16 @@ impl MemoryBackend {
     }
 }
 
-
+#[cfg(test)]
 #[derive(Clone)]
 pub struct SafeMemoryBackend {
     backend: Arc<Mutex<MemoryBackend>>,
 }
 
+#[cfg(test)]
 impl SafeMemoryBackend {
     fn new() -> SafeMemoryBackend {
         SafeMemoryBackend { backend: Arc::new(Mutex::new(MemoryBackend::new())) }
-    }
-
-    fn insert_parent(&mut self, hash_id: Id, childs: Vec<Id>) {
-        self.backend.lock().unwrap().parents.insert(hash_id, childs);
     }
 
     fn insert_snapshot(&mut self, info: &snapshot::Info, refs: Vec<Id>) {
@@ -184,6 +189,7 @@ impl SafeMemoryBackend {
     }
 }
 
+#[cfg(test)]
 impl GcBackend for SafeMemoryBackend {
     type Err = String;
 
@@ -281,18 +287,13 @@ impl GcBackend for SafeMemoryBackend {
 }
 
 
-pub enum GcType {
-    Exact,
-    InExact, // Includes probalistic gc.
-}
-
-pub fn gc_test<GC, F>(snapshots: Vec<Vec<u8>>, mk_gc: F, gc_type: GcType)
-    where F: FnOnce(SafeMemoryBackend) -> GC,
-          GC: Gc,
+#[cfg(test)]
+pub fn gc_test<GC>(snapshots: Vec<Vec<u8>>)
+    where GC: Gc<SafeMemoryBackend>,
           GC::Err: fmt::Debug
 {
     let mut backend = SafeMemoryBackend::new();
-    let mut gc = mk_gc(backend.clone());
+    let mut gc = GC::new(backend.clone());
 
     let mut infos = vec![];
     for (i, refs) in snapshots.iter().enumerate() {
@@ -334,29 +335,26 @@ pub fn gc_test<GC, F>(snapshots: Vec<Vec<u8>>, mk_gc: F, gc_type: GcType)
     all_refs.sort();
     all_refs.dedup();
 
-    match gc_type {
-        GcType::Exact => {
-            // Check that all IDs were eventually marked unused.
-            let (sender, receiver) = mpsc::channel();
-            gc.list_unused_ids(sender).unwrap();
-            let unused: Vec<Id> = receiver.iter().collect();
-            if unused.len() != all_refs.len() {
-                panic!("Did not mark all IDs as unused. Wanted {:?}, got {:?}.",
-                       all_refs,
-                       unused);
-            }
+    if GC::is_exact() {
+        // Check that all IDs were eventually marked unused.
+        let (sender, receiver) = mpsc::channel();
+        gc.list_unused_ids(sender).unwrap();
+        let unused: Vec<Id> = receiver.iter().collect();
+        if unused.len() != all_refs.len() {
+            panic!("Did not mark all IDs as unused. Wanted {:?}, got {:?}.",
+                   all_refs,
+                   unused);
         }
-        GcType::InExact => {}
     }
 }
 
-pub fn resume_register_test<GC, F>(mk_gc: F, gc_type: GcType)
-    where F: FnOnce(SafeMemoryBackend) -> GC,
-          GC: Gc,
+#[cfg(test)]
+pub fn resume_register_test<GC>()
+    where GC: Gc<SafeMemoryBackend>,
           GC::Err: fmt::Debug
 {
     let mut backend = SafeMemoryBackend::new();
-    let mut gc = mk_gc(backend.clone());
+    let mut gc = GC::new(backend.clone());
 
     let refs = vec![1, 2, 3, 4, 5];
     let info = snapshot::Info {
@@ -398,18 +396,18 @@ pub fn resume_register_test<GC, F>(mk_gc: F, gc_type: GcType)
     let mut unused: Vec<_> = receiver.iter().collect();
     unused.sort();
 
-    if let GcType::Exact = gc_type {
+    if GC::is_exact() {
         assert_eq!(unused, vec![1, 2, 3, 4, 5]);
     }
 }
 
-pub fn resume_deregister_test<GC, F>(mk_gc: F, gc_type: GcType)
-    where F: FnOnce(SafeMemoryBackend) -> GC,
-          GC: Gc,
+#[cfg(test)]
+pub fn resume_deregister_test<GC>()
+    where GC: Gc<SafeMemoryBackend>,
           GC::Err: fmt::Debug
 {
     let mut backend = SafeMemoryBackend::new();
-    let mut gc = mk_gc(backend.clone());
+    let mut gc = GC::new(backend.clone());
 
     let refs = vec![1, 2, 3, 4, 5];
     let info = snapshot::Info {
@@ -450,7 +448,7 @@ pub fn resume_deregister_test<GC, F>(mk_gc: F, gc_type: GcType)
     let mut unused: Vec<_> = receiver.iter().collect();
     unused.sort();
 
-    if let GcType::Exact = gc_type {
+    if GC::is_exact() {
         assert_eq!(unused, vec![1, 2, 3, 4, 5]);
     }
 }

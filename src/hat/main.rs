@@ -14,11 +14,6 @@
 
 #![crate_type="bin"]
 
-#![allow(dead_code)]
-
-#![warn(non_upper_case_globals)]
-#![warn(non_camel_case_types)]
-
 // Unstable APIs:
 #![cfg_attr(feature = "benchmarks", feature(test))]
 
@@ -37,6 +32,7 @@ extern crate sodiumoxide;
 extern crate libsodium_sys;
 extern crate rustc_serialize;
 extern crate threadpool;
+extern crate void;
 
 // Error definition macros.
 #[macro_use]
@@ -63,7 +59,7 @@ use clap::{App, SubCommand};
 
 mod util;
 
-mod hat;
+pub mod hat;
 mod hash;
 mod blob;
 mod key;

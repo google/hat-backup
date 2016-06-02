@@ -372,6 +372,7 @@ impl SnapshotIndex {
         Ok(SnapshotIndex(Arc::new(Mutex::new(index))))
     }
 
+    #[cfg(test)]
     pub fn new_for_testing() -> Result<SnapshotIndex, IndexError> {
         SnapshotIndex::new(":memory:")
     }

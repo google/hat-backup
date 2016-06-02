@@ -25,6 +25,8 @@ rustc-serialize = "*"
 sodiumoxide = "*"
 threadpool = "*"
 time = "*"
+void = "1"
+
 
 [dependencies.diesel]
 default-features = false

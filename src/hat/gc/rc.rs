@@ -29,14 +29,17 @@ pub struct GcRc<B> {
     backend: B,
 }
 
-impl<B: gc::GcBackend> gc::Gc for GcRc<B> {
+impl<B: gc::GcBackend> gc::Gc<B> for GcRc<B> {
     type Err = B::Err;
-    type Backend = B;
 
     fn new(backend: B) -> GcRc<B>
         where B: gc::GcBackend
     {
         GcRc { backend: backend }
+    }
+
+    fn is_exact() -> bool {
+        true
     }
 
     fn register(&mut self,
@@ -142,18 +145,15 @@ impl<B: gc::GcBackend> gc::Gc for GcRc<B> {
 
 #[test]
 fn gc_rc_test() {
-    gc::gc_test::<GcRc<_>, _>(vec![vec![1], vec![2], vec![1, 2, 3], vec![4, 5, 6]],
-                              move |backend| gc::Gc::new(backend),
-                              gc::GcType::Exact);
+    gc::gc_test::<GcRc<_>>(vec![vec![1], vec![2], vec![1, 2, 3], vec![4, 5, 6]]);
 }
 
 #[test]
 fn gc_rc_resume_register_test() {
-    gc::resume_register_test::<GcRc<_>, _>(move |backend| gc::Gc::new(backend), gc::GcType::Exact);
+    gc::resume_register_test::<GcRc<_>>();
 }
 
 #[test]
 fn gc_rc_resume_deregister_test() {
-    gc::resume_deregister_test::<GcRc<_>, _>(move |backend| gc::Gc::new(backend),
-                                             gc::GcType::Exact);
+    gc::resume_deregister_test::<GcRc<_>>();
 }

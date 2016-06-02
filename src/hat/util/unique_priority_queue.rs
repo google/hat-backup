@@ -87,14 +87,6 @@ impl<P: Clone + Ord, K: Clone + Ord, V> UniquePriorityQueue<P, K, V> {
             (p, k, v)
         })
     }
-
-    fn len(&self) -> usize {
-        self.priority.len()
-    }
-
-    fn is_empty(&self) -> bool {
-        self.priority.is_empty()
-    }
 }
 
 
