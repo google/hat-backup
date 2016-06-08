@@ -276,12 +276,9 @@ impl InternalHashIndex {
         if id_opt.is_some() {
             assert_eq!(id_opt, Some(old_entry.id));
             self.queue.update_value(&hash.bytes, |qe| {
-                QueueEntry {
-                    level: level,
-                    payload: payload,
-                    persistent_ref: persistent_ref,
-                    ..qe
-                }
+                qe.level = level;
+                qe.payload = payload;
+                qe.persistent_ref = persistent_ref;
             });
         }
     }
@@ -449,8 +446,9 @@ impl InternalHashIndex {
     fn commit(&mut self, hash: &Hash, chunk_ref: blob::ChunkRef) {
         // Update persistent reference for ready hash
         let queue_entry = self.locate(hash).expect("hash was committed");
-        self.queue.update_value(&hash.bytes,
-                                |old_qe| QueueEntry { persistent_ref: Some(chunk_ref), ..old_qe });
+        self.queue.update_value(&hash.bytes, |old_qe| {
+            old_qe.persistent_ref = Some(chunk_ref);
+        });
         self.queue.set_ready(&queue_entry.id);
 
         self.insert_completed_in_order();

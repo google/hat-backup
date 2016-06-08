@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use std::collections::BTreeMap;
-use std::mem;
 
 use super::ordered_collection::OrderedCollection;
 
@@ -26,7 +25,7 @@ enum Status {
 
 
 pub struct UniquePriorityQueue<P, K, V> {
-    priority: BTreeMap<P, (Status, K, Option<V>)>,
+    priority: BTreeMap<P, (Status, K, V)>,
     key_to_priority: BTreeMap<K, P>,
 }
 
@@ -46,7 +45,7 @@ impl<P: Clone + Ord, K: Clone + Ord, V> UniquePriorityQueue<P, K, V> {
         if self.priority.get(&p).is_some() || self.key_to_priority.contains_key(&k) {
             return Err(());
         }
-        self.priority.insert_unique(p.clone(), (Status::Pending, k.clone(), Some(v)));
+        self.priority.insert_unique(p.clone(), (Status::Pending, k.clone(), v));
         self.key_to_priority.insert(k, p);
 
         Ok(())
@@ -54,18 +53,15 @@ impl<P: Clone + Ord, K: Clone + Ord, V> UniquePriorityQueue<P, K, V> {
 
     pub fn find_value_of_key(&self, k: &K) -> Option<&V> {
         let prio_opt = self.key_to_priority.get(k);
-        prio_opt.and_then(|prio| {
-            self.priority.get(prio).and_then(|&(_, _, ref v_opt)| v_opt.as_ref())
-        })
+        prio_opt.and_then(|prio| self.priority.get(prio).map(|&(_, _, ref v_opt)| v_opt))
     }
 
     pub fn update_value<F>(&mut self, k: &K, f: F)
-        where F: FnOnce(V) -> V
+        where F: FnOnce(&mut V)
     {
         let prio = self.key_to_priority.get(k).expect("update_value: Key must exist.");
         let cur = self.priority.get_mut(prio).expect("update_value: Priority must exist.");
-        let v = mem::replace(&mut cur.2, None).unwrap();
-        cur.2 = Some(f(v));
+        f(&mut cur.2);
     }
 
     pub fn set_ready(&mut self, p: &P) {
@@ -75,9 +71,8 @@ impl<P: Clone + Ord, K: Clone + Ord, V> UniquePriorityQueue<P, K, V> {
 
     pub fn pop_min_if_complete(&mut self) -> Option<(P, K, V)> {
         let min_opt = self.priority
-            .pop_min_when(|_k, min| min.0 == Status::Ready && min.2.is_some());
-        min_opt.map(|(p, (_status, k, v_opt))| {
-            let v = v_opt.unwrap();
+            .pop_min_when(|_k, min| min.0 == Status::Ready);
+        min_opt.map(|(p, (_status, k, v))| {
             self.key_to_priority.remove(&k);
             (p, k, v)
         })
@@ -99,7 +94,7 @@ mod tests {
             assert!(upq.put_value(priority, key, value).is_ok());
             assert_eq!(upq.pop_min_if_complete(), None);
             upq.set_ready(&priority);
-            assert_eq!(upq.pop_min_if_complete(), Some((priority, key, value)));
+            assert_eq!(upq.pop_min_if_complete(), (priority, key, value));
 
             true
         }
