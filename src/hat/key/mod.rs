@@ -622,7 +622,7 @@ mod bench {
     use super::tests::*;
 
     use blob::tests::DevNullBackend;
-    use process::Process;
+    use util::Process;
     use test::Bencher;
 
     #[bench]
