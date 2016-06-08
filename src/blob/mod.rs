@@ -72,12 +72,12 @@ pub struct FileBackend {
 }
 
 impl FileBackend {
-    pub fn new(root: PathBuf) -> Result<FileBackend, MsgError> {
-        Ok(FileBackend {
+    pub fn new(root: PathBuf) -> FileBackend {
+        FileBackend {
             root: root,
             read_cache: Arc::new(Mutex::new(BTreeMap::new())),
             max_cache_size: 10,
-        })
+        }
     }
 
     fn guarded_cache_get(&self, name: &[u8]) -> Option<Result<Vec<u8>, String>> {
