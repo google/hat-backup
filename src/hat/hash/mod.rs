@@ -117,8 +117,8 @@ pub struct Entry {
 }
 
 pub enum ReserveResult {
-    HashKnown,
-    ReserveOk,
+    HashKnown(i64),
+    ReserveOk(i64),
 }
 
 #[derive(Clone)]
@@ -245,22 +245,24 @@ impl InternalHashIndex {
         self.id_counter.next()
     }
 
-    fn reserve(&mut self, hash_entry: Entry) -> i64 {
+    fn reserve(&mut self, hash_entry: &Entry) -> i64 {
         self.maybe_flush();
 
-        let Entry { hash, level, payload, persistent_ref } = hash_entry;
+        let Entry { ref hash, ref level, ref payload, ref persistent_ref } = *hash_entry;
         assert!(!hash.bytes.is_empty());
 
         let my_id = self.next_id();
 
-        assert!(self.queue.reserve_priority(my_id, hash.bytes.clone()).is_ok());
-        self.queue.put_value(&hash.bytes,
-                             QueueEntry {
-                                 id: my_id,
-                                 level: level,
-                                 payload: payload,
-                                 persistent_ref: persistent_ref,
-                             });
+        assert!(self.queue
+            .put_value(my_id,
+                       hash.bytes.clone(),
+                       QueueEntry {
+                           id: my_id,
+                           level: level.clone(),
+                           payload: payload.clone(),
+                           persistent_ref: persistent_ref.clone(),
+                       })
+            .is_ok());
         my_id
     }
 
@@ -586,17 +588,17 @@ impl HashIndex {
 
     /// Reserve a `Hash` in the index, while sending its content to external storage.
     /// This is used to ensure that each `Hash` is stored only once.
-    pub fn reserve(&self, hash_entry: Entry) -> Result<ReserveResult, MsgError> {
+    pub fn reserve(&self, hash_entry: &Entry) -> Result<ReserveResult, MsgError> {
         assert!(!hash_entry.hash.bytes.is_empty());
         // To avoid unused IO, we store entries in-memory until committed to persistent
         // storage. This allows us to continue after a crash without needing to scan
         // through and delete uncommitted entries.
         let mut guard = try!(self.lock());
         match guard.0.locate(&hash_entry.hash) {
-            Some(_) => Ok(ReserveResult::HashKnown),
+            Some(entry) => Ok(ReserveResult::HashKnown(entry.id)),
             None => {
-                guard.0.reserve(hash_entry);
-                Ok(ReserveResult::ReserveOk)
+                let id = guard.0.reserve(hash_entry);
+                Ok(ReserveResult::ReserveOk(id))
             }
         }
     }

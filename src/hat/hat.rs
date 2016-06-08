@@ -183,7 +183,7 @@ fn hash_index_name(root: PathBuf) -> String {
 }
 
 fn list_snapshot(backend: &key::HashStoreBackend,
-                 out: &mpsc::Sender<hash::Hash>,
+                 out: &mut Vec<hash::Hash>,
                  family: &Family,
                  dir_hash: &hash::Hash,
                  dir_ref: blob::ChunkRef)
@@ -191,10 +191,10 @@ fn list_snapshot(backend: &key::HashStoreBackend,
     for (entry, hash, pref) in try!(family.fetch_dir_data(dir_hash, dir_ref, backend.clone())) {
         if entry.data_hash.is_some() {
             // File.
-            out.send(hash).unwrap();
+            out.push(hash);
         } else {
             // Directory.
-            out.send(hash.clone()).unwrap();
+            out.push(hash.clone());
             try!(list_snapshot(backend, out, family, &hash, pref));
         }
     }
@@ -202,11 +202,10 @@ fn list_snapshot(backend: &key::HashStoreBackend,
 }
 
 impl HatRc {
-    pub fn open_repository<B: 'static + blob::StoreBackend + Clone + Send>
-        (repository_root: PathBuf,
-         backend: B,
-         max_blob_size: usize)
-         -> Result<HatRc, HatError> {
+    pub fn open_repository<B: 'static + blob::StoreBackend + Send>(repository_root: PathBuf,
+                                                                   backend: B,
+                                                                   max_blob_size: usize)
+                                                                   -> Result<HatRc, HatError> {
         let snapshot_index_path = snapshot_index_name(repository_root.clone());
         let blob_index_path = blob_index_name(repository_root.clone());
         let hash_index_path = hash_index_name(repository_root.clone());
@@ -214,11 +213,7 @@ impl HatRc {
         let bi_p = try!(blob::BlobIndex::new(&blob_index_path));
         let hi_p = try!(hash::HashIndex::new(&hash_index_path));
 
-        let local_blob_index = bi_p.clone();
-        let local_backend = backend.clone();
-        let bs_p = try!(Process::new(move || {
-            blob::Store::new(local_blob_index, local_backend, max_blob_size)
-        }));
+        let bs_p = try!(Process::new(move || blob::Store::new(bi_p, backend, max_blob_size)));
 
         let gc_backend = GcBackend { hash_index: hi_p.clone() };
         let gc = gc::Gc::new(gc_backend);
@@ -239,11 +234,10 @@ impl HatRc {
     }
 
     #[cfg(test)]
-    pub fn new_for_testing<B: 'static + blob::StoreBackend + Clone + Send>
-        (backend: B,
-         max_blob_size: usize,
-         poison_after: &[i64])
-         -> Result<HatRc, HatError> {
+    pub fn new_for_testing<B: 'static + blob::StoreBackend + Send>(backend: B,
+                                                                   max_blob_size: usize,
+                                                                   poison_after: &[i64])
+                                                                   -> Result<HatRc, HatError> {
         // If provided, we cycle the possible poison values to give every process one.
         let mut poison = poison_after.iter().cycle();
 
@@ -251,13 +245,7 @@ impl HatRc {
         let bi_p = blob::BlobIndex::new_for_testing().unwrap();
         let hi_p = hash::HashIndex::new_for_testing(poison.next().cloned()).unwrap();
 
-        let local_blob_index = bi_p.clone();
-        let local_backend = backend.clone();
-        let bs_p = Process::new_with_poison(move || {
-                                                blob::Store::new(local_blob_index,
-                                                                 local_backend,
-                                                                 max_blob_size)
-                                            },
+        let bs_p = Process::new_with_poison(move || blob::Store::new(bi_p, backend, max_blob_size),
                                             poison.next().cloned())
             .unwrap();
 
@@ -385,9 +373,8 @@ impl HatRc {
                         -> Result<(), HatError> {
         fn recover_entry(hashes: &hash::HashIndex,
                          blobs: &blob::StoreProcess,
-                         entry: hash::Entry)
+                         entry: &hash::Entry)
                          -> Result<i64, HatError> {
-            let hash = entry.hash.clone();
             let pref = entry.persistent_ref.clone().unwrap();
 
             // Make sure we have the blob described.
@@ -396,14 +383,16 @@ impl HatRc {
                 _ => return Err(From::from("Failed to add recovered blob")),
             }
             // Now insert the hash information if needed.
-            match try!(hashes.reserve(entry)) {
-                hash::ReserveResult::HashKnown => return Ok(try!(hashes.get_id(&hash)).unwrap()),
-                hash::ReserveResult::ReserveOk => (),
-            }
-            // Commit hash.
-            try!(hashes.commit(&hash, pref));
+            let id = match try!(hashes.reserve(entry)) {
+                hash::ReserveResult::HashKnown(id) => id,
+                hash::ReserveResult::ReserveOk(id) => {
+                    // Commit hash.
+                    try!(hashes.commit(&entry.hash, pref));
+                    id
+                }
+            };
 
-            Ok(try!(hashes.get_id(&hash)).unwrap())
+            Ok(id)
         }
 
         let family = self.open_family(family_name.clone())
@@ -417,7 +406,7 @@ impl HatRc {
                                                                      recover_sender));
         // Recover hashes for tree child chunks.
         for entry in recover_receiver {
-            try!(recover_entry(&self.hash_index, &self.blob_store, entry));
+            try!(recover_entry(&self.hash_index, &self.blob_store, &entry));
         }
 
         // Recover hashes for tree-tops. These are also registered with the GC.
@@ -426,18 +415,18 @@ impl HatRc {
         let local_blob_store = self.blob_store.clone();
         thread::spawn(move || {
             for entry in register_receiver {
-                let id = recover_entry(&local_hash_index, &local_blob_store, entry).unwrap();
+                let id = recover_entry(&local_hash_index, &local_blob_store, &entry).unwrap();
                 id_sender.send(id).unwrap();
             }
         });
 
-        try!(self.gc.register(info.clone(), id_receiver));
+        try!(self.gc.register(&info, id_receiver));
         try!(self.flush_blob_store());
 
         // Recover final root hash for the snapshot.
         try!(recover_entry(&self.hash_index,
                            &self.blob_store,
-                           hash::Entry {
+                           &hash::Entry {
                                hash: hash.clone(),
                                persistent_ref: Some(dir_ref),
                                level: final_level,
@@ -445,7 +434,7 @@ impl HatRc {
                            }));
 
         let final_id = try!(self.hash_index.get_id(hash)).unwrap();
-        try!(self.gc.register_final(info.clone(), final_id));
+        try!(self.gc.register_final(&info, final_id));
 
         try!(self.commit_finalize(&family, info, hash));
 
@@ -459,7 +448,7 @@ impl HatRc {
                        register_out: mpsc::Sender<hash::Entry>,
                        recover_out: mpsc::Sender<hash::Entry>)
                        -> Result<(Option<Vec<u8>>, i64), HatError> {
-        fn recover_tree<B: hash::tree::HashTreeBackend<Err = key::MsgError> + Clone>
+        fn recover_tree<B: hash::tree::HashTreeBackend<Err = key::MsgError>>
             (backend: B,
              hash: &hash::Hash,
              pref: blob::ChunkRef,
@@ -626,7 +615,7 @@ impl HatRc {
                           family_name: String,
                           resume_info: Option<snapshot::Info>)
                           -> Result<(), HatError> {
-        let family = try!(self.open_family(family_name.clone()));
+        let family = try!(self.open_family(family_name));
         try!(self.commit(&family, resume_info));
 
         Ok(())
@@ -668,8 +657,8 @@ impl HatRc {
             let mut local_family = family.clone();
             let (s, r) = mpsc::channel();
 
-            thread::spawn(move || s.send(local_family.commit(hash_sender)));
-            try!(self.gc.register(snap_info.clone(), hash_id_receiver));
+            thread::spawn(move || s.send(local_family.commit(&hash_sender)));
+            try!(self.gc.register(&snap_info, hash_id_receiver));
 
             try!(try!(r.recv()))
         };
@@ -689,7 +678,7 @@ impl HatRc {
         // After a successful flush, all GC work is done.
         // The GC must be able to tell if it has completed or not.
         let hash_id = try!(self.hash_index.get_id(&hash)).expect("Hash does not exist");
-        try!(self.gc.register_final(snap_info.clone(), hash_id));
+        try!(self.gc.register_final(&snap_info, hash_id));
         try!(family.flush());
         try!(self.commit_finalize(family, snap_info, &hash));
 
@@ -717,7 +706,7 @@ impl HatRc {
         self.flush_snapshot_index();
 
         let hash_id = try!(self.hash_index.get_id(hash)).expect("Hash does not exist");
-        try!(self.gc.register_cleanup(snap_info.clone(), hash_id));
+        try!(self.gc.register_cleanup(&snap_info, hash_id));
         try!(family.flush());
 
         // Tag 0: All is done.
@@ -793,7 +782,7 @@ impl HatRc {
                               family_name: String,
                               snapshot_id: i64)
                               -> Result<(), HatError> {
-        let family = try!(self.open_family(family_name.clone()));
+        let family = try!(self.open_family(family_name));
         try!(self.deregister(&family, snapshot_id));
 
         Ok(())
@@ -815,38 +804,33 @@ impl HatRc {
         self.snapshot_index.will_delete(&info);
         self.flush_snapshot_index();
 
-        let local_family = family.clone();
-        let local_hash_index = self.hash_index.clone();
-        let local_hash_backend = self.hash_backend.clone();
-        let local_dir_hash = dir_hash.clone();
-        let listing = move || {
-            let (sender, receiver) = mpsc::channel();
-            list_snapshot(&local_hash_backend,
-                          &sender,
-                          &local_family,
-                          &local_dir_hash,
-                          dir_ref)
-                .unwrap();
-            drop(sender);
-
-            let (id_sender, id_receiver) = mpsc::channel();
-            for hash in receiver.iter() {
-                match local_hash_index.get_id(&hash).expect("Hash index failed") {
-                    Some(id) => id_sender.send(id).unwrap(),
-                    None => panic!("Unexpected reply from hash index."),
-                }
-            }
-            match local_hash_index.get_id(&local_dir_hash).expect("Hash index failed") {
-                Some(id) => id_sender.send(id).unwrap(),
-                None => panic!("Unexpected reply from hash index."),
-            }
-            id_receiver
-        };
-
         let final_ref = try!(self.hash_index
                 .get_id(&dir_hash))
             .expect("Snapshot hash does not exist");
-        try!(self.gc.deregister(info.clone(), final_ref, listing));
+
+        {
+            let &mut Hat { ref mut hash_index, ref mut hash_backend, ref mut gc, .. } = self;
+
+            let listing = || {
+                let mut files = Vec::new();
+                list_snapshot(hash_backend, &mut files, &family, &dir_hash, dir_ref).unwrap();
+
+                let (id_sender, id_receiver) = mpsc::channel();
+                for hash in files {
+                    match hash_index.get_id(&hash).expect("Hash index failed") {
+                        Some(id) => id_sender.send(id).unwrap(),
+                        None => panic!("Unexpected reply from hash index."),
+                    }
+                }
+                match hash_index.get_id(&dir_hash).expect("Hash index failed") {
+                    Some(id) => id_sender.send(id).unwrap(),
+                    None => panic!("Unexpected reply from hash index."),
+                }
+                id_receiver
+            };
+
+            try!(gc.deregister(&info, final_ref, listing));
+        }
         try!(family.flush());
 
         self.deregister_finalize(family, info, final_ref)
@@ -873,7 +857,7 @@ impl HatRc {
         self.flush_snapshot_index();
 
         // Clear GC state.
-        try!(self.gc.register_cleanup(snap_info.clone(), final_ref));
+        try!(self.gc.register_cleanup(&snap_info, final_ref));
         try!(family.flush());
 
         // Delete snapshot metadata.
@@ -940,14 +924,15 @@ impl FileEntry {
     fn new(full_path: PathBuf, parent: Option<u64>) -> Result<FileEntry, Box<Error>> {
         debug!("FileEntry::new({:?})", full_path);
 
-        let filename_opt = full_path.file_name().and_then(|n| n.to_str());
+        let filename_opt =
+            full_path.file_name().and_then(|n| n.to_str()).map(|n| n.bytes().collect());
 
         if filename_opt.is_some() {
             let md = try!(fs::symlink_metadata(&full_path));
             let link_path = fs::read_link(&full_path).ok();
             Ok(FileEntry {
                 key_entry: key::Entry {
-                    name: filename_opt.unwrap().bytes().collect(),
+                    name: filename_opt.unwrap(),
                     created: Some(md.ctime_nsec()),
                     modified: Some(md.mtime_nsec()),
                     accessed: Some(md.atime_nsec()),
@@ -960,7 +945,7 @@ impl FileEntry {
                     group_id: None,
                 },
                 metadata: md,
-                full_path: full_path.clone(),
+                full_path: full_path,
                 link_path: link_path,
             })
         } else {
@@ -1045,7 +1030,7 @@ impl Iterator for FileIterator {
                 }
             }
             #[cfg(all(test, feature = "benchmarks"))]
-            &mut FileIterator::Iter(ref mut inner) => inner.next()
+            &mut FileIterator::Iter(ref mut inner) => inner.next(),
         }
     }
 }
@@ -1183,7 +1168,7 @@ impl Family {
         Err(From::from("Unexpected reply from key store"))
     }
 
-  fn write_file_chunks<HTB: hash::tree::HashTreeBackend<Err=key::MsgError> + Clone>(
+  fn write_file_chunks<HTB: hash::tree::HashTreeBackend<Err=key::MsgError>>(
     &self, fd: &mut fs::File, tree: hash::tree::ReaderResult<HTB>)
   {
         for chunk in tree {
@@ -1231,7 +1216,7 @@ impl Family {
         }
     }
 
-    pub fn fetch_dir_data<HTB: hash::tree::HashTreeBackend<Err = key::MsgError> + Clone>
+    pub fn fetch_dir_data<HTB: hash::tree::HashTreeBackend<Err = key::MsgError>>
         (&self,
          dir_hash: &hash::Hash,
          dir_ref: blob::ChunkRef,
@@ -1308,7 +1293,7 @@ impl Family {
     }
 
     pub fn commit(&mut self,
-                  hash_ch: mpsc::Sender<hash::Hash>)
+                  hash_ch: &mpsc::Sender<hash::Hash>)
                   -> Result<(hash::Hash, blob::ChunkRef), HatError> {
         let mut top_tree = self.key_store.hash_tree_writer();
         try!(self.commit_to_tree(&mut top_tree, None, hash_ch));
@@ -1319,7 +1304,7 @@ impl Family {
     pub fn commit_to_tree(&mut self,
                           tree: &mut hash::tree::SimpleHashTreeWriter<key::HashStoreBackend>,
                           dir_id: Option<u64>,
-                          hash_ch: mpsc::Sender<hash::Hash>)
+                          hash_ch: &mpsc::Sender<hash::Hash>)
                           -> Result<(), HatError> {
 
         let files_at_a_time = 1024;
@@ -1379,7 +1364,7 @@ impl Family {
 
                         // This is a directory, recurse!
                         let mut inner_tree = self.key_store.hash_tree_writer();
-                        try!(self.commit_to_tree(&mut inner_tree, entry.id, hash_ch.clone()));
+                        try!(self.commit_to_tree(&mut inner_tree, entry.id, hash_ch));
                         // Store a reference for the sub-tree in our tree:
                         let (dir_hash, dir_ref) = try!(inner_tree.hash());
 
@@ -1427,9 +1412,7 @@ mod tests {
     use blob::tests::MemoryBackend;
     use key;
 
-    pub fn setup_hat<B: Clone + Send + StoreBackend + 'static>(backend: B,
-                                                               poison_after: &[i64])
-                                                               -> HatRc {
+    pub fn setup_hat<B: Send + StoreBackend + 'static>(backend: B, poison_after: &[i64]) -> HatRc {
         let max_blob_size = 1024 * 1024;
         Hat::new_for_testing(backend, max_blob_size, poison_after).unwrap()
     }
@@ -1620,7 +1603,7 @@ mod tests {
 
         // Create a new hat to wipe the index states.
         let poison = vec![];
-        let mut hat2 = setup_hat(backend.clone(), &poison[..]);
+        let mut hat2 = setup_hat(backend, &poison[..]);
 
         // Recover index states.
         hat2.recover().unwrap();
@@ -1680,10 +1663,10 @@ mod bench {
     fn setup_family() -> (HatRc, Family) {
         let empty = vec![];
         let backend = blob::tests::DevNullBackend {};
-        let hat = setup_hat(backend.clone(), &empty[..]);
+        let hat = setup_hat(backend, &empty[..]);
 
         let family = "familyname".to_string();
-        let fam = hat.open_family(family.clone()).unwrap();
+        let fam = hat.open_family(family).unwrap();
 
         (hat, fam)
     }
@@ -1718,7 +1701,7 @@ mod bench {
     #[derive(Clone)]
     struct UniqueBlockIter {
         filler: UniqueBlockFiller,
-        block: Vec<u8>,
+        blocksize: usize,
         filesize: i32,
     }
 
@@ -1726,7 +1709,7 @@ mod bench {
         fn new(filler: UniqueBlockFiller, blocksize: usize, filesize: i32) -> UniqueBlockIter {
             UniqueBlockIter {
                 filler: filler,
-                block: vec![0; blocksize],
+                blocksize: blocksize,
                 filesize: filesize,
             }
         }
@@ -1745,9 +1728,10 @@ mod bench {
             if self.filesize <= 0 {
                 None
             } else {
-                self.filesize -= self.block.len() as i32;
-                self.filler.fill_bytes(&mut self.block);
-                Some(self.block.clone())
+                self.filesize -= self.blocksize as i32;
+                let mut res = vec![0; self.blocksize];
+                self.filler.fill_bytes(&mut res);
+                Some(res)
             }
         }
     }

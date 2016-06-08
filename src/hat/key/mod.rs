@@ -239,13 +239,13 @@ impl HashTreeBackend for HashStoreBackend {
             persistent_ref: None,
         };
 
-        match try!(self.hash_index.reserve(hash_entry.clone())) {
-            hash::ReserveResult::HashKnown => {
+        match try!(self.hash_index.reserve(&hash_entry)) {
+            hash::ReserveResult::HashKnown(..) => {
                 // Someone came before us: piggyback on their result.
                 Ok(try!(self.fetch_persistent_ref(hash))
                     .expect("Could not find persistent_ref for known chunk."))
             }
-            hash::ReserveResult::ReserveOk => {
+            hash::ReserveResult::ReserveOk(..) => {
                 // We came first: this data-chunk is ours to process.
                 let local_hash_index = self.hash_index.clone();
 
