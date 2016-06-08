@@ -995,6 +995,8 @@ pub enum FileIterator {
     File(fs::File),
     #[cfg(test)]
     Buf(Vec<u8>, usize),
+    #[cfg(all(test, feature = "benchmarks"))]
+    Iter(Box<Iterator<Item = Vec<u8>> + Send>),
 }
 
 impl FileIterator {
@@ -1007,6 +1009,13 @@ impl FileIterator {
     #[cfg(test)]
     fn from_bytes(contents: Vec<u8>) -> FileIterator {
         FileIterator::Buf(contents, 0)
+    }
+
+    #[cfg(all(test, feature = "benchmarks"))]
+    fn from_iter<I>(i: Box<I>) -> FileIterator
+        where I: Iterator<Item = Vec<u8>> + Send + 'static
+    {
+        FileIterator::Iter(i)
     }
 }
 
@@ -1035,6 +1044,8 @@ impl Iterator for FileIterator {
                     Some(next.to_owned())
                 }
             }
+            #[cfg(all(test, feature = "benchmarks"))]
+            &mut FileIterator::Iter(ref mut inner) => inner.next()
         }
     }
 }

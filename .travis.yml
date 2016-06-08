@@ -3,7 +3,7 @@ sudo: false
 rust:
   - stable
   - beta
-  - nightly-2016-05-27
+  - nightly-2016-06-07
   - nightly
 matrix:
   allow_failures:
@@ -36,4 +36,5 @@ install:
 script:
   - cargo build --verbose
   - RUST_LOG=error cargo test --verbose
+  - 'if [[ "$TRAVIS_RUST_VERSION" == nightly* ]]; then RUST_LOG=error cargo test --verbose --features benchmarks; fi'
   - cargo doc
