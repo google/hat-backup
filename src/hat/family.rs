@@ -24,8 +24,8 @@ use hash;
 use key;
 use root_capnp;
 use util::{self, FileIterator, FnBox};
-use super::HatError;
-use super::insert_path_handler::InsertPathHandler;
+use errors::HatError;
+use hat::insert_path_handler::InsertPathHandler;
 
 fn try_a_few_times_then_panic<F>(mut f: F, msg: &str)
     where F: FnMut() -> bool

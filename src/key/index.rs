@@ -14,8 +14,6 @@
 
 //! Local state for keys in the snapshot in progress (the "index").
 
-use std::borrow::Cow;
-
 use diesel;
 use diesel::prelude::*;
 use diesel::sqlite::SqliteConnection;
@@ -24,34 +22,11 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use time::Duration;
 
 use blob;
+use errors::DieselError;
 use hash;
 use util::{InfoWriter, PeriodicTimer};
 
 use super::schema;
-
-error_type! {
-    #[derive(Debug)]
-    pub enum IndexError {
-        SqlConnection(diesel::ConnectionError) {
-            cause;
-        },
-        SqlMigration(diesel::migrations::MigrationError) {
-            cause;
-        },
-        SqlRunMigration(diesel::migrations::RunMigrationsError) {
-            cause;
-        },
-        SqlExecute(diesel::result::Error) {
-            cause;
-        },
-        Message(Cow<'static, str>) {
-            desc (e) &**e;
-            from (s: &'static str) s.into();
-            from (s: String) s.into();
-        }
-     }
-}
-
 
 #[derive(Clone, Debug)]
 pub struct Entry {
@@ -82,7 +57,7 @@ pub struct InternalKeyIndex {
 
 
 impl InternalKeyIndex {
-    fn new(path: &str) -> Result<InternalKeyIndex, IndexError> {
+    fn new(path: &str) -> Result<InternalKeyIndex, DieselError> {
         let conn = try!(SqliteConnection::establish(path));
 
         let ki = InternalKeyIndex {
@@ -99,13 +74,13 @@ impl InternalKeyIndex {
         Ok(ki)
     }
 
-    fn last_insert_rowid(&self) -> Result<i64, IndexError> {
+    fn last_insert_rowid(&self) -> Result<i64, DieselError> {
         let id = try!(diesel::select(diesel::expression::sql("last_insert_rowid()"))
             .first::<i64>(&self.conn));
         Ok(id)
     }
 
-    fn maybe_flush(&mut self) -> Result<(), IndexError> {
+    fn maybe_flush(&mut self) -> Result<(), DieselError> {
         if self.flush_timer.did_fire() {
             try!(self.flush());
         }
@@ -113,7 +88,7 @@ impl InternalKeyIndex {
         Ok(())
     }
 
-    fn flush(&mut self) -> Result<(), IndexError> {
+    fn flush(&mut self) -> Result<(), DieselError> {
         try!(self.conn.commit_transaction());
         try!(self.conn.begin_transaction());
 
@@ -122,7 +97,7 @@ impl InternalKeyIndex {
 
     /// Insert an entry in the key index.
     /// Returns `Id` with the new entry ID.
-    fn insert(&mut self, entry: Entry) -> Result<Entry, IndexError> {
+    fn insert(&mut self, entry: Entry) -> Result<Entry, DieselError> {
         use super::schema::keys::dsl::*;
 
         let entry = match entry.id {
@@ -171,7 +146,7 @@ impl InternalKeyIndex {
     fn lookup(&mut self,
               parent_: Option<u64>,
               name_: Vec<u8>)
-              -> Result<Option<Entry>, IndexError> {
+              -> Result<Option<Entry>, DieselError> {
         use super::schema::keys::dsl::*;
 
         let row_opt = match parent_ {
@@ -212,25 +187,23 @@ impl InternalKeyIndex {
     /// Update the `payload` and `persistent_ref` of an entry.
     /// Returns `UpdateOk`.
     fn update_data_hash(&mut self,
-                        entry: Entry,
+                        id_: u64,
+                        last_modified: Option<i64>,
                         hash_opt: Option<hash::Hash>,
                         persistent_ref_opt: Option<blob::ChunkRef>)
-                        -> Result<(), IndexError> {
+                        -> Result<(), DieselError> {
         use super::schema::keys::dsl::*;
 
-        let id_ = match entry.id {
-            Some(i) => i as i64,
-            None => return Err(From::from("Tried to update data hash without an id")),
-        };
+        let id_ = id_ as i64;
         assert!(hash_opt.is_some() == persistent_ref_opt.is_some());
 
         let hash_bytes = hash_opt.map(|h| h.bytes);
         let persistent_ref_bytes = persistent_ref_opt.map(|p| p.as_bytes());
 
-        if entry.modified.is_some() {
+        if last_modified.is_some() {
             try!(diesel::update(keys.find(id_)
                     .filter(modified.eq::<Option<i64>>(None)
-                        .or(modified.le(entry.modified))))
+                        .or(modified.le(last_modified))))
                 .set((hash.eq(hash_bytes), persistent_ref.eq(persistent_ref_bytes)))
                 .execute(&self.conn));
         } else {
@@ -246,7 +219,7 @@ impl InternalKeyIndex {
     /// Returns `ListResult` with all the entries under the given parent.
     fn list_dir(&mut self,
                 parent_opt: Option<u64>)
-                -> Result<Vec<(Entry, Option<blob::ChunkRef>)>, IndexError> {
+                -> Result<Vec<(Entry, Option<blob::ChunkRef>)>, DieselError> {
         use super::schema::keys::dsl::*;
 
         let rows = match parent_opt {
@@ -285,13 +258,12 @@ impl InternalKeyIndex {
 }
 
 impl KeyIndex {
-    pub fn new(path: &str) -> Result<KeyIndex, IndexError> {
-        let index = try!(InternalKeyIndex::new(path));
-        Ok(KeyIndex(Arc::new(Mutex::new(index))))
+    pub fn new(path: &str) -> Result<KeyIndex, DieselError> {
+        InternalKeyIndex::new(path).map(|index| KeyIndex(Arc::new(Mutex::new(index))))
     }
 
     #[cfg(test)]
-    pub fn new_for_testing() -> Result<KeyIndex, IndexError> {
+    pub fn new_for_testing() -> Result<KeyIndex, DieselError> {
         KeyIndex::new(":memory:")
     }
 
@@ -299,32 +271,33 @@ impl KeyIndex {
         self.0.lock().expect("index-process has failed")
     }
 
-    pub fn insert(&self, entry: Entry) -> Result<Entry, IndexError> {
+    pub fn insert(&self, entry: Entry) -> Result<Entry, DieselError> {
         self.lock().insert(entry)
     }
 
     pub fn lookup(&self,
                   parent_: Option<u64>,
                   name_: Vec<u8>)
-                  -> Result<Option<Entry>, IndexError> {
+                  -> Result<Option<Entry>, DieselError> {
         self.lock().lookup(parent_, name_)
     }
 
     pub fn update_data_hash(&self,
-                            entry: Entry,
+                            id: u64,
+                            last_modified: Option<i64>,
                             hash_opt: Option<hash::Hash>,
                             persistent_ref_opt: Option<blob::ChunkRef>)
-                            -> Result<(), IndexError> {
-        self.lock().update_data_hash(entry, hash_opt, persistent_ref_opt)
+                            -> Result<(), DieselError> {
+        self.lock().update_data_hash(id, last_modified, hash_opt, persistent_ref_opt)
     }
 
     pub fn list_dir(&self,
                     parent_opt: Option<u64>)
-                    -> Result<Vec<(Entry, Option<blob::ChunkRef>)>, IndexError> {
+                    -> Result<Vec<(Entry, Option<blob::ChunkRef>)>, DieselError> {
         self.lock().list_dir(parent_opt)
     }
 
-    pub fn flush(&self) -> Result<(), IndexError> {
+    pub fn flush(&self) -> Result<(), DieselError> {
         self.lock().flush()
     }
 }

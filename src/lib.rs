@@ -47,6 +47,7 @@ extern crate quickcheck;
 
 // Submodules
 pub mod blob;
+pub mod errors;
 pub mod gc;
 pub mod hash;
 pub mod hat;

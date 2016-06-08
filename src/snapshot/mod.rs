@@ -21,30 +21,12 @@ use diesel::prelude::*;
 use diesel::sqlite::SqliteConnection;
 
 use blob;
+use errors::DieselError;
 use hash;
 use tags;
 use util;
 
 mod schema;
-
-
-error_type! {
-    #[derive(Debug)]
-    pub enum IndexError {
-        SqlConnection(diesel::ConnectionError) {
-            cause;
-        },
-        SqlMigration(diesel::migrations::MigrationError) {
-            cause;
-        },
-        SqlRunMigration(diesel::migrations::RunMigrationsError) {
-            cause;
-        },
-        SqlExecute(diesel::result::Error) {
-            cause;
-        },
-    }
-}
 
 
 #[derive(Clone, Debug)]
@@ -104,7 +86,7 @@ fn work_status_to_tag(status: WorkStatus) -> tags::Tag {
 }
 
 impl InternalSnapshotIndex {
-    pub fn new(path: &str) -> Result<InternalSnapshotIndex, IndexError> {
+    pub fn new(path: &str) -> Result<InternalSnapshotIndex, DieselError> {
         let conn = try!(SqliteConnection::establish(path));
 
         let si = InternalSnapshotIndex { conn: conn };
@@ -367,13 +349,12 @@ impl InternalSnapshotIndex {
 }
 
 impl SnapshotIndex {
-    pub fn new(path: &str) -> Result<SnapshotIndex, IndexError> {
-        let index = try!(InternalSnapshotIndex::new(path));
-        Ok(SnapshotIndex(Arc::new(Mutex::new(index))))
+    pub fn new(path: &str) -> Result<SnapshotIndex, DieselError> {
+        InternalSnapshotIndex::new(path).map(|index| SnapshotIndex(Arc::new(Mutex::new(index))))
     }
 
     #[cfg(test)]
-    pub fn new_for_testing() -> Result<SnapshotIndex, IndexError> {
+    pub fn new_for_testing() -> Result<SnapshotIndex, DieselError> {
         SnapshotIndex::new(":memory:")
     }
 

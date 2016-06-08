@@ -94,7 +94,7 @@ mod tests {
             assert!(upq.put_value(priority, key, value).is_ok());
             assert_eq!(upq.pop_min_if_complete(), None);
             upq.set_ready(&priority);
-            assert_eq!(upq.pop_min_if_complete(), (priority, key, value));
+            assert_eq!(upq.pop_min_if_complete(), Some((priority, key, value)));
 
             true
         }

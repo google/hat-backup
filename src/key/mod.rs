@@ -22,13 +22,13 @@ use hash;
 use hash::tree::{HashTreeBackend, SimpleHashTreeWriter, SimpleHashTreeReader, ReaderResult};
 
 use util::{FnBox, MsgHandler, Process};
-
+use errors::{DieselError, LockError, RetryError};
 
 mod schema;
 mod index;
 
 
-pub use self::index::{IndexError, KeyIndex, Entry};
+pub use self::index::{KeyIndex, Entry};
 
 
 error_type! {
@@ -42,15 +42,18 @@ error_type! {
             from (s: &'static str) s.into();
             from (s: String) s.into();
         },
-        Index(IndexError) {
-            cause;
-        },
-        Hashes(hash::MsgError) {
-            cause;
-        },
         Blobs(blob::MsgError) {
             cause;
         },
+        RetryError(RetryError) {
+            cause;
+        },
+        LockError(LockError) {
+            cause;
+        },
+        DieselError(DieselError) {
+            cause;
+        }
      }
 }
 
@@ -121,7 +124,8 @@ impl Store {
          -> Result<Store, MsgError> {
         let ki_p = try!(index::KeyIndex::new_for_testing());
         let hi_p = try!(hash::HashIndex::new_for_testing(None));
-        let bs_p = try!(Process::new(move || blob::Store::new_for_testing(backend, 1024)));
+        let blob_index = blob::BlobIndex::new_for_testing().unwrap();
+        let bs_p = try!(Process::new(move || Ok(blob::Store::new(blob_index, backend, 1024))));
         Ok(Store {
             index: ki_p,
             hash_index: hi_p,
@@ -211,7 +215,7 @@ impl HashTreeBackend for HashStoreBackend {
             match self.hash_index.fetch_persistent_ref(hash) {
                 Ok(Some(r)) => return Ok(Some(r)), // done
                 Ok(None) => return Ok(None), // done
-                Err(hash::MsgError::RetryError(_msg)) => (),  // continue loop
+                Err(RetryError::Retry) => (),  // continue loop
                 Err(err) => return Err(From::from(err)),
             }
         }
@@ -368,7 +372,12 @@ impl<IT: Iterator<Item = Vec<u8>>> MsgHandler<Msg<IT>, Reply> for Store {
                 let it_opt = chunk_it_opt.and_then(|open| open.call(()));
                 if it_opt.is_none() {
                     // No data is associated with this entry.
-                    try!(self.index.update_data_hash(entry, None, None));
+                    try!(self.index.update_data_hash(
+                        entry.id.unwrap(),
+                        entry.modified,
+                        None,
+                        None
+                    ));
                     // Bail out before storing data that does not exist:
                     return Ok(());
                 }
@@ -391,7 +400,12 @@ impl<IT: Iterator<Item = Vec<u8>>> MsgHandler<Msg<IT>, Reply> for Store {
 
                 // Update hash in key index.
                 // It is OK that this has is not yet valid, as we check hashes at snapshot time.
-                try!(self.index.update_data_hash(entry, Some(hash), Some(persistent_ref)));
+                try!(self.index.update_data_hash(
+                    entry.id.unwrap(),
+                    entry.modified,
+                    Some(hash),
+                    Some(persistent_ref)
+                ));
 
                 Ok(())
             }

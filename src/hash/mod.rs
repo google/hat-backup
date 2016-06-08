@@ -14,7 +14,6 @@
 
 //! Local state for known hashes and their external location (blob reference).
 
-use std::borrow::Cow;
 use std::sync::{Arc, Mutex, MutexGuard};
 use time::Duration;
 
@@ -28,41 +27,17 @@ use sodiumoxide::crypto::hash::sha512;
 use blob;
 use util::{Counter, InfoWriter, PeriodicTimer, UniquePriorityQueue};
 use tags;
+use errors::{DieselError, LockError, RetryError};
 
 mod schema;
 pub mod tree;
 
 
-error_type! {
-    #[derive(Debug)]
-    pub enum MsgError {
-        Message(Cow<'static, str>) {
-            desc (e) &**e;
-            from (s: &'static str) s.into();
-        },
-        SqlConnection(diesel::ConnectionError) {
-            cause;
-        },
-        SqlMigration(diesel::migrations::MigrationError) {
-            cause;
-        },
-        SqlRunMigration(diesel::migrations::RunMigrationsError) {
-            cause;
-        },
-        SqlExecute(diesel::result::Error) {
-            cause;
-        },
-        RetryError(String) {
-            desc (e) e;
-        },
-    }
-}
-
-
 pub static HASHBYTES: usize = sha512::DIGESTBYTES;
 
 #[derive(Clone)]
-pub struct HashIndex(Arc<Mutex<(InternalHashIndex, Option<i64>)>>);
+pub struct HashIndex(Arc<Mutex<IndexInner>>);
+type IndexInner = (InternalHashIndex, Option<i64>);
 
 
 /// A wrapper around Hash digests.
@@ -141,7 +116,7 @@ pub struct InternalHashIndex {
 }
 
 impl InternalHashIndex {
-    fn new(path: &str) -> Result<InternalHashIndex, MsgError> {
+    fn new(path: &str) -> Result<InternalHashIndex, DieselError> {
         let conn = try!(SqliteConnection::establish(path));
 
         let mut hi = InternalHashIndex {
@@ -515,32 +490,32 @@ impl InternalHashIndex {
 }
 
 impl HashIndex {
-    pub fn new(path: &str) -> Result<HashIndex, MsgError> {
+    pub fn new(path: &str) -> Result<HashIndex, DieselError> {
         HashIndex::new_with_poison(path, None)
     }
 
-    pub fn new_for_testing(poison: Option<i64>) -> Result<HashIndex, MsgError> {
+    #[cfg(test)]
+    pub fn new_for_testing(poison: Option<i64>) -> Result<HashIndex, DieselError> {
         HashIndex::new_with_poison(":memory:", poison)
     }
 
-    pub fn new_with_poison(path: &str, poison: Option<i64>) -> Result<HashIndex, MsgError> {
-        let index = try!(InternalHashIndex::new(path));
-        Ok(HashIndex(Arc::new(Mutex::new((index, poison)))))
+    fn new_with_poison(path: &str, poison: Option<i64>) -> Result<HashIndex, DieselError> {
+        InternalHashIndex::new(path).map(|index| HashIndex(Arc::new(Mutex::new((index, poison)))))
     }
 
-    fn lock_ignore_poison(&self) -> Result<MutexGuard<(InternalHashIndex, Option<i64>)>, MsgError> {
+    fn lock_ignore_poison(&self) -> Result<MutexGuard<IndexInner>, LockError> {
         match self.0.lock() {
-            Err(_) => return Err(From::from("Unable to lock mutex: poisoned")),
+            Err(_) => return Err(LockError::Poisoned),
             Ok(lock) => Ok(lock),
         }
     }
 
-    fn lock(&self) -> Result<MutexGuard<(InternalHashIndex, Option<i64>)>, MsgError> {
+    fn lock(&self) -> Result<MutexGuard<IndexInner>, LockError> {
         let mut guard = try!(self.lock_ignore_poison());
 
         match &mut guard.1 {
             &mut None => (),
-            &mut Some(0) => return Err(From::from("No more requests for this index process")),
+            &mut Some(0) => return Err(LockError::RequestLimitReached),
             &mut Some(ref mut n) => {
                 *n -= 1;
             }
@@ -550,35 +525,33 @@ impl HashIndex {
     }
 
     /// Locate the local ID of this hash.
-    pub fn get_id(&self, hash: &Hash) -> Result<Option<i64>, MsgError> {
+    pub fn get_id(&self, hash: &Hash) -> Result<Option<i64>, LockError> {
         assert!(!hash.bytes.is_empty());
         Ok(try!(self.lock()).0.locate(&hash).map(|entry| entry.id))
     }
 
     /// Locate hash entry from its ID.
-    pub fn get_hash(&self, id: i64) -> Result<Option<Entry>, MsgError> {
+    pub fn get_hash(&self, id: i64) -> Result<Option<Entry>, LockError> {
         Ok(try!(self.lock()).0.locate_by_id(id))
     }
 
     /// Check whether this `Hash` already exists in the system.
-    pub fn hash_exists(&self, hash: &Hash) -> Result<bool, MsgError> {
+    pub fn hash_exists(&self, hash: &Hash) -> Result<bool, LockError> {
         assert!(!hash.bytes.is_empty());
         Ok(try!(self.lock()).0.locate(hash).is_some())
     }
 
     /// Locate the local payload of the `Hash`.
-    pub fn fetch_payload(&self, hash: &Hash) -> Result<Option<Option<Vec<u8>>>, MsgError> {
+    pub fn fetch_payload(&self, hash: &Hash) -> Result<Option<Option<Vec<u8>>>, LockError> {
         assert!(!hash.bytes.is_empty());
         Ok(try!(self.lock()).0.locate(hash).map(|queue_entry| queue_entry.payload))
     }
 
     /// Locate the persistent reference (external blob reference) for this `Hash`.
-    pub fn fetch_persistent_ref(&self, hash: &Hash) -> Result<Option<blob::ChunkRef>, MsgError> {
+    pub fn fetch_persistent_ref(&self, hash: &Hash) -> Result<Option<blob::ChunkRef>, RetryError> {
         assert!(!hash.bytes.is_empty());
         match try!(self.lock()).0.locate(hash) {
-            Some(ref queue_entry) if queue_entry.persistent_ref.is_none() => {
-                Err(MsgError::RetryError(From::from("Persistent reference not yet ready.")))
-            }
+            Some(ref queue_entry) if queue_entry.persistent_ref.is_none() => Err(RetryError::Retry),
             Some(queue_entry) => Ok(Some(queue_entry.persistent_ref.expect("persistent_ref"))),
             None => Ok(None),
         }
@@ -586,7 +559,7 @@ impl HashIndex {
 
     /// Reserve a `Hash` in the index, while sending its content to external storage.
     /// This is used to ensure that each `Hash` is stored only once.
-    pub fn reserve(&self, hash_entry: &Entry) -> Result<ReserveResult, MsgError> {
+    pub fn reserve(&self, hash_entry: &Entry) -> Result<ReserveResult, LockError> {
         assert!(!hash_entry.hash.bytes.is_empty());
         // To avoid unused IO, we store entries in-memory until committed to persistent
         // storage. This allows us to continue after a crash without needing to scan
@@ -604,7 +577,7 @@ impl HashIndex {
     /// Update the info for a reserved `Hash`. The `Hash` remains reserved. This is used to update
     /// the persistent reference (external blob reference) as soon as it is available (to allow new
     /// references to the `Hash` to be created before it is committed).
-    pub fn update_reserved(&self, hash_entry: Entry) -> Result<(), MsgError> {
+    pub fn update_reserved(&self, hash_entry: Entry) -> Result<(), LockError> {
         assert!(!hash_entry.hash.bytes.is_empty());
         try!(self.lock()).0.update_reserved(hash_entry);
         Ok(())
@@ -612,7 +585,7 @@ impl HashIndex {
 
     /// A `Hash` is committed when it has been `finalized` in the external storage. `Commit`
     /// includes the persistent reference that the content is available at.
-    pub fn commit(&self, hash: &Hash, persistent_ref: blob::ChunkRef) -> Result<(), MsgError> {
+    pub fn commit(&self, hash: &Hash, persistent_ref: blob::ChunkRef) -> Result<(), LockError> {
         // Ignore poison setup since commit is often triggered by callbacks with no error
         // handling options.
         assert!(!hash.bytes.is_empty());
@@ -621,44 +594,44 @@ impl HashIndex {
     }
 
     /// List all hash entries.
-    pub fn list(&self) -> Result<Vec<Entry>, MsgError> {
+    pub fn list(&self) -> Result<Vec<Entry>, LockError> {
         Ok(try!(self.lock()).0.list())
     }
 
     /// Permanently delete hash by its ID.
-    pub fn delete(&self, id: i64) -> Result<(), MsgError> {
+    pub fn delete(&self, id: i64) -> Result<(), LockError> {
         try!(self.lock()).0.delete(id);
         Ok(())
     }
 
     /// API related to tagging, which is useful to indicate state during operation stages.
     /// It operates directly on the underlying IDs.
-    pub fn set_tag(&self, id: i64, tag: tags::Tag) -> Result<(), MsgError> {
+    pub fn set_tag(&self, id: i64, tag: tags::Tag) -> Result<(), LockError> {
         try!(self.lock()).0.set_tag(Some(id), tag);
         Ok(())
     }
 
     /// API related to tagging, which is useful to indicate state during operation stages.
     /// It operates directly on the underlying IDs.
-    pub fn set_all_tags(&self, tag: tags::Tag) -> Result<(), MsgError> {
+    pub fn set_all_tags(&self, tag: tags::Tag) -> Result<(), LockError> {
         try!(self.lock()).0.set_tag(None, tag);
         Ok(())
     }
 
     /// API related to tagging, which is useful to indicate state during operation stages.
     /// It operates directly on the underlying IDs.
-    pub fn get_tag(&self, id: i64) -> Result<Option<tags::Tag>, MsgError> {
+    pub fn get_tag(&self, id: i64) -> Result<Option<tags::Tag>, LockError> {
         Ok(try!(self.lock()).0.get_tag(id))
     }
 
     /// API related to tagging, which is useful to indicate state during operation stages.
     /// It operates directly on the underlying IDs.
-    pub fn get_ids_by_tag(&self, tag: i64) -> Result<Vec<i64>, MsgError> {
+    pub fn get_ids_by_tag(&self, tag: i64) -> Result<Vec<i64>, LockError> {
         Ok(try!(self.lock()).0.list_ids_by_tag(tag))
     }
 
     /// API related to garbage collector metadata tied to (hash id, family id) pairs.
-    pub fn read_gc_data(&self, hash_id: i64, family_id: i64) -> Result<GcData, MsgError> {
+    pub fn read_gc_data(&self, hash_id: i64, family_id: i64) -> Result<GcData, LockError> {
         Ok(try!(self.lock()).0.read_gc_data(hash_id, family_id))
     }
 
@@ -667,7 +640,7 @@ impl HashIndex {
                                        hash_id: i64,
                                        family_id: i64,
                                        update_fn: F)
-                                       -> Result<GcData, MsgError> {
+                                       -> Result<GcData, LockError> {
         Ok(try!(self.lock()).0.update_gc_data(hash_id, family_id, update_fn))
     }
 
@@ -675,13 +648,13 @@ impl HashIndex {
     pub fn update_family_gc_data<F: UpdateFn, I: Iterator<Item = F>>(&self,
                                                                      family_id: i64,
                                                                      update_fns: I)
-                                                                     -> Result<(), MsgError> {
+                                                                     -> Result<(), LockError> {
         try!(self.lock()).0.update_family_gc_data(family_id, update_fns);
         Ok(())
     }
 
     /// Manual commit. This also disables automatic periodic commit.
-    pub fn manual_commit(&self) -> Result<(), MsgError> {
+    pub fn manual_commit(&self) -> Result<(), LockError> {
         let mut guard = try!(self.lock());
         guard.0.flush();
         guard.0.flush_periodically = false;
@@ -689,7 +662,7 @@ impl HashIndex {
     }
 
     /// Flush the hash index to clear internal buffers and commit the underlying database.
-    pub fn flush(&self) -> Result<(), MsgError> {
+    pub fn flush(&self) -> Result<(), LockError> {
         try!(self.lock()).0.flush();
         Ok(())
     }
