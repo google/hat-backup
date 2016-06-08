@@ -12,44 +12,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![crate_type="bin"]
-
-// Unstable APIs:
-#![cfg_attr(feature = "benchmarks", feature(test))]
-
-// Standard Rust imports.
-#[macro_use]
-extern crate log;
-extern crate rand;
-#[cfg(feature = "benchmarks")]
-extern crate test;
-extern crate time;
+// Import the hat library
+extern crate hat;
 
 // Rust crates.
-extern crate capnp;
 extern crate env_logger;
 extern crate sodiumoxide;
-extern crate libsodium_sys;
-extern crate rustc_serialize;
-extern crate threadpool;
-extern crate void;
-
-// Error definition macros.
-#[macro_use]
-extern crate error_type;
-
-// Diesel supplies our SQLite wrapper.
-#[macro_use]
-extern crate diesel;
 
 // We use Clap for argument parsing.
 #[macro_use]
 extern crate clap;
-
-// Testing utilities.
-#[cfg(test)]
-extern crate quickcheck;
-
 
 use std::convert::From;
 use std::path::PathBuf;
@@ -57,21 +29,7 @@ use std::borrow::ToOwned;
 
 use clap::{App, SubCommand};
 
-mod util;
-
-pub mod hat;
-mod hash;
-mod blob;
-mod key;
-mod gc;
-mod tags;
-mod snapshot;
-
-
-pub mod root_capnp {
-    include!(concat!(env!("OUT_DIR"), "/root_capnp.rs"));
-}
-
+use hat::blob;
 
 static MAX_BLOB_SIZE: usize = 4 * 1024 * 1024;
 
@@ -80,9 +38,9 @@ fn blob_dir() -> PathBuf {
 }
 
 fn license() {
-    println!(include_str!("../../LICENSE"));
+    println!(include_str!("../LICENSE"));
     println!("clap (Command Line Argument Parser) License:");
-    println!(include_str!("../../LICENSE-CLAP"));
+    println!(include_str!("../LICENSE-CLAP"));
 }
 
 
