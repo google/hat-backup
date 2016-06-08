@@ -45,7 +45,7 @@ extern crate diesel;
 #[cfg(test)]
 extern crate quickcheck;
 
-// Public modules
+// Submodules
 pub mod blob;
 pub mod gc;
 pub mod hash;
@@ -53,7 +53,7 @@ pub mod hat;
 pub mod key;
 pub mod snapshot;
 pub mod tags;
-pub mod util;
+mod util;
 
 // Re-export the main type
 pub use hat::Hat;
