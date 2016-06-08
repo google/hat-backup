@@ -30,7 +30,7 @@ use util;
 use super::schema;
 
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct BlobDesc {
     pub name: Vec<u8>,
     pub id: i64,

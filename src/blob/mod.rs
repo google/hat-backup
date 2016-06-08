@@ -263,21 +263,12 @@ pub struct Store<B> {
     max_blob_size: usize,
 }
 
-
-fn empty_blob_desc() -> BlobDesc {
-    BlobDesc {
-        name: vec![],
-        id: 0,
-    }
-}
-
-
 impl<B: StoreBackend> Store<B> {
     pub fn new(index: BlobIndex, backend: B, max_blob_size: usize) -> Store<B> {
         let mut bs = Store {
             backend: backend,
             blob_index: index,
-            blob_desc: empty_blob_desc(),
+            blob_desc: Default::default(),
             blob_refs: Vec::new(),
             blob_data: Vec::with_capacity(max_blob_size),
             max_blob_size: max_blob_size,
