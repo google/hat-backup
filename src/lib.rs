@@ -14,6 +14,49 @@
 
 //! High level Hat API
 
+// Unstable APIs:
+#![cfg_attr(feature = "benchmarks", feature(test))]
+
+// Standard Rust imports.
+#[macro_use]
+extern crate log;
+extern crate rand;
+#[cfg(feature = "benchmarks")]
+extern crate test;
+extern crate time;
+
+// Rust crates.
+extern crate capnp;
+extern crate sodiumoxide;
+extern crate libsodium_sys;
+extern crate rustc_serialize;
+extern crate threadpool;
+extern crate void;
+
+// Error definition macros.
+#[macro_use]
+extern crate error_type;
+
+// Diesel supplies our SQLite wrapper.
+#[macro_use]
+extern crate diesel;
+
+// Testing utilities.
+#[cfg(test)]
+extern crate quickcheck;
+
+// Public modules
+pub mod blob;
+pub mod gc;
+pub mod hash;
+pub mod key;
+pub mod snapshot;
+pub mod tags;
+pub mod util;
+
+pub mod root_capnp {
+    include!(concat!(env!("OUT_DIR"), "/root_capnp.rs"));
+}
 
 use std::borrow::Cow;
 use std::error::Error;
@@ -28,19 +71,8 @@ use std::sync::atomic;
 use std::sync::mpsc;
 use std::thread;
 
-use capnp;
-use root_capnp;
-use time;
-
-use blob;
-use gc;
 use gc::{Gc, GcRc};
-use hash;
-use key;
-use snapshot;
-use tags;
-use util::{self, FnBox, Process};
-
+use util::{FnBox, Process};
 
 error_type! {
     #[derive(Debug)]

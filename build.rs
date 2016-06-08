@@ -9,7 +9,7 @@ fn build_diesel(paths: &[(&str, &str)]) {
     let out_dir = env::var_os("OUT_DIR").unwrap();
 
     for &(src, dst) in paths {
-        let src = Path::new("src/hat").join(src);
+        let src = Path::new("src").join(src);
         let dst = Path::new(&out_dir).join(dst);
 
         let mut registry = syntex::Registry::new();
