@@ -16,7 +16,8 @@ use quickcheck;
 
 use blob::StoreBackend;
 use blob::tests::MemoryBackend;
-use hat::{HatRc, HatError};
+use errors::HatError;
+use hat::HatRc;
 use hat::family::Family;
 use key;
 use util::FileIterator;

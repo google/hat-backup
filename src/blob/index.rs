@@ -23,32 +23,14 @@ use diesel::sqlite::SqliteConnection;
 
 use sodiumoxide::randombytes::randombytes;
 
+use errors::DieselError;
 use tags;
 use util;
 
 use super::schema;
 
 
-error_type! {
-    #[derive(Debug)]
-    pub enum IndexError {
-        SqlConnection(diesel::ConnectionError) {
-            cause;
-        },
-        SqlMigration(diesel::migrations::MigrationError) {
-            cause;
-        },
-        SqlRunMigration(diesel::migrations::RunMigrationsError) {
-            cause;
-        },
-        SqlExecute(diesel::result::Error) {
-            cause;
-        },
-    }
-}
-
-
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct BlobDesc {
     pub name: Vec<u8>,
     pub id: i64,
@@ -65,7 +47,7 @@ pub struct BlobIndex(Arc<Mutex<InternalBlobIndex>>);
 
 
 impl InternalBlobIndex {
-    pub fn new(path: &str) -> Result<InternalBlobIndex, IndexError> {
+    pub fn new(path: &str) -> Result<InternalBlobIndex, DieselError> {
         let conn = try!(SqliteConnection::establish(path));
 
         let mut bi = InternalBlobIndex {
@@ -230,13 +212,12 @@ impl InternalBlobIndex {
 }
 
 impl BlobIndex {
-    pub fn new(path: &str) -> Result<BlobIndex, IndexError> {
-        let index = try!(InternalBlobIndex::new(path));
-        Ok(BlobIndex(Arc::new(Mutex::new(index))))
+    pub fn new(path: &str) -> Result<BlobIndex, DieselError> {
+        InternalBlobIndex::new(path).map(|index| BlobIndex(Arc::new(Mutex::new(index))))
     }
 
     #[cfg(test)]
-    pub fn new_for_testing() -> Result<BlobIndex, IndexError> {
+    pub fn new_for_testing() -> Result<BlobIndex, DieselError> {
         BlobIndex::new(":memory:")
     }
 

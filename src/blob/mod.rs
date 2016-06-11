@@ -37,16 +37,13 @@ use util::{FnBox, MsgHandler, Process};
 mod index;
 mod schema;
 
-pub use self::index::{BlobIndex, IndexError, BlobDesc};
+pub use self::index::{BlobIndex, BlobDesc};
 
 
 error_type! {
     #[derive(Debug)]
     pub enum MsgError {
         Recv(mpsc::RecvError) {
-            cause;
-        },
-        Index(IndexError) {
             cause;
         },
         Message(Cow<'static, str>) {
@@ -75,12 +72,12 @@ pub struct FileBackend {
 }
 
 impl FileBackend {
-    pub fn new(root: PathBuf) -> Result<FileBackend, MsgError> {
-        Ok(FileBackend {
+    pub fn new(root: PathBuf) -> FileBackend {
+        FileBackend {
             root: root,
             read_cache: Arc::new(Mutex::new(BTreeMap::new())),
             max_cache_size: 10,
-        })
+        }
     }
 
     fn guarded_cache_get(&self, name: &[u8]) -> Option<Result<Vec<u8>, String>> {
@@ -257,7 +254,7 @@ pub enum Reply {
 pub struct Store<B> {
     backend: B,
 
-    blob_index: index::BlobIndex,
+    blob_index: BlobIndex,
     blob_desc: BlobDesc,
 
     blob_data: Vec<u8>,
@@ -266,45 +263,18 @@ pub struct Store<B> {
     max_blob_size: usize,
 }
 
-
-fn empty_blob_desc() -> BlobDesc {
-    BlobDesc {
-        name: vec![],
-        id: 0,
-    }
-}
-
-
 impl<B: StoreBackend> Store<B> {
-    pub fn new(index: index::BlobIndex,
-               backend: B,
-               max_blob_size: usize)
-               -> Result<Store<B>, MsgError> {
+    pub fn new(index: BlobIndex, backend: B, max_blob_size: usize) -> Store<B> {
         let mut bs = Store {
             backend: backend,
             blob_index: index,
-            blob_desc: empty_blob_desc(),
+            blob_desc: Default::default(),
             blob_refs: Vec::new(),
             blob_data: Vec::with_capacity(max_blob_size),
             max_blob_size: max_blob_size,
         };
         bs.reserve_new_blob();
-        Ok(bs)
-    }
-
-    #[cfg(test)]
-    pub fn new_for_testing(backend: B, max_blob_size: usize) -> Result<Store<B>, MsgError> {
-        let bi_p = try!(index::BlobIndex::new_for_testing());
-        let mut bs = Store {
-            backend: backend,
-            blob_index: bi_p,
-            blob_desc: empty_blob_desc(),
-            blob_refs: Vec::new(),
-            blob_data: Vec::with_capacity(max_blob_size),
-            max_blob_size: max_blob_size,
-        };
-        bs.reserve_new_blob();
-        Ok(bs)
+        bs
     }
 
     fn reserve_new_blob(&mut self) -> BlobDesc {
@@ -535,8 +505,9 @@ pub mod tests {
             let mut backend = MemoryBackend::new();
 
             let local_backend = backend.clone();
+            let blob_index = BlobIndex::new_for_testing().unwrap();
             let bs_p: StoreProcess =
-                Process::new(move || Store::new_for_testing(local_backend, 1024)).unwrap();
+                Process::new(move || Ok(Store::new(blob_index, local_backend, 1024))).unwrap();
 
             let mut ids = Vec::new();
             for chunk in chunks.iter() {
@@ -582,8 +553,9 @@ pub mod tests {
             let mut backend = MemoryBackend::new();
 
             let local_backend = backend.clone();
+            let blob_index = BlobIndex::new_for_testing().unwrap();
             let bs_p: StoreProcess =
-                Process::new(move || Store::new_for_testing(local_backend, 1024)).unwrap();
+                Process::new(move || Ok(Store::new(blob_index, local_backend, 1024))).unwrap();
 
             let mut ids = Vec::new();
             for chunk in chunks.iter() {

@@ -12,9 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::borrow::Cow;
 use std::fs;
-use std::io;
 use std::path::PathBuf;
 use std::str;
 use std::sync::mpsc;
@@ -22,6 +20,7 @@ use std::thread;
 use capnp;
 
 use blob;
+use errors::HatError;
 use gc::{self, Gc, GcRc};
 use hash;
 use key;
@@ -39,43 +38,6 @@ mod tests;
 #[cfg(all(test, feature = "benchmarks"))]
 mod benchmarks;
 
-error_type! {
-    #[derive(Debug)]
-    pub enum HatError {
-        Recv(mpsc::RecvError) {
-            cause;
-        },
-        Keys(key::MsgError) {
-            cause;
-        },
-        KeyDb(key::IndexError) {
-            cause;
-        },
-        Snapshots(snapshot::IndexError) {
-            cause;
-        },
-        Blobs(blob::MsgError) {
-            cause;
-        },
-        BlobDb(blob::IndexError) {
-            cause;
-        },
-        Hashes(hash::MsgError) {
-            cause;
-        },
-        DataSerialization(capnp::Error) {
-            cause;
-        },
-        IO(io::Error) {
-            cause;
-        },
-        Message(Cow<'static, str>) {
-            desc (e) &**e;
-            from (s: &'static str) s.into();
-            from (s: String) s.into();
-        }
-    }
-}
 
 
 pub struct GcBackend {
@@ -210,7 +172,7 @@ impl HatRc {
         let bi_p = try!(blob::BlobIndex::new(&blob_index_path));
         let hi_p = try!(hash::HashIndex::new(&hash_index_path));
 
-        let bs_p = try!(Process::new(move || blob::Store::new(bi_p, backend, max_blob_size)));
+        let bs_p = try!(Process::new(move || Ok(blob::Store::new(bi_p, backend, max_blob_size))));
 
         let gc_backend = GcBackend { hash_index: hi_p.clone() };
         let gc = gc::Gc::new(gc_backend);
@@ -242,9 +204,10 @@ impl HatRc {
         let bi_p = blob::BlobIndex::new_for_testing().unwrap();
         let hi_p = hash::HashIndex::new_for_testing(poison.next().cloned()).unwrap();
 
-        let bs_p = Process::new_with_poison(move || blob::Store::new(bi_p, backend, max_blob_size),
-                                            poison.next().cloned())
-            .unwrap();
+        let bs_p =
+            Process::new_with_poison(move || Ok(blob::Store::new(bi_p, backend, max_blob_size)),
+                                     poison.next().cloned())
+                .unwrap();
 
         let gc_backend = GcBackend { hash_index: hi_p.clone() };
         let gc = gc::Gc::new(gc_backend);
