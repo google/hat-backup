@@ -292,6 +292,12 @@ fn file_size_warning(name: &[u8], wanted: u64, got: u64) {
 impl<IT: Iterator<Item = Vec<u8>>> MsgHandler<Msg<IT>, Reply> for Store {
     type Err = MsgError;
 
+    fn reset(&mut self) -> Result<(), MsgError> {
+        try!(self.blob_store.reset());
+        try!(self.hash_index.reset());
+        Ok(())
+    }
+
     fn handle<F: FnOnce(Result<Reply, MsgError>)>(&mut self,
                                                   msg: Msg<IT>,
                                                   reply: F)

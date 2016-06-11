@@ -14,7 +14,6 @@
 
 //! Local state for external blobs and their states.
 
-use std::collections::HashMap;
 use std::sync::{Arc, Mutex, MutexGuard};
 
 use diesel;
@@ -70,7 +69,7 @@ impl InternalBlobIndex {
         }
     }
 
-    fn refresh_next_id(&mut self) {
+    pub fn refresh_next_id(&mut self) {
         use diesel::expression::max;
         use super::schema::blobs::dsl::*;
 
@@ -213,6 +212,12 @@ impl BlobIndex {
 
     fn lock(&self) -> MutexGuard<InternalBlobIndex> {
         self.0.lock().expect("index-process has failed")
+    }
+
+    /// Reset in-memory state.
+    pub fn reset(&mut self) -> Result<(), DieselError> {
+        self.lock().refresh_next_id();
+        Ok(())
     }
 
     /// Reserve an internal `BlobDesc` for a new blob.
