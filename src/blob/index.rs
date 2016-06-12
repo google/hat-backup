@@ -14,7 +14,6 @@
 
 //! Local state for external blobs and their states.
 
-use std::collections::HashMap;
 use std::sync::{Arc, Mutex, MutexGuard};
 
 use diesel;
@@ -39,7 +38,6 @@ pub struct BlobDesc {
 pub struct InternalBlobIndex {
     conn: SqliteConnection,
     next_id: i64,
-    reserved: HashMap<Vec<u8>, BlobDesc>,
 }
 
 #[derive(Clone)]
@@ -53,7 +51,6 @@ impl InternalBlobIndex {
         let mut bi = InternalBlobIndex {
             conn: conn,
             next_id: -1,
-            reserved: HashMap::new(),
         };
 
         let dir = try!(diesel::migrations::find_migrations_directory());
@@ -72,7 +69,7 @@ impl InternalBlobIndex {
         }
     }
 
-    fn refresh_next_id(&mut self) {
+    pub fn refresh_next_id(&mut self) {
         use diesel::expression::max;
         use super::schema::blobs::dsl::*;
 
@@ -105,7 +102,6 @@ impl InternalBlobIndex {
             name: name,
             id: self.next_id(),
         };
-        self.reserved.insert(blob.name.clone(), blob.clone());
         self.in_air(&blob);
         self.commit_blob(&blob);
 
@@ -113,15 +109,10 @@ impl InternalBlobIndex {
     }
 
     fn reserve(&mut self) -> BlobDesc {
-        let blob = self.new_blob_desc();
-        self.reserved.insert(blob.name.clone(), blob.clone());
-
-        blob
+        self.new_blob_desc()
     }
 
     fn in_air(&mut self, blob: &BlobDesc) {
-        assert!(self.reserved.get(&blob.name).is_some(),
-                "blob was not reserved!");
         use super::schema::blobs::dsl::*;
 
         let new = schema::NewBlob {
@@ -143,8 +134,6 @@ impl InternalBlobIndex {
     }
 
     fn commit_blob(&mut self, blob: &BlobDesc) {
-        assert!(self.reserved.get(&blob.name).is_some(),
-                "blob was not reserved!");
         use super::schema::blobs::dsl::*;
 
         diesel::update(blobs.find(blob.id))
@@ -223,6 +212,12 @@ impl BlobIndex {
 
     fn lock(&self) -> MutexGuard<InternalBlobIndex> {
         self.0.lock().expect("index-process has failed")
+    }
+
+    /// Reset in-memory state.
+    pub fn reset(&mut self) -> Result<(), DieselError> {
+        self.lock().refresh_next_id();
+        Ok(())
     }
 
     /// Reserve an internal `BlobDesc` for a new blob.

@@ -524,6 +524,22 @@ impl HashIndex {
         Ok(guard)
     }
 
+    /// Reset in-memory state.
+    pub fn reset(&self) -> Result<(), LockError> {
+        let mut state = try!(self.lock_ignore_poison());
+
+        // Only reset a poisoned state.
+        assert_eq!(state.1, Some(0));
+
+        state.0.queue = UniquePriorityQueue::new();
+        state.0.refresh_id_counter();
+
+        // Unpoison:
+        state.1 = None;
+
+        Ok(())
+    }
+
     /// Locate the local ID of this hash.
     pub fn get_id(&self, hash: &Hash) -> Result<Option<i64>, LockError> {
         assert!(!hash.bytes.is_empty());

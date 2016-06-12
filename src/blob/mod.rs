@@ -30,6 +30,7 @@ use rustc_serialize::hex::ToHex;
 use capnp;
 use root_capnp;
 
+use errors::DieselError;
 use tags;
 use util::{FnBox, MsgHandler, Process};
 
@@ -44,6 +45,9 @@ error_type! {
     #[derive(Debug)]
     pub enum MsgError {
         Recv(mpsc::RecvError) {
+            cause;
+        },
+        Diesel(DieselError) {
             cause;
         },
         Message(Cow<'static, str>) {
@@ -324,6 +328,16 @@ impl<B: StoreBackend> Store<B> {
 
 impl<B: StoreBackend> MsgHandler<Msg, Reply> for Store<B> {
     type Err = MsgError;
+
+    fn reset(&mut self) -> Result<(), MsgError> {
+        try!(self.blob_index.reset());
+
+        self.blob_refs.clear();
+        self.blob_data.clear();
+        self.reserve_new_blob();
+
+        Ok(())
+    }
 
     fn handle<F: FnOnce(Result<Reply, MsgError>)>(&mut self,
                                                   msg: Msg,

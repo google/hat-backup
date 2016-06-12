@@ -55,8 +55,18 @@ use std::thread;
 use std::sync::{mpsc, Arc, Mutex};
 
 
+enum InternalMsg<M> {
+    Msg(M),
+    Reset,
+}
+
+enum InternalReply<R, E> {
+    Reply(Result<R, E>),
+    Reset(Result<(), E>),
+}
+
 pub struct Process<Msg, Reply, E> {
-    sender: mpsc::SyncSender<(Msg, mpsc::Sender<Result<Reply, E>>)>,
+    sender: mpsc::SyncSender<(InternalMsg<Msg>, mpsc::Sender<InternalReply<Reply, E>>)>,
     poison_after: Option<i64>,
     poisoned: Arc<Mutex<bool>>,
 }
@@ -80,6 +90,8 @@ pub trait MsgHandler<Msg, Reply> {
                                                    msg: Msg,
                                                    callback: F)
                                                    -> Result<(), Self::Err>;
+
+    fn reset(&mut self) -> Result<(), Self::Err>;
 }
 
 impl<Msg: 'static + Send, Reply: 'static + Send, E> Process<Msg, Reply, E> {
@@ -111,9 +123,9 @@ impl<Msg: 'static + Send, Reply: 'static + Send, E> Process<Msg, Reply, E> {
         Ok(p)
     }
 
-
     fn start<H, F>(&self,
-                   receiver: mpsc::Receiver<(Msg, mpsc::Sender<Result<Reply, E>>)>,
+                   receiver: mpsc::Receiver<(InternalMsg<Msg>,
+                                             mpsc::Sender<InternalReply<Reply, E>>)>,
                    handler_proc: F)
                    -> Result<(), E>
         where H: 'static + MsgHandler<Msg, Reply, Err = E> + Send,
@@ -127,32 +139,42 @@ impl<Msg: 'static + Send, Reply: 'static + Send, E> Process<Msg, Reply, E> {
 
         thread::spawn(move || {
             // fork handler
-            let mut handle_msg = |msg, rep: mpsc::Sender<Result<Reply, E>>| {
-                let mut did_reply = false;
-                let ret = my_handler.handle(msg, |r| {
-                    did_reply = true;
-                    rep.send(r)
-                        .expect("Message reply ignored");
-                });
-                match ret {
-                    Ok(()) => assert!(did_reply),
-                    Err(e) => {
-                        if did_reply {
-                            return Err(format!("Encountered unrecoverable error: {:?}", e));
-                        } else {
-                            rep.send(Err(e)).expect("Message reply ignored");
+            let mut handle_msg = |m| {
+                match m {
+                    (InternalMsg::Reset, rep) => {
+                        let rep = rep as mpsc::Sender<InternalReply<Reply, E>>;
+                        let result = my_handler.reset();
+                        rep.send(InternalReply::Reset(result)).unwrap();
+                    }
+                    (InternalMsg::Msg(msg), rep) => {
+                        let mut did_reply = false;
+                        let rep = rep as mpsc::Sender<InternalReply<Reply, E>>;
+                        let ret = my_handler.handle(msg, |r| {
+                            did_reply = true;
+                            rep.send(InternalReply::Reply(r))
+                                .expect("Message reply ignored");
+                        });
+                        match ret {
+                            Ok(()) => assert!(did_reply),
+                            Err(e) => {
+                                if did_reply {
+                                    return Err(format!("Encountered unrecoverable error: {:?}", e));
+                                } else {
+                                    rep.send(InternalReply::Reply(Err(e)))
+                                        .expect("Message reply ignored");
+                                }
+                            }
                         }
                     }
                 }
-
                 Ok(())
             };
             let mut do_loop = || {
                 match poison_after {
                     Some(msg_count) => {
                         for _ in 0..msg_count {
-                            if let Ok((msg, rep)) = receiver.recv() {
-                                try!(handle_msg(msg, rep))
+                            if let Ok(m) = receiver.recv() {
+                                try!(handle_msg(m))
                             } else {
                                 return Ok(());  // Clean shutdown.
                             }
@@ -160,8 +182,8 @@ impl<Msg: 'static + Send, Reply: 'static + Send, E> Process<Msg, Reply, E> {
                         return Err("Process has reached message limit".to_string());
                     }
                     None => {
-                        while let Ok((msg, rep)) = receiver.recv() {
-                            try!(handle_msg(msg, rep))
+                        while let Ok(m) = receiver.recv() {
+                            try!(handle_msg(m))
                         }
                     }
                 };
@@ -176,6 +198,27 @@ impl<Msg: 'static + Send, Reply: 'static + Send, E> Process<Msg, Reply, E> {
         Ok(())
     }
 
+    /// Reset in-memory state of a poisoned process, making it available again.
+    pub fn reset(&mut self) -> Result<(), E>
+        where E: From<String>
+    {
+        let (sender, receiver) = mpsc::channel();
+
+        if !*self.poisoned.lock().unwrap() {
+            return Err(From::from("This process has not been poisoned".to_string()));
+        }
+
+        if let Err(e) = self.sender.send((InternalMsg::Reset, sender)) {
+            return Err(From::from(format!("Could not send Reset message; process looks dead: {}", e)));
+        }
+
+        match receiver.recv() {
+            Err(e) => Err(From::from(format!("Could not read reply: {}", e))),
+            Ok(InternalReply::Reset(result)) => result,
+            _ => Err(From::from("Unexpected internal reply from process".to_string())),
+        }
+    }
+
     /// Synchronous send.
     ///
     /// Will always wait for a reply from the receiving `process`.
@@ -188,13 +231,14 @@ impl<Msg: 'static + Send, Reply: 'static + Send, E> Process<Msg, Reply, E> {
             return Err(From::from("Refusing to forward message to poisoned process".to_string()));
         }
 
-        if let Err(e) = self.sender.send((msg, sender)) {
-            return Err(From::from(format!("Could not send message: process is dead: {}", e)));
+        if let Err(e) = self.sender.send((InternalMsg::Msg(msg), sender)) {
+            return Err(From::from(format!("Could not send message; process looks dead: {}", e)));
         }
 
         match receiver.recv() {
             Err(e) => Err(From::from(format!("Could not read reply: {}", e))),
-            Ok(reply) => reply,
+            Ok(InternalReply::Reply(reply)) => reply,
+            _ => Err(From::from("Unexpected internal reply from process".to_string())),
         }
     }
 }
