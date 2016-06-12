@@ -15,7 +15,7 @@
 use std::sync::{Arc, Mutex};
 use test::Bencher;
 
-use blob;
+use backend::DevNullBackend;
 use hat::HatRc;
 use hat::family::Family;
 use hat::tests::{setup_hat, entry};
@@ -24,7 +24,7 @@ use util::FileIterator;
 
 fn setup_family() -> (HatRc, Family) {
     let empty = vec![];
-    let backend = blob::tests::DevNullBackend {};
+    let backend = Arc::new(DevNullBackend);
     let hat = setup_hat(backend, &empty[..]);
 
     let family = "familyname".to_string();

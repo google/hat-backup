@@ -46,6 +46,7 @@ extern crate diesel;
 extern crate quickcheck;
 
 // Submodules
+pub mod backend;
 pub mod blob;
 pub mod errors;
 pub mod gc;

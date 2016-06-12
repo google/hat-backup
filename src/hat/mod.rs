@@ -15,10 +15,11 @@
 use std::fs;
 use std::path::PathBuf;
 use std::str;
-use std::sync::mpsc;
+use std::sync::{mpsc, Arc};
 use std::thread;
 use capnp;
 
+use backend::StoreBackend;
 use blob;
 use errors::HatError;
 use gc::{self, Gc, GcRc};
@@ -161,10 +162,10 @@ fn list_snapshot(backend: &key::HashStoreBackend,
 }
 
 impl HatRc {
-    pub fn open_repository<B: 'static + blob::StoreBackend + Send>(repository_root: PathBuf,
-                                                                   backend: B,
-                                                                   max_blob_size: usize)
-                                                                   -> Result<HatRc, HatError> {
+    pub fn open_repository<B: StoreBackend>(repository_root: PathBuf,
+                                            backend: Arc<B>,
+                                            max_blob_size: usize)
+                                            -> Result<HatRc, HatError> {
         let snapshot_index_path = snapshot_index_name(repository_root.clone());
         let blob_index_path = blob_index_name(repository_root.clone());
         let hash_index_path = hash_index_name(repository_root.clone());
@@ -193,10 +194,10 @@ impl HatRc {
     }
 
     #[cfg(test)]
-    pub fn new_for_testing<B: 'static + blob::StoreBackend + Send>(backend: B,
-                                                                   max_blob_size: usize,
-                                                                   poison_after: &[i64])
-                                                                   -> Result<HatRc, HatError> {
+    pub fn new_for_testing<B: StoreBackend>(backend: Arc<B>,
+                                            max_blob_size: usize,
+                                            poison_after: &[i64])
+                                            -> Result<HatRc, HatError> {
         // If provided, we cycle the possible poison values to give every process one.
         let mut poison = poison_after.iter().cycle();
 

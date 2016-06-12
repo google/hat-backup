@@ -17,6 +17,11 @@
 use std::borrow::Cow;
 use std::sync::mpsc;
 
+#[cfg(test)]
+use std::sync::Arc;
+#[cfg(test)]
+use backend::StoreBackend;
+
 use blob;
 use hash;
 use hash::tree::{HashTreeBackend, SimpleHashTreeWriter, SimpleHashTreeReader, ReaderResult};
@@ -119,9 +124,7 @@ impl Store {
     }
 
     #[cfg(test)]
-    pub fn new_for_testing<B: 'static + blob::StoreBackend + Send + Clone>
-        (backend: B)
-         -> Result<Store, MsgError> {
+    pub fn new_for_testing<B: StoreBackend>(backend: Arc<B>) -> Result<Store, MsgError> {
         let ki_p = try!(index::KeyIndex::new_for_testing());
         let hi_p = try!(hash::HashIndex::new_for_testing(None));
         let blob_index = blob::BlobIndex::new_for_testing().unwrap();
@@ -423,8 +426,9 @@ impl<IT: Iterator<Item = Vec<u8>>> MsgHandler<Msg<IT>, Reply> for Store {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Arc;
 
-    use blob::tests::MemoryBackend;
+    use backend::MemoryBackend;
     use util::Process;
 
     use rand::Rng;
@@ -617,7 +621,7 @@ mod tests {
     #[test]
     fn identity() {
         fn prop(size: u8) -> bool {
-            let backend = MemoryBackend::new();
+            let backend = Arc::new(MemoryBackend::new());
             let ks_p = Process::new(move || Store::new_for_testing(backend)).unwrap();
 
             let mut fs = rng_filesystem(size as usize);
@@ -640,14 +644,15 @@ mod tests {
 mod bench {
     use super::*;
     use super::tests::*;
+    use std::sync::Arc;
 
-    use blob::tests::DevNullBackend;
+    use backend::DevNullBackend;
     use util::Process;
     use test::Bencher;
 
     #[bench]
     fn insert_1_key_x_128000_zeros(bench: &mut Bencher) {
-        let backend = DevNullBackend;
+        let backend = Arc::new(DevNullBackend);
         let ks_p: StoreProcess<EntryStub> = Process::new(move || Store::new_for_testing(backend))
             .unwrap();
 
@@ -685,7 +690,7 @@ mod bench {
 
     #[bench]
     fn insert_1_key_x_128000_unique(bench: &mut Bencher) {
-        let backend = DevNullBackend;
+        let backend = Arc::new(DevNullBackend);
         let ks_p: StoreProcess<EntryStub> = Process::new(move || Store::new_for_testing(backend))
             .unwrap();
 
@@ -727,7 +732,7 @@ mod bench {
 
     #[bench]
     fn insert_1_key_x_16_x_128000_zeros(bench: &mut Bencher) {
-        let backend = DevNullBackend;
+        let backend = Arc::new(DevNullBackend);
         let ks_p: StoreProcess<EntryStub> = Process::new(move || Store::new_for_testing(backend))
             .unwrap();
 
@@ -765,7 +770,7 @@ mod bench {
 
     #[bench]
     fn insert_1_key_x_16_x_128000_unique(bench: &mut Bencher) {
-        let backend = DevNullBackend;
+        let backend = Arc::new(DevNullBackend);
         let ks_p: StoreProcess<EntryStub> = Process::new(move || Store::new_for_testing(backend))
             .unwrap();
 
@@ -819,7 +824,7 @@ mod bench {
 
     #[bench]
     fn insert_1_key_unchanged_empty(bench: &mut Bencher) {
-        let backend = DevNullBackend;
+        let backend = Arc::new(DevNullBackend);
         let ks_p: StoreProcess<EntryStub> = Process::new(move || Store::new_for_testing(backend))
             .unwrap();
 
@@ -846,7 +851,7 @@ mod bench {
 
     #[bench]
     fn insert_1_key_updated_empty(bench: &mut Bencher) {
-        let backend = DevNullBackend;
+        let backend = Arc::new(DevNullBackend);
         let ks_p: StoreProcess<EntryStub> = Process::new(move || Store::new_for_testing(backend))
             .unwrap();
 
@@ -875,7 +880,7 @@ mod bench {
 
     #[bench]
     fn insert_1_key_unique_empty(bench: &mut Bencher) {
-        let backend = DevNullBackend;
+        let backend = Arc::new(DevNullBackend);
         let ks_p: StoreProcess<EntryStub> = Process::new(move || Store::new_for_testing(backend))
             .unwrap();
 
