@@ -64,26 +64,11 @@ impl FileEntry {
         }
     }
 
-    fn file_iterator(&self) -> io::Result<FileIterator> {
-        FileIterator::new(&self.full_path)
-    }
-
     fn is_directory(&self) -> bool {
         self.metadata.is_dir()
     }
     fn is_symlink(&self) -> bool {
         self.link_path.is_some()
-    }
-}
-
-impl Clone for FileEntry {
-    fn clone(&self) -> FileEntry {
-        FileEntry {
-            metadata: fs::metadata(&self.full_path).unwrap(),
-            full_path: self.full_path.clone(),
-            link_path: self.link_path.clone(),
-            key_entry: self.key_entry.clone(),
-        }
     }
 }
 
@@ -134,7 +119,7 @@ impl PathHandler<Option<u64>> for InsertPathHandler {
                 }
                 let is_directory = file_entry.is_directory();
                 let local_root = path;
-                let local_file_entry = file_entry.clone();
+                let full_path = file_entry.full_path.clone();
 
                 match self.key_store
                     .lock()
@@ -144,7 +129,7 @@ impl PathHandler<Option<u64>> for InsertPathHandler {
                                                      None
                                                  } else {
                                                      Some(Box::new(move |()| {
-                            match local_file_entry.file_iterator() {
+                            match FileIterator::new(&full_path) {
                                 Err(e) => {
                                     println!("Skipping '{}': {}",
                                              local_root.display(),
