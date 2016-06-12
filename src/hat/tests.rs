@@ -23,12 +23,12 @@ use key;
 use util::FileIterator;
 
 
-pub fn setup_hat<B: StoreBackend>(backend: Arc<B>, poison_after: &[i64]) -> HatRc {
+pub fn setup_hat<B: StoreBackend>(backend: Arc<B>, poison_after: &[i64]) -> HatRc<B> {
     let max_blob_size = 1024 * 1024;
     HatRc::new_for_testing(backend, max_blob_size, poison_after).unwrap()
 }
 
-fn setup_family(poison_after: Option<Vec<i64>>) -> (Arc<MemoryBackend>, HatRc, Family) {
+fn setup_family(poison_after: Option<Vec<i64>>) -> (Arc<MemoryBackend>, HatRc<MemoryBackend>, Family<MemoryBackend>) {
     let poison = poison_after.unwrap_or(vec![]);
 
     let backend = Arc::new(MemoryBackend::new());
@@ -56,7 +56,7 @@ pub fn entry(name: Vec<u8>) -> key::Entry {
     }
 }
 
-fn snapshot_files(family: &Family, files: Vec<(&str, Vec<u8>)>) -> Result<(), HatError> {
+fn snapshot_files<B: StoreBackend>(family: &Family<B>, files: Vec<(&str, Vec<u8>)>) -> Result<(), HatError> {
     for (name, contents) in files {
         try!(family.snapshot_direct(entry(name.bytes().collect()),
                                     false,

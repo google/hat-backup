@@ -15,7 +15,7 @@
 use key::*;
 use std::sync::Arc;
 
-use backend::MemoryBackend;
+use backend::{StoreBackend, MemoryBackend};
 use util::Process;
 
 use rand::Rng;
@@ -131,7 +131,7 @@ fn rng_filesystem(size: usize) -> FileSystem {
     }
 }
 
-fn insert_and_update_fs(fs: &mut FileSystem, ks_p: &StoreProcess<EntryStub>) {
+fn insert_and_update_fs<B: StoreBackend>(fs: &mut FileSystem, ks_p: &StoreProcess<EntryStub, B>) {
     let local_file = fs.file.clone();
     let id = match ks_p.send_reply(Msg::Insert(fs.file.key_entry.clone(),
                                 if fs.file.data.is_some() {
@@ -152,7 +152,7 @@ fn insert_and_update_fs(fs: &mut FileSystem, ks_p: &StoreProcess<EntryStub>) {
     }
 }
 
-fn verify_filesystem(fs: &FileSystem, ks_p: &StoreProcess<EntryStub>) -> usize {
+fn verify_filesystem<B: StoreBackend>(fs: &FileSystem, ks_p: &StoreProcess<EntryStub, B>) -> usize {
     let listing = match ks_p.send_reply(Msg::ListDir(fs.file.key_entry.id)).unwrap() {
         Reply::ListResult(ls) => ls,
         _ => panic!("Unexpected result from key store."),

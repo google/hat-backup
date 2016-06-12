@@ -14,7 +14,7 @@
 
 //! Local state for external blobs and their states.
 
-use std::sync::{Arc, Mutex, MutexGuard};
+use std::sync::{Mutex, MutexGuard};
 
 use diesel;
 use diesel::prelude::*;
@@ -40,8 +40,7 @@ pub struct InternalBlobIndex {
     next_id: i64,
 }
 
-#[derive(Clone)]
-pub struct BlobIndex(Arc<Mutex<InternalBlobIndex>>);
+pub struct BlobIndex(Mutex<InternalBlobIndex>);
 
 
 impl InternalBlobIndex {
@@ -202,7 +201,7 @@ impl InternalBlobIndex {
 
 impl BlobIndex {
     pub fn new(path: &str) -> Result<BlobIndex, DieselError> {
-        InternalBlobIndex::new(path).map(|index| BlobIndex(Arc::new(Mutex::new(index))))
+        InternalBlobIndex::new(path).map(|index| BlobIndex(Mutex::new(index)))
     }
 
     #[cfg(test)]
@@ -215,9 +214,8 @@ impl BlobIndex {
     }
 
     /// Reset in-memory state.
-    pub fn reset(&mut self) -> Result<(), DieselError> {
+    pub fn reset(&self) {
         self.lock().refresh_next_id();
-        Ok(())
     }
 
     /// Reserve an internal `BlobDesc` for a new blob.

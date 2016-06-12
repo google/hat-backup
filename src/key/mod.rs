@@ -15,13 +15,9 @@
 //! External API for creating and manipulating snapshots.
 
 use std::borrow::Cow;
-use std::sync::mpsc;
+use std::sync::{mpsc, Arc};
 
-#[cfg(test)]
-use std::sync::Arc;
-#[cfg(test)]
 use backend::StoreBackend;
-
 use blob;
 use hash;
 use hash::tree::{SimpleHashTreeWriter, SimpleHashTreeReader, ReaderResult};
@@ -69,19 +65,19 @@ error_type! {
 }
 
 
-pub type StoreProcess<IT> = Process<Msg<IT>, Reply, MsgError>;
+pub type StoreProcess<IT, B> = Process<Msg<IT>, Reply<B>, MsgError>;
 
-pub type DirElem = (Entry, Option<blob::ChunkRef>, Option<HashTreeReaderInitializer>);
+pub type DirElem<B> = (Entry, Option<blob::ChunkRef>, Option<HashTreeReaderInitializer<B>>);
 
-pub struct HashTreeReaderInitializer {
+pub struct HashTreeReaderInitializer<B> {
     hash: hash::Hash,
     persistent_ref: Option<blob::ChunkRef>,
-    hash_index: hash::HashIndex,
-    blob_store: blob::StoreProcess,
+    hash_index: Arc<hash::HashIndex>,
+    blob_store: Arc<blob::BlobStore<B>>,
 }
 
-impl HashTreeReaderInitializer {
-    pub fn init(self) -> Result<Option<ReaderResult<HashStoreBackend>>, MsgError> {
+impl<B: StoreBackend> HashTreeReaderInitializer<B> {
+    pub fn init(self) -> Result<Option<ReaderResult<HashStoreBackend<B>>>, MsgError> {
         let backend = HashStoreBackend::new(self.hash_index, self.blob_store);
         SimpleHashTreeReader::open(backend, &self.hash, self.persistent_ref)
     }
@@ -103,25 +99,33 @@ pub enum Msg<IT> {
     Flush,
 }
 
-pub enum Reply {
+pub enum Reply<B> {
     Id(u64),
-    ListResult(Vec<DirElem>),
+    ListResult(Vec<DirElem<B>>),
     FlushOk,
 }
 
-#[derive(Clone)]
-pub struct Store {
-    index: index::KeyIndex,
-    hash_index: hash::HashIndex,
-    blob_store: blob::StoreProcess,
+pub struct Store<B> {
+    index: Arc<index::KeyIndex>,
+    hash_index: Arc<hash::HashIndex>,
+    blob_store: Arc<blob::BlobStore<B>>,
+}
+impl<B> Clone for Store<B> {
+    fn clone(&self) -> Store<B> {
+        Store {
+            index: self.index.clone(),
+            hash_index: self.hash_index.clone(),
+            blob_store: self.blob_store.clone()
+        }
+    }
 }
 
 // Implementations
-impl Store {
-    pub fn new(index: index::KeyIndex,
-               hash_index: hash::HashIndex,
-               blob_store: blob::StoreProcess)
-               -> Result<Store, MsgError> {
+impl<B: StoreBackend> Store<B> {
+    pub fn new(index: Arc<index::KeyIndex>,
+               hash_index: Arc<hash::HashIndex>,
+               blob_store: Arc<blob::BlobStore<B>>)
+               -> Result<Store<B>, MsgError> {
         Ok(Store {
             index: index,
             hash_index: hash_index,
@@ -130,11 +134,11 @@ impl Store {
     }
 
     #[cfg(test)]
-    pub fn new_for_testing<B: StoreBackend>(backend: Arc<B>) -> Result<Store, MsgError> {
-        let ki_p = try!(index::KeyIndex::new_for_testing());
-        let hi_p = try!(hash::HashIndex::new_for_testing(None));
-        let blob_index = blob::BlobIndex::new_for_testing().unwrap();
-        let bs_p = try!(Process::new(move || Ok(blob::Store::new(blob_index, backend, 1024))));
+    pub fn new_for_testing(backend: Arc<B>) -> Result<Store<B>, MsgError> {
+        let ki_p = Arc::new(try!(index::KeyIndex::new_for_testing()));
+        let hi_p = Arc::new(try!(hash::HashIndex::new_for_testing(None)));
+        let blob_index = Arc::new(try!(blob::BlobIndex::new_for_testing()));
+        let bs_p = Arc::new(blob::BlobStore::new(blob_index, backend, 1024));
         Ok(Store {
             index: ki_p,
             hash_index: hi_p,
@@ -143,14 +147,14 @@ impl Store {
     }
 
     pub fn flush(&mut self) -> Result<(), MsgError> {
-        try!(self.blob_store.send_reply(blob::Msg::Flush));
+        try!(self.blob_store.flush());
         try!(self.hash_index.flush());
         try!(self.index.flush());
 
         Ok(())
     }
 
-    pub fn hash_tree_writer(&mut self) -> SimpleHashTreeWriter<HashStoreBackend> {
+    pub fn hash_tree_writer(&mut self) -> SimpleHashTreeWriter<HashStoreBackend<B>> {
         let backend = HashStoreBackend::new(self.hash_index.clone(), self.blob_store.clone());
         SimpleHashTreeWriter::new(8, backend)
     }
@@ -170,7 +174,7 @@ fn file_size_warning(name: &[u8], wanted: u64, got: u64) {
     }
 }
 
-impl<IT: Iterator<Item = Vec<u8>>> MsgHandler<Msg<IT>, Reply> for Store {
+impl<IT: Iterator<Item = Vec<u8>>, B: StoreBackend> MsgHandler<Msg<IT>, Reply<B>> for Store<B> {
     type Err = MsgError;
 
     fn reset(&mut self) -> Result<(), MsgError> {
@@ -179,10 +183,10 @@ impl<IT: Iterator<Item = Vec<u8>>> MsgHandler<Msg<IT>, Reply> for Store {
         Ok(())
     }
 
-    fn handle<F: FnOnce(Result<Reply, MsgError>)>(&mut self,
-                                                  msg: Msg<IT>,
-                                                  reply: F)
-                                                  -> Result<(), MsgError> {
+    fn handle<F: FnOnce(Result<Reply<B>, MsgError>)>(&mut self,
+                                                     msg: Msg<IT>,
+                                                     reply: F)
+                                                     -> Result<(), MsgError> {
         macro_rules! reply_ok(($x:expr) => {{
             reply(Ok($x));
             Ok(())
@@ -202,7 +206,7 @@ impl<IT: Iterator<Item = Vec<u8>>> MsgHandler<Msg<IT>, Reply> for Store {
             Msg::ListDir(parent) => {
                 match self.index.list_dir(parent) {
                     Ok(entries) => {
-                        let mut my_entries: Vec<DirElem> = Vec::with_capacity(entries.len());
+                        let mut my_entries: Vec<DirElem<B>> = Vec::with_capacity(entries.len());
                         for (entry, persistent_ref) in entries.into_iter() {
                             let open_fn = entry.data_hash.as_ref().map(|bytes| {
                                 HashTreeReaderInitializer {

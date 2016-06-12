@@ -19,6 +19,7 @@ use std::str;
 use std::sync::{Arc, mpsc};
 use capnp;
 
+use backend::StoreBackend;
 use blob;
 use hash;
 use key;
@@ -38,14 +39,22 @@ fn try_a_few_times_then_panic<F>(mut f: F, msg: &str)
     panic!(msg.to_owned());
 }
 
-#[derive(Clone)]
-pub struct Family {
+pub struct Family<B> {
     pub name: String,
-    pub key_store: key::Store,
-    pub key_store_process: key::StoreProcess<FileIterator>,
+    pub key_store: key::Store<B>,
+    pub key_store_process: key::StoreProcess<FileIterator, B>,
+}
+impl<B: StoreBackend> Clone for Family<B> {
+    fn clone(&self) -> Family<B> {
+        Family {
+            name: self.name.clone(),
+            key_store: self.key_store.clone(),
+            key_store_process: self.key_store_process.clone()
+        }
+    }
 }
 
-impl Family {
+impl<B: StoreBackend> Family<B> {
     pub fn snapshot_dir(&self, dir: PathBuf) {
         let handler = InsertPathHandler::new(self.key_store_process.clone());
         util::iterate_recursively((PathBuf::from(&dir), None), &Arc::new(handler));
@@ -115,7 +124,7 @@ impl Family {
         Ok(())
     }
 
-    pub fn list_from_key_store(&self, dir_id: Option<u64>) -> Result<Vec<key::DirElem>, HatError> {
+    pub fn list_from_key_store(&self, dir_id: Option<u64>) -> Result<Vec<key::DirElem<B>>, HatError> {
         match try!(self.key_store_process.send_reply(key::Msg::ListDir(dir_id))) {
             key::Reply::ListResult(ls) => Ok(ls),
             _ => Err(From::from("Unexpected result from key store")),
@@ -208,7 +217,7 @@ impl Family {
     }
 
     pub fn commit_to_tree(&mut self,
-                          tree: &mut hash::tree::SimpleHashTreeWriter<key::HashStoreBackend>,
+                          tree: &mut hash::tree::SimpleHashTreeWriter<key::HashStoreBackend<B>>,
                           dir_id: Option<u64>,
                           hash_ch: &mpsc::Sender<hash::Hash>)
                           -> Result<(), HatError> {

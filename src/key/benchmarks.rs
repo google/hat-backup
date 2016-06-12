@@ -23,7 +23,7 @@ use test::Bencher;
 #[bench]
 fn insert_1_key_x_128000_zeros(bench: &mut Bencher) {
     let backend = Arc::new(DevNullBackend);
-    let ks_p: StoreProcess<EntryStub> = Process::new(move || Store::new_for_testing(backend))
+    let ks_p: StoreProcess<EntryStub, _> = Process::new(move || Store::new_for_testing(backend))
         .unwrap();
 
     let bytes = vec![0u8; 128*1024];
@@ -61,7 +61,7 @@ fn insert_1_key_x_128000_zeros(bench: &mut Bencher) {
 #[bench]
 fn insert_1_key_x_128000_unique(bench: &mut Bencher) {
     let backend = Arc::new(DevNullBackend);
-    let ks_p: StoreProcess<EntryStub> = Process::new(move || Store::new_for_testing(backend))
+    let ks_p: StoreProcess<EntryStub, _> = Process::new(move || Store::new_for_testing(backend))
         .unwrap();
 
     let bytes = vec![0u8; 128*1024];
@@ -103,7 +103,7 @@ fn insert_1_key_x_128000_unique(bench: &mut Bencher) {
 #[bench]
 fn insert_1_key_x_16_x_128000_zeros(bench: &mut Bencher) {
     let backend = Arc::new(DevNullBackend);
-    let ks_p: StoreProcess<EntryStub> = Process::new(move || Store::new_for_testing(backend))
+    let ks_p: StoreProcess<EntryStub, _> = Process::new(move || Store::new_for_testing(backend))
         .unwrap();
 
     bench.iter(|| {
@@ -141,7 +141,7 @@ fn insert_1_key_x_16_x_128000_zeros(bench: &mut Bencher) {
 #[bench]
 fn insert_1_key_x_16_x_128000_unique(bench: &mut Bencher) {
     let backend = Arc::new(DevNullBackend);
-    let ks_p: StoreProcess<EntryStub> = Process::new(move || Store::new_for_testing(backend))
+    let ks_p: StoreProcess<EntryStub, _> = Process::new(move || Store::new_for_testing(backend))
         .unwrap();
 
     let bytes = vec![0u8; 128*1024];
@@ -195,7 +195,7 @@ fn insert_1_key_x_16_x_128000_unique(bench: &mut Bencher) {
 #[bench]
 fn insert_1_key_unchanged_empty(bench: &mut Bencher) {
     let backend = Arc::new(DevNullBackend);
-    let ks_p: StoreProcess<EntryStub> = Process::new(move || Store::new_for_testing(backend))
+    let ks_p: StoreProcess<EntryStub, _> = Process::new(move || Store::new_for_testing(backend))
         .unwrap();
 
     bench.iter(|| {
@@ -222,7 +222,7 @@ fn insert_1_key_unchanged_empty(bench: &mut Bencher) {
 #[bench]
 fn insert_1_key_updated_empty(bench: &mut Bencher) {
     let backend = Arc::new(DevNullBackend);
-    let ks_p: StoreProcess<EntryStub> = Process::new(move || Store::new_for_testing(backend))
+    let ks_p: StoreProcess<EntryStub, _> = Process::new(move || Store::new_for_testing(backend))
         .unwrap();
 
     let mut i = 0;
@@ -251,7 +251,7 @@ fn insert_1_key_updated_empty(bench: &mut Bencher) {
 #[bench]
 fn insert_1_key_unique_empty(bench: &mut Bencher) {
     let backend = Arc::new(DevNullBackend);
-    let ks_p: StoreProcess<EntryStub> = Process::new(move || Store::new_for_testing(backend))
+    let ks_p: StoreProcess<EntryStub, _> = Process::new(move || Store::new_for_testing(backend))
         .unwrap();
 
     let mut i = 0;

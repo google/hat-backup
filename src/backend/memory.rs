@@ -35,9 +35,11 @@ impl MemoryBackend {
         Ok(())
     }
 
-    fn guarded_retrieve(&self, key: &[u8]) -> Result<Vec<u8>, String> {
-        let value_opt = self.files.lock().unwrap().get(&key.to_vec()).map(|v| v.clone());
-        value_opt.map(|v| Ok(v)).unwrap_or_else(|| Err(format!("Unknown key: '{:?}'", key)))
+    fn guarded_retrieve(&self, key: &[u8]) -> Result<Option<Vec<u8>>, String> {
+        match self.files.lock() {
+            Err(e) => Err(e.to_string()),
+            Ok(map) => Ok(map.get(key).map(|v| v.clone()))
+        }
     }
 
     fn guarded_delete(&self, key: &[u8]) -> Result<(), String> {
@@ -52,7 +54,7 @@ impl StoreBackend for MemoryBackend {
         self.guarded_insert(name.to_vec(), data.to_vec())
     }
 
-    fn retrieve(&self, name: &[u8]) -> Result<Vec<u8>, String> {
+    fn retrieve(&self, name: &[u8]) -> Result<Option<Vec<u8>>, String> {
         self.guarded_retrieve(name)
     }
 

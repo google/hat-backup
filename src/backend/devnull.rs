@@ -21,8 +21,8 @@ impl StoreBackend for DevNullBackend {
         Ok(())
     }
 
-    fn retrieve(&self, name: &[u8]) -> Result<Vec<u8>, String> {
-        Err(format!("Unknown key: '{:?}'", name))
+    fn retrieve(&self, _name: &[u8]) -> Result<Option<Vec<u8>>, String> {
+        Ok(None)
     }
 
     fn delete(&self, _name: &[u8]) -> Result<(), String> {
