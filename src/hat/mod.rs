@@ -357,15 +357,15 @@ impl HatRc {
 
         let family = self.open_family(family_name.clone())
             .expect(&format!("Could not open family '{}'", family_name));
-        let (register_sender, register_receiver) = mpsc::channel();
-        let (recover_sender, recover_receiver) = mpsc::channel();
+        let mut registered = Vec::new();
+        let mut recovered = Vec::new();
         let (final_payload, final_level) = try!(self.recover_dir_ref(&family,
                                                                      hash,
                                                                      dir_ref.clone(),
-                                                                     register_sender,
-                                                                     recover_sender));
+                                                                     &mut registered,
+                                                                     &mut recovered));
         // Recover hashes for tree child chunks.
-        for entry in recover_receiver {
+        for entry in recovered {
             try!(recover_entry(&self.hash_index, &self.blob_store, &entry));
         }
 
@@ -374,7 +374,7 @@ impl HatRc {
         let local_hash_index = self.hash_index.clone();
         let local_blob_store = self.blob_store.clone();
         thread::spawn(move || {
-            for entry in register_receiver {
+            for entry in registered {
                 let id = recover_entry(&local_hash_index, &local_blob_store, &entry).unwrap();
                 id_sender.send(id).unwrap();
             }
@@ -405,14 +405,14 @@ impl HatRc {
                        family: &Family,
                        dir_hash: &hash::Hash,
                        dir_ref: blob::ChunkRef,
-                       register_out: mpsc::Sender<hash::Entry>,
-                       recover_out: mpsc::Sender<hash::Entry>)
+                       register_out: &mut Vec<hash::Entry>,
+                       recover_out: &mut Vec<hash::Entry>)
                        -> Result<(Option<Vec<u8>>, i64), HatError> {
         fn recover_tree<B: hash::tree::HashTreeBackend<Err = key::MsgError>>
             (backend: B,
              hash: &hash::Hash,
              pref: blob::ChunkRef,
-             out: mpsc::Sender<hash::Entry>)
+             out: &mut Vec<hash::Entry>)
              -> Result<(Option<Vec<u8>>, i64), HatError> {
             match try!(hash::tree::SimpleHashTreeReader::open(backend, &hash, Some(pref)))
                 .unwrap() {
@@ -429,17 +429,14 @@ impl HatRc {
             let (payload, level) = match file.data_hash {
                 Some(..) => {
                     // Entry is a data leaf. Read the hash tree.
-                    try!(recover_tree(self.hash_backend.clone(),
-                                      &hash,
-                                      pref.clone(),
-                                      recover_out.clone()))
+                    try!(recover_tree(self.hash_backend.clone(), &hash, pref.clone(), recover_out))
                 }
                 None => {
                     try!(self.recover_dir_ref(&family,
                                               &hash,
                                               pref.clone(),
-                                              register_out.clone(),
-                                              recover_out.clone()))
+                                              register_out,
+                                              recover_out))
                 }
             };
             // We register the top hash with the GC (tree nodes are inferred).
@@ -449,7 +446,7 @@ impl HatRc {
                 level: level,
                 payload: payload,
             };
-            register_out.send(r).unwrap();
+            register_out.push(r);
         }
 
         recover_tree(self.hash_backend.clone(), dir_hash, dir_ref, recover_out)

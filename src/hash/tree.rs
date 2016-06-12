@@ -18,7 +18,6 @@
 //! a streaming hash-tree reader.
 
 use std::fmt;
-use std::sync::mpsc;
 
 use capnp;
 use root_capnp;
@@ -342,7 +341,7 @@ impl<B: HashTreeBackend> SimpleHashTreeReader<B> {
         }
     }
 
-    pub fn list_entries(&mut self, out: mpsc::Sender<Entry>) -> Result<(Vec<u8>, i64), B::Err> {
+    pub fn list_entries(&mut self, out: &mut Vec<Entry>) -> Result<(Vec<u8>, i64), B::Err> {
         let mut level = 1;
         let mut metadata = vec![];
         while !self.stack.is_empty() {
@@ -352,13 +351,12 @@ impl<B: HashTreeBackend> SimpleHashTreeReader<B> {
             let hash = Hash { bytes: child.hash.clone() };
             match child.persistent_ref.kind {
                 Kind::TreeLeaf => {
-                    out.send(Entry {
-                            hash: hash,
-                            persistent_ref: Some(child.persistent_ref),
-                            level: 0,
-                            payload: None,
-                        })
-                        .unwrap()
+                    out.push(Entry {
+                        hash: hash,
+                        persistent_ref: Some(child.persistent_ref),
+                        level: 0,
+                        payload: None,
+                    })
                 }
                 Kind::TreeBranch => {
                     let data = try!(self.backend
@@ -372,14 +370,13 @@ impl<B: HashTreeBackend> SimpleHashTreeReader<B> {
                         stack: new_childs,
                         backend: self.backend.clone(),
                     };
-                    let (child_payload, child_level) = try!(next.list_entries(out.clone()));
-                    out.send(Entry {
-                            hash: hash,
-                            persistent_ref: Some(child.persistent_ref),
-                            level: child_level,
-                            payload: Some(child_payload),
-                        })
-                        .unwrap();
+                    let (child_payload, child_level) = try!(next.list_entries(out));
+                    out.push(Entry {
+                        hash: hash,
+                        persistent_ref: Some(child.persistent_ref),
+                        level: child_level,
+                        payload: Some(child_payload),
+                    });
 
                     let my_level = 1 + child_level;
                     assert!(level == 1 || level == my_level);
