@@ -23,13 +23,14 @@ extern crate sodiumoxide;
 #[macro_use]
 extern crate clap;
 
+use std::borrow::ToOwned;
 use std::convert::From;
 use std::path::PathBuf;
-use std::borrow::ToOwned;
+use std::sync::Arc;
 
 use clap::{App, SubCommand};
 
-use hat::blob;
+use hat::backend;
 
 static MAX_BLOB_SIZE: usize = 4 * 1024 * 1024;
 
@@ -93,14 +94,14 @@ fn main() {
     match matches.subcommand() {
         ("resume", Some(_cmd)) => {
             // Setting up the repository triggers automatic resume.
-            let backend = blob::FileBackend::new(blob_dir());
+            let backend = Arc::new(backend::FileBackend::new(blob_dir()));
             hat::Hat::open_repository(PathBuf::from("repo"), backend, MAX_BLOB_SIZE).unwrap();
         }
         ("snapshot", Some(cmd)) => {
             let name = cmd.value_of("NAME").unwrap().to_owned();
             let path = cmd.value_of("PATH").unwrap();
 
-            let backend = blob::FileBackend::new(blob_dir());
+            let backend = Arc::new(backend::FileBackend::new(blob_dir()));
             let hat = hat::Hat::open_repository(PathBuf::from("repo"), backend, MAX_BLOB_SIZE)
                 .unwrap();
 
@@ -116,21 +117,21 @@ fn main() {
             let name = cmd.value_of("NAME").unwrap().to_owned();
             let path = cmd.value_of("PATH").unwrap();
 
-            let backend = blob::FileBackend::new(blob_dir());
+            let backend = Arc::new(backend::FileBackend::new(blob_dir()));
             let hat = hat::Hat::open_repository(PathBuf::from("repo"), backend, MAX_BLOB_SIZE)
                 .unwrap();
 
             hat.checkout_in_dir(name.clone(), PathBuf::from(path)).unwrap();
         }
         ("meta-commit", Some(_cmd)) => {
-            let backend = blob::FileBackend::new(blob_dir());
+            let backend = Arc::new(backend::FileBackend::new(blob_dir()));
             let mut hat = hat::Hat::open_repository(PathBuf::from("repo"), backend, MAX_BLOB_SIZE)
                 .unwrap();
 
             hat.meta_commit().unwrap();
         }
         ("recover", Some(_cmd)) => {
-            let backend = blob::FileBackend::new(blob_dir());
+            let backend = Arc::new(backend::FileBackend::new(blob_dir()));
             let mut hat = hat::Hat::open_repository(PathBuf::from("repo"), backend, MAX_BLOB_SIZE)
                 .unwrap();
 
@@ -139,7 +140,7 @@ fn main() {
         ("commit", Some(cmd)) => {
             let name = cmd.value_of("NAME").unwrap().to_owned();
 
-            let backend = blob::FileBackend::new(blob_dir());
+            let backend = Arc::new(backend::FileBackend::new(blob_dir()));
             let mut hat = hat::Hat::open_repository(PathBuf::from("repo"), backend, MAX_BLOB_SIZE)
                 .unwrap();
 
@@ -149,14 +150,14 @@ fn main() {
             let name = cmd.value_of("NAME").unwrap().to_owned();
             let id = cmd.value_of("ID").unwrap().to_owned();
 
-            let backend = blob::FileBackend::new(blob_dir());
+            let backend = Arc::new(backend::FileBackend::new(blob_dir()));
             let mut hat = hat::Hat::open_repository(PathBuf::from("repo"), backend, MAX_BLOB_SIZE)
                 .unwrap();
 
             hat.deregister_by_name(name, id.parse::<i64>().unwrap()).unwrap();
         }
         ("gc", Some(_cmd)) => {
-            let backend = blob::FileBackend::new(blob_dir());
+            let backend = Arc::new(backend::FileBackend::new(blob_dir()));
             let mut hat = hat::Hat::open_repository(PathBuf::from("repo"), backend, MAX_BLOB_SIZE)
                 .unwrap();
             let (deleted_hashes, live_blobs) = hat.gc().unwrap();

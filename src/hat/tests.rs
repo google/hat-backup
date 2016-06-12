@@ -13,9 +13,9 @@
 // limitations under the License.
 
 use quickcheck;
+use std::sync::Arc;
 
-use blob::StoreBackend;
-use blob::tests::MemoryBackend;
+use backend::{StoreBackend, MemoryBackend};
 use errors::HatError;
 use hat::HatRc;
 use hat::family::Family;
@@ -23,15 +23,15 @@ use key;
 use util::FileIterator;
 
 
-pub fn setup_hat<B: Send + StoreBackend + 'static>(backend: B, poison_after: &[i64]) -> HatRc {
+pub fn setup_hat<B: StoreBackend>(backend: Arc<B>, poison_after: &[i64]) -> HatRc {
     let max_blob_size = 1024 * 1024;
     HatRc::new_for_testing(backend, max_blob_size, poison_after).unwrap()
 }
 
-fn setup_family(poison_after: Option<Vec<i64>>) -> (MemoryBackend, HatRc, Family) {
+fn setup_family(poison_after: Option<Vec<i64>>) -> (Arc<MemoryBackend>, HatRc, Family) {
     let poison = poison_after.unwrap_or(vec![]);
 
-    let backend = MemoryBackend::new();
+    let backend = Arc::new(MemoryBackend::new());
     let hat = setup_hat(backend.clone(), &poison[..]);
 
     let family = "familyname".to_string();

@@ -15,21 +15,15 @@
 //! Combines data chunks into larger blobs to be stored externally.
 
 use std::borrow::Cow;
-use std::collections::BTreeMap;
 
-use std::fs;
 use std::mem;
-use std::io::{Read, Write};
-use std::path::PathBuf;
-
-use std::sync::{mpsc, Arc, Mutex};
+use std::sync::{mpsc, Arc};
 use std::thread;
-
-use rustc_serialize::hex::ToHex;
 
 use capnp;
 use root_capnp;
 
+use backend::StoreBackend;
 use errors::DieselError;
 use tags;
 use util::{FnBox, MsgHandler, Process};
@@ -60,106 +54,6 @@ error_type! {
 
 
 pub type StoreProcess = Process<Msg, Reply, MsgError>;
-
-pub trait StoreBackend {
-    fn store(&mut self, name: &[u8], data: &[u8]) -> Result<(), String>;
-    fn retrieve(&mut self, name: &[u8]) -> Result<Vec<u8>, String>;
-    fn delete(&mut self, name: &[u8]) -> Result<(), String>;
-}
-
-
-#[derive(Clone)]
-pub struct FileBackend {
-    root: PathBuf,
-    read_cache: Arc<Mutex<BTreeMap<Vec<u8>, Result<Vec<u8>, String>>>>,
-    max_cache_size: usize,
-}
-
-impl FileBackend {
-    pub fn new(root: PathBuf) -> FileBackend {
-        FileBackend {
-            root: root,
-            read_cache: Arc::new(Mutex::new(BTreeMap::new())),
-            max_cache_size: 10,
-        }
-    }
-
-    fn guarded_cache_get(&self, name: &[u8]) -> Option<Result<Vec<u8>, String>> {
-        self.read_cache.lock().unwrap().get(name).cloned()
-    }
-
-    fn guarded_cache_delete(&self, name: &[u8]) {
-        self.read_cache.lock().unwrap().remove(name);
-    }
-
-    fn guarded_cache_put(&mut self, name: Vec<u8>, result: Result<Vec<u8>, String>) {
-        let mut cache = self.read_cache.lock().unwrap();
-        if cache.len() >= self.max_cache_size {
-            cache.clear();
-        }
-        cache.insert(name, result);
-    }
-}
-
-impl StoreBackend for FileBackend {
-    fn store(&mut self, name: &[u8], data: &[u8]) -> Result<(), String> {
-        let mut path = self.root.clone();
-        path.push(&name.to_hex());
-
-        let mut file = match fs::File::create(&path) {
-            Err(e) => return Err(e.to_string()),
-            Ok(f) => f,
-        };
-
-        match file.write_all(data) {
-            Err(e) => Err(e.to_string()),
-            Ok(()) => Ok(()),
-        }
-    }
-
-    fn retrieve(&mut self, name: &[u8]) -> Result<Vec<u8>, String> {
-        // Check for key in cache:
-        let value_opt = self.guarded_cache_get(name);
-        if let Some(r) = value_opt {
-            return r;
-        }
-
-        // Read key:
-        let path = {
-            let mut p = self.root.clone();
-            p.push(&name.to_hex());
-            p
-        };
-
-        let mut fd = fs::File::open(&path).unwrap();
-        let mut buf = Vec::new();
-        let res = match fd.read_to_end(&mut buf) {
-            Ok(_) => Ok(buf),
-            Err(e) => Err(e.to_string()),
-        };
-
-        // Update cache to contain key:
-        self.guarded_cache_put(name.to_vec(), res.clone());
-
-        res
-    }
-
-    fn delete(&mut self, name: &[u8]) -> Result<(), String> {
-        let name = name.to_vec();
-        self.guarded_cache_delete(&name);
-
-        let path = {
-            let mut p = self.root.clone();
-            p.push(&name.to_hex());
-            p
-        };
-
-        match fs::remove_file(&path) {
-            Ok(_) => Ok(()),
-            Err(e) => Err(e.to_string()),
-        }
-    }
-}
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub enum Kind {
@@ -256,7 +150,7 @@ pub enum Reply {
 
 
 pub struct Store<B> {
-    backend: B,
+    backend: Arc<B>,
 
     blob_index: BlobIndex,
     blob_desc: BlobDesc,
@@ -268,7 +162,7 @@ pub struct Store<B> {
 }
 
 impl<B: StoreBackend> Store<B> {
-    pub fn new(index: BlobIndex, backend: B, max_blob_size: usize) -> Store<B> {
+    pub fn new(index: BlobIndex, backend: Arc<B>, max_blob_size: usize) -> Store<B> {
         let mut bs = Store {
             backend: backend,
             blob_index: index,
@@ -285,20 +179,6 @@ impl<B: StoreBackend> Store<B> {
         mem::replace(&mut self.blob_desc, self.blob_index.reserve())
     }
 
-    fn backend_store(&mut self, name: &[u8], blob: &[u8]) {
-        match self.backend.store(name, blob) {
-            Ok(()) => (),
-            Err(s) => panic!(s),
-        }
-    }
-
-    fn backend_read(&mut self, name: &[u8]) -> Vec<u8> {
-        match self.backend.retrieve(name) {
-            Ok(data) => data,
-            Err(s) => panic!(s),
-        }
-    }
-
     fn flush(&mut self) {
         if self.blob_data.len() == 0 {
             return;
@@ -310,7 +190,7 @@ impl<B: StoreBackend> Store<B> {
         let old_blob = mem::replace(&mut self.blob_data, Vec::with_capacity(self.max_blob_size));
 
         self.blob_index.in_air(&old_blob_desc);
-        self.backend_store(&old_blob_desc.name[..], &old_blob[..]);
+        self.backend.store(&old_blob_desc.name[..], &old_blob[..]).expect("Store operation failed");
         self.blob_index.commit_done(&old_blob_desc);
 
         // Go through callbacks
@@ -390,17 +270,19 @@ impl<B: StoreBackend> MsgHandler<Msg, Reply> for Store<B> {
                 if id.offset == 0 && id.length == 0 {
                     return reply_ok!(Reply::RetrieveOk(vec![]));
                 }
-                let blob = self.backend_read(&id.blob_id[..]);
+                let blob = self.backend.retrieve(&id.blob_id[..]).expect("Read operation failed");
                 let chunk = &blob[id.offset..id.offset + id.length];
 
                 reply_ok!(Reply::RetrieveOk(chunk.to_vec()))
             }
             Msg::StoreNamed(name, data) => {
-                self.backend.store(name.as_bytes(), &data[..]).ok();
+                self.backend.store(name.as_bytes(), &data[..]).expect("Store operation failed");
                 reply_ok!(Reply::StoreNamedOk(name))
             }
             Msg::RetrieveNamed(name) => {
-                reply_ok!(Reply::RetrieveOk(self.backend_read(name.as_bytes())))
+                reply_ok!(Reply::RetrieveOk(
+                    self.backend.retrieve(name.as_bytes()).expect("Read operation failed")
+                ))
             }
             Msg::Recover(chunk) => {
                 if chunk.offset == 0 && chunk.length == 0 {
@@ -446,77 +328,16 @@ impl<B: StoreBackend> MsgHandler<Msg, Reply> for Store<B> {
 pub mod tests {
     use super::*;
 
+    use backend::{StoreBackend, MemoryBackend};
     use util::Process;
 
-    use std::sync::{Arc, Mutex};
-    use std::collections::BTreeMap;
+    use std::sync::Arc;
     use quickcheck;
-
-    #[derive(Clone)]
-    pub struct MemoryBackend {
-        files: Arc<Mutex<BTreeMap<Vec<u8>, Vec<u8>>>>,
-    }
-
-    impl MemoryBackend {
-        pub fn new() -> MemoryBackend {
-            MemoryBackend { files: Arc::new(Mutex::new(BTreeMap::new())) }
-        }
-
-        fn guarded_insert(&mut self, key: Vec<u8>, value: Vec<u8>) -> Result<(), String> {
-            let mut guarded_files = self.files.lock().unwrap();
-            if guarded_files.contains_key(&key) {
-                return Err(format!("Key already exists: '{:?}'", key));
-            }
-            guarded_files.insert(key, value);
-            Ok(())
-        }
-
-        fn guarded_retrieve(&mut self, key: &[u8]) -> Result<Vec<u8>, String> {
-            let value_opt = self.files.lock().unwrap().get(&key.to_vec()).map(|v| v.clone());
-            value_opt.map(|v| Ok(v)).unwrap_or_else(|| Err(format!("Unknown key: '{:?}'", key)))
-        }
-
-        fn guarded_delete(&mut self, key: &[u8]) -> Result<(), String> {
-            let mut guarded_files = self.files.lock().unwrap();
-            guarded_files.remove(key);
-            Ok(())
-        }
-    }
-
-    impl StoreBackend for MemoryBackend {
-        fn store(&mut self, name: &[u8], data: &[u8]) -> Result<(), String> {
-            self.guarded_insert(name.to_vec(), data.to_vec())
-        }
-
-        fn retrieve(&mut self, name: &[u8]) -> Result<Vec<u8>, String> {
-            self.guarded_retrieve(name)
-        }
-
-        fn delete(&mut self, name: &[u8]) -> Result<(), String> {
-            self.guarded_delete(name)
-        }
-    }
-
-    #[derive(Clone)]
-    pub struct DevNullBackend;
-
-    impl StoreBackend for DevNullBackend {
-        fn store(&mut self, _name: &[u8], _data: &[u8]) -> Result<(), String> {
-            Ok(())
-        }
-        fn retrieve(&mut self, name: &[u8]) -> Result<Vec<u8>, String> {
-            Err(format!("Unknown key: '{:?}'", name))
-        }
-        fn delete(&mut self, _name: &[u8]) -> Result<(), String> {
-            Ok(())
-        }
-    }
-
 
     #[test]
     fn identity() {
         fn prop(chunks: Vec<Vec<u8>>) -> bool {
-            let mut backend = MemoryBackend::new();
+            let backend = Arc::new(MemoryBackend::new());
 
             let local_backend = backend.clone();
             let blob_index = BlobIndex::new_for_testing().unwrap();
@@ -564,7 +385,7 @@ pub mod tests {
     #[test]
     fn identity_with_excessive_flushing() {
         fn prop(chunks: Vec<Vec<u8>>) -> bool {
-            let mut backend = MemoryBackend::new();
+            let backend = Arc::new(MemoryBackend::new());
 
             let local_backend = backend.clone();
             let blob_index = BlobIndex::new_for_testing().unwrap();

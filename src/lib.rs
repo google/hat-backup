@@ -46,14 +46,15 @@ extern crate diesel;
 extern crate quickcheck;
 
 // Submodules
-pub mod blob;
-pub mod errors;
-pub mod gc;
-pub mod hash;
+pub mod backend;
+mod blob;
+mod errors;
+mod gc;
+mod hash;
 pub mod hat;
-pub mod key;
-pub mod snapshot;
-pub mod tags;
+mod key;
+mod snapshot;
+mod tags;
 mod util;
 
 // Re-export the main type
