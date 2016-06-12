@@ -209,9 +209,8 @@ impl<Msg: 'static + Send, Reply: 'static + Send, E> Process<Msg, Reply, E> {
         }
 
         if let Err(e) = self.sender.send((InternalMsg::Reset, sender)) {
-            return Err(From::from(
-                format!("Could not send Reset message; process looks dead: {}", e)
-            ));
+            return Err(From::from(format!("Could not send Reset message; process looks dead: {}",
+                                          e)));
         }
 
         match receiver.recv() {

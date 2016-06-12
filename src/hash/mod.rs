@@ -32,6 +32,10 @@ use errors::{DieselError, LockError, RetryError};
 mod schema;
 pub mod tree;
 
+#[cfg(test)]
+mod tests;
+#[cfg(all(test, feature = "benchmarks"))]
+mod benchmarks;
 
 pub static HASHBYTES: usize = sha512::DIGESTBYTES;
 
