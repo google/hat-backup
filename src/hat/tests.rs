@@ -36,7 +36,7 @@ fn setup_family(poison_after: Option<Vec<i64>>)
     let hat = setup_hat(backend.clone(), &poison[..]);
 
     let family = "familyname".to_string();
-    let fam = hat.open_family_with_poison(family.clone(), poison.last().cloned()).unwrap();
+    let fam = hat.open_family_with_poison(family, poison.last().cloned()).unwrap();
 
     (backend, hat, fam)
 }

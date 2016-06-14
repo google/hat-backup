@@ -24,9 +24,8 @@ fn identity() {
     fn prop(chunks: Vec<Vec<u8>>) -> bool {
         let backend = Arc::new(MemoryBackend::new());
 
-        let local_backend = backend.clone();
         let blob_index = Arc::new(BlobIndex::new_for_testing().unwrap());
-        let bs_p = BlobStore::new(blob_index, local_backend, 1024);
+        let bs_p = BlobStore::new(blob_index, backend.clone(), 1024);
 
         let mut ids = Vec::new();
         for chunk in chunks.iter() {
@@ -62,9 +61,8 @@ fn identity_with_excessive_flushing() {
     fn prop(chunks: Vec<Vec<u8>>) -> bool {
         let backend = Arc::new(MemoryBackend::new());
 
-        let local_backend = backend.clone();
         let blob_index = Arc::new(BlobIndex::new_for_testing().unwrap());
-        let bs_p = BlobStore::new(blob_index, local_backend, 1024);
+        let bs_p = BlobStore::new(blob_index, backend.clone(), 1024);
 
         let mut ids = Vec::new();
         for chunk in chunks.iter() {

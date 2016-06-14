@@ -121,7 +121,7 @@ fn main() {
             let hat = hat::Hat::open_repository(PathBuf::from("repo"), backend, MAX_BLOB_SIZE)
                 .unwrap();
 
-            hat.checkout_in_dir(name.clone(), PathBuf::from(path)).unwrap();
+            hat.checkout_in_dir(name, PathBuf::from(path)).unwrap();
         }
         ("meta-commit", Some(_cmd)) => {
             let backend = Arc::new(backend::FileBackend::new(blob_dir()));
