@@ -178,7 +178,11 @@ impl<B: StoreBackend> StoreInner<B> {
         self.reserve_new_blob();
     }
 
-    fn store(&mut self, mut chunk: Vec<u8>, kind: Kind, callback: Box<FnBox<ChunkRef, ()>>) -> ChunkRef {
+    fn store(&mut self,
+             mut chunk: Vec<u8>,
+             kind: Kind,
+             callback: Box<FnBox<ChunkRef, ()>>)
+             -> ChunkRef {
         if chunk.is_empty() {
             let id = ChunkRef {
                 blob_id: vec![0],
@@ -188,7 +192,7 @@ impl<B: StoreBackend> StoreInner<B> {
             };
             let cb_id = id.clone();
             thread::spawn(move || callback.call(cb_id));
-            return id
+            return id;
         }
 
         let id = ChunkRef {
@@ -213,7 +217,7 @@ impl<B: StoreBackend> StoreInner<B> {
         match self.backend.retrieve(&id.blob_id[..]) {
             Ok(Some(blob)) => Ok(Some(blob[id.offset..id.offset + id.length].to_vec())),
             Ok(None) => Ok(None),
-            Err(e) => Err(e)
+            Err(e) => Err(e),
         }
     }
 
@@ -236,9 +240,9 @@ impl<B: StoreBackend> StoreInner<B> {
 
     fn tag(&mut self, chunk: ChunkRef, tag: tags::Tag) {
         self.blob_index.tag(&BlobDesc {
-            id: 0,
-            name: chunk.blob_id,
-        },
+                                id: 0,
+                                name: chunk.blob_id,
+                            },
                             tag);
     }
 
@@ -261,13 +265,17 @@ impl<B: StoreBackend> BlobStore<B> {
         BlobStore::new_with_poison(index, backend, max_blob_size, None)
     }
 
-    pub fn new_with_poison(index: Arc<BlobIndex>, backend: Arc<B>, max_blob_size: usize, poison_after: Option<i64>) -> BlobStore<B> {
-        BlobStore(Arc::new(Mutex::new((StoreInner::new(index, backend, max_blob_size), poison_after))))
+    pub fn new_with_poison(index: Arc<BlobIndex>,
+                           backend: Arc<B>,
+                           max_blob_size: usize,
+                           poison_after: Option<i64>)
+                           -> BlobStore<B> {
+        BlobStore(Arc::new(Mutex::new((StoreInner::new(index, backend, max_blob_size),
+                                       poison_after))))
     }
 
     /// Reset in-memory state of a poisoned process, making it available again.
-    pub fn reset(&self) -> Result<(), MsgError>
-    {
+    pub fn reset(&self) -> Result<(), MsgError> {
         let mut guard = try!(self.lock_ignore_poison());
         if guard.1 != Some(0) {
             return Err(From::from("This process has not been poisoned".to_string()));
@@ -302,7 +310,11 @@ impl<B: StoreBackend> BlobStore<B> {
     /// Store a new data chunk into the current blob. The callback is triggered after the blob
     /// containing the chunk has been committed to persistent storage (it is then safe to use the
     /// `ChunkRef` as persistent reference).
-    pub fn store(&self, chunk: Vec<u8>, kind: Kind, callback: Box<FnBox<ChunkRef, ()>>) -> Result<ChunkRef, LockError> {
+    pub fn store(&self,
+                 chunk: Vec<u8>,
+                 kind: Kind,
+                 callback: Box<FnBox<ChunkRef, ()>>)
+                 -> Result<ChunkRef, LockError> {
         let mut guard = try!(self.lock());
         let res = guard.0.store(chunk, kind, callback);
         drop(guard);

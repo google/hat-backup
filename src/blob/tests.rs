@@ -30,9 +30,9 @@ fn identity() {
 
         let mut ids = Vec::new();
         for chunk in chunks.iter() {
-            ids.push((bs_p.store(chunk.to_owned(),
-                             Kind::TreeLeaf,
-                             Box::new(move |_| {})).unwrap(), chunk));
+            ids.push((bs_p.store(chunk.to_owned(), Kind::TreeLeaf, Box::new(move |_| {}))
+                .unwrap(),
+                      chunk));
         }
 
         assert!(bs_p.flush().is_ok());
@@ -68,9 +68,9 @@ fn identity_with_excessive_flushing() {
 
         let mut ids = Vec::new();
         for chunk in chunks.iter() {
-            ids.push((bs_p.store(chunk.to_owned(),
-                             Kind::TreeLeaf,
-                             Box::new(move |_| {})).unwrap(), chunk));
+            ids.push((bs_p.store(chunk.to_owned(), Kind::TreeLeaf, Box::new(move |_| {}))
+                .unwrap(),
+                      chunk));
             assert!(bs_p.flush().is_ok());
             let &(ref id, chunk) = ids.last().unwrap();
             assert_eq!(bs_p.retrieve(id).unwrap().unwrap(), &chunk[..]);

@@ -60,12 +60,7 @@ pub trait HashTreeBackend: Clone {
     fn fetch_chunk(&self, &Hash, Option<ChunkRef>) -> Result<Option<Vec<u8>>, Self::Err>;
     fn fetch_payload(&self, &Hash) -> Result<Option<Vec<u8>>, Self::Err>;
     fn fetch_persistent_ref(&self, &Hash) -> Result<Option<ChunkRef>, Self::Err>;
-    fn insert_chunk(&self,
-                    &Hash,
-                    i64,
-                    Option<Vec<u8>>,
-                    Vec<u8>)
-                    -> Result<ChunkRef, Self::Err>;
+    fn insert_chunk(&self, &Hash, i64, Option<Vec<u8>>, Vec<u8>) -> Result<ChunkRef, Self::Err>;
 }
 
 

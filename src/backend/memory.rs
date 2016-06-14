@@ -38,7 +38,7 @@ impl MemoryBackend {
     fn guarded_retrieve(&self, key: &[u8]) -> Result<Option<Vec<u8>>, String> {
         match self.files.lock() {
             Err(e) => Err(e.to_string()),
-            Ok(map) => Ok(map.get(key).map(|v| v.clone()))
+            Ok(map) => Ok(map.get(key).map(|v| v.clone())),
         }
     }
 
