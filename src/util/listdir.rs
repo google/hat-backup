@@ -19,9 +19,8 @@ use std::io;
 use std::iter;
 use std::path::PathBuf;
 use std::sync::mpsc;
-use std::sync::Arc;
 
-use threadpool;
+use scoped_threadpool;
 
 
 pub trait HasPath {
@@ -34,79 +33,77 @@ impl HasPath for fs::DirEntry {
     }
 }
 
-pub trait PathHandler<D>: Send + Sync + 'static {
+pub trait PathHandler<P: Send>: Sync {
     type DirItem: HasPath;
     type DirIter: iter::Iterator<Item = io::Result<Self::DirItem>>;
 
     fn read_dir(&self, &PathBuf) -> io::Result<Self::DirIter>;
-    fn handle_path(&self, &D, PathBuf) -> Option<D>;
-}
+    fn handle_path(&self, &P, &PathBuf) -> Option<P>;
 
-pub fn iterate_recursively<P: Send + 'static, W: PathHandler<P>>(first: (PathBuf, P),
-                                                                 worker: &Arc<W>) {
-    let threads = 10;
-    let (push_ch, work_ch) = mpsc::sync_channel(threads);
-    let pool = threadpool::ThreadPool::new(threads);
+    fn recurse(&self, root: PathBuf, payload: P) {
+        let threads = 10;
+        let (push_ch, work_ch) = mpsc::sync_channel(threads);
+        let mut pool = scoped_threadpool::Pool::new(threads as u32);
 
-    enum Work<P> {
-        Done,
-        More(PathBuf, P),
-    }
+        enum Work<P> {
+            Done,
+            More(PathBuf, P),
+        }
 
-    // Insert the first task into the queue:
-    let (root, payload) = first;
-    push_ch.send(Work::More(root, payload)).unwrap();
-    let mut active_workers = 0;
+        // Insert the first task into the queue:
+        push_ch.send(Work::More(root, payload)).unwrap();
+        let mut active_workers = 0;
 
-    // Master thread:
-    loop {
-        match work_ch.recv() {
-            Err(_) => unreachable!(),
-            Ok(Work::Done) => {
-                // A worker has completed a task.
-                // We are done when no more workers are active (i.e. all tasks are done):
-                active_workers -= 1;
-                if active_workers == 0 {
-                    break;
-                }
-            }
-            Ok(Work::More(root, payload)) => {
-                // Execute the task in a pool thread:
-                active_workers += 1;
-
-                let worker = worker.clone();
-                let push_ch_ = push_ch.clone();
-                pool.execute(move || {
-                    match worker.read_dir(&root) {
-                        Ok(dir) => {
-                            for entry_res in dir {
-                                match entry_res {
-                                    Ok(entry) => {
-                                        let file = entry.path();
-                                        let path = PathBuf::from(file.to_str().unwrap());
-                                        let dir_opt = worker.handle_path(&payload, path);
-                                        if let Some(dir) = dir_opt {
-                                            push_ch_.send(Work::More(file, dir)).unwrap();
-                                        }
-                                    }
-                                    Err(err) => {
-                                        // For some reason, we failed to read this entry.
-                                        // Just skip it and continue with the next.
-                                        warn!("Could not read directory entry: {}", err);
-                                    }
-                                }
-                            }
-                        }
-                        Err(err) => {
-                            // Cannot read this directory.
-                            warn!("Skipping unreadable directory {:?}: {}", root, err);
+        // Master thread:
+        pool.scoped(|scoped| {
+            loop {
+                match work_ch.recv() {
+                    Err(_) => unreachable!(),
+                    Ok(Work::Done) => {
+                        // A worker has completed a task.
+                        // We are done when no more workers are active (i.e. all tasks are done):
+                        active_workers -= 1;
+                        if active_workers == 0 {
+                            break;
                         }
                     }
-                    // Count this pool thread as idle:
-                    push_ch_.send(Work::Done).unwrap();
-                });
+                    Ok(Work::More(root, payload)) => {
+                        // Execute the task in a pool thread:
+                        active_workers += 1;
+
+                        let push_ch_ = push_ch.clone();
+                        scoped.execute(move || {
+                            match self.read_dir(&root) {
+                                Ok(dir) => {
+                                    for entry_res in dir {
+                                        match entry_res {
+                                            Ok(entry) => {
+                                                let path = entry.path();
+                                                let dir_opt = self.handle_path(&payload, &path);
+                                                if let Some(dir) = dir_opt {
+                                                    push_ch_.send(Work::More(path, dir)).unwrap();
+                                                }
+                                            }
+                                            Err(err) => {
+                                                // For some reason, we failed to read this entry.
+                                                // Just skip it and continue with the next.
+                                                warn!("Could not read directory entry: {}", err);
+                                            }
+                                        }
+                                    }
+                                }
+                                Err(err) => {
+                                    // Cannot read this directory.
+                                    warn!("Skipping unreadable directory {:?}: {}", root, err);
+                                }
+                            }
+                            // Count this pool thread as idle:
+                            push_ch_.send(Work::Done).unwrap();
+                        });
+                    }
+                }
             }
-        }
+        });
     }
 }
 
@@ -117,7 +114,7 @@ mod tests {
     use std::collections::btree_map;
     use std::io;
     use std::path::PathBuf;
-    use std::sync::{Arc, Mutex};
+    use std::sync::Mutex;
     use std::vec;
 
     use super::*;
@@ -180,14 +177,14 @@ mod tests {
             Ok(self.list(path))
         }
 
-        fn handle_path(&self, p_opt: &ParentOpt, path: PathBuf) -> Option<ParentOpt> {
+        fn handle_path(&self, p_opt: &ParentOpt, path: &PathBuf) -> Option<ParentOpt> {
             assert_eq!(self.visit(path.clone()), Some(false));
 
             if let &Some(ref p) = p_opt {
                 assert!(path.parent() == Some(p));
             }
 
-            self.list(&path).next().map(|_| Some(path))
+            self.list(path).next().map(|_| Some(path.clone()))
         }
     }
 
@@ -215,8 +212,7 @@ mod tests {
                                  "/empty/9/"];
 
         let handler = StubPathHandler::new(paths.iter().map(PathBuf::from).collect());
-        let handler = Arc::new(handler);
-        iterate_recursively((PathBuf::from("/"), None), &handler);
+        handler.recurse(PathBuf::from("/"), None);
 
         assert_eq!(handler.not_visited(), vec![PathBuf::from("/")]);
     }

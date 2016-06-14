@@ -27,9 +27,9 @@ quickcheck = "*"
 rand = "*"
 rustc-serialize = "*"
 sodiumoxide = "*"
-threadpool = "*"
 time = "*"
 void = "1"
+scoped_threadpool = "0.1.*"
 
 
 [dependencies.diesel]

@@ -30,7 +30,7 @@ extern crate capnp;
 extern crate sodiumoxide;
 extern crate libsodium_sys;
 extern crate rustc_serialize;
-extern crate threadpool;
+extern crate scoped_threadpool;
 extern crate void;
 
 // Error definition macros.

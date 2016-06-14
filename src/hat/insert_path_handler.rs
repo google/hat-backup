@@ -97,7 +97,7 @@ impl<B: StoreBackend> PathHandler<Option<u64>> for InsertPathHandler<B> {
         fs::read_dir(path)
     }
 
-    fn handle_path(&self, parent: &Option<u64>, path: PathBuf) -> Option<Option<u64>> {
+    fn handle_path(&self, parent: &Option<u64>, path: &PathBuf) -> Option<Option<u64>> {
         let count = self.count.fetch_add(1, atomic::Ordering::SeqCst) + 1;
 
         if count % 16 == 0 {
@@ -119,7 +119,7 @@ impl<B: StoreBackend> PathHandler<Option<u64>> for InsertPathHandler<B> {
                     return None;
                 }
                 let is_directory = file_entry.is_directory();
-                let local_root = path;
+                let local_root = path.clone();
                 let full_path = file_entry.full_path.clone();
 
                 match self.key_store
