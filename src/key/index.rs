@@ -18,7 +18,7 @@ use diesel;
 use diesel::prelude::*;
 use diesel::sqlite::SqliteConnection;
 
-use std::sync::{Arc, Mutex, MutexGuard};
+use std::sync::{Mutex, MutexGuard};
 use time::Duration;
 
 use blob;
@@ -47,8 +47,7 @@ pub struct Entry {
     pub data_length: Option<u64>,
 }
 
-#[derive(Clone)]
-pub struct KeyIndex(Arc<Mutex<InternalKeyIndex>>);
+pub struct KeyIndex(Mutex<InternalKeyIndex>);
 
 pub struct InternalKeyIndex {
     conn: SqliteConnection,
@@ -259,7 +258,7 @@ impl InternalKeyIndex {
 
 impl KeyIndex {
     pub fn new(path: &str) -> Result<KeyIndex, DieselError> {
-        InternalKeyIndex::new(path).map(|index| KeyIndex(Arc::new(Mutex::new(index))))
+        InternalKeyIndex::new(path).map(|index| KeyIndex(Mutex::new(index)))
     }
 
     #[cfg(test)]

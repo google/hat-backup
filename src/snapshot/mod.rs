@@ -14,7 +14,7 @@
 
 //! Local state for known snapshots.
 
-use std::sync::{Arc, Mutex, MutexGuard};
+use std::sync::{Mutex, MutexGuard};
 
 use diesel;
 use diesel::prelude::*;
@@ -60,8 +60,7 @@ pub struct InternalSnapshotIndex {
     conn: SqliteConnection,
 }
 
-#[derive(Clone)]
-pub struct SnapshotIndex(Arc<Mutex<InternalSnapshotIndex>>);
+pub struct SnapshotIndex(Mutex<InternalSnapshotIndex>);
 
 
 fn tag_to_work_status(tag: tags::Tag) -> WorkStatus {
@@ -350,7 +349,7 @@ impl InternalSnapshotIndex {
 
 impl SnapshotIndex {
     pub fn new(path: &str) -> Result<SnapshotIndex, DieselError> {
-        InternalSnapshotIndex::new(path).map(|index| SnapshotIndex(Arc::new(Mutex::new(index))))
+        InternalSnapshotIndex::new(path).map(|index| SnapshotIndex(Mutex::new(index)))
     }
 
     #[cfg(test)]

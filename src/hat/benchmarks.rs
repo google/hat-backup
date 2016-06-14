@@ -22,7 +22,7 @@ use hat::tests::{setup_hat, entry};
 use util::FileIterator;
 
 
-fn setup_family() -> (HatRc, Family) {
+fn setup_family() -> (HatRc<DevNullBackend>, Family<DevNullBackend>) {
     let empty = vec![];
     let backend = Arc::new(DevNullBackend);
     let hat = setup_hat(backend, &empty[..]);

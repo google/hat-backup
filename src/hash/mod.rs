@@ -14,7 +14,7 @@
 
 //! Local state for known hashes and their external location (blob reference).
 
-use std::sync::{Arc, Mutex, MutexGuard};
+use std::sync::{Mutex, MutexGuard};
 use time::Duration;
 
 use diesel;
@@ -39,8 +39,7 @@ mod benchmarks;
 
 pub static HASHBYTES: usize = sha512::DIGESTBYTES;
 
-#[derive(Clone)]
-pub struct HashIndex(Arc<Mutex<IndexInner>>);
+pub struct HashIndex(Mutex<IndexInner>);
 type IndexInner = (InternalHashIndex, Option<i64>);
 
 
@@ -504,7 +503,7 @@ impl HashIndex {
     }
 
     fn new_with_poison(path: &str, poison: Option<i64>) -> Result<HashIndex, DieselError> {
-        InternalHashIndex::new(path).map(|index| HashIndex(Arc::new(Mutex::new((index, poison)))))
+        InternalHashIndex::new(path).map(|index| HashIndex(Mutex::new((index, poison))))
     }
 
     fn lock_ignore_poison(&self) -> Result<MutexGuard<IndexInner>, LockError> {

@@ -46,7 +46,7 @@ impl MemoryBackend {
 impl HashTreeBackend for MemoryBackend {
     type Err = key::MsgError;
 
-    fn fetch_chunk(&mut self,
+    fn fetch_chunk(&self,
                    hash: &Hash,
                    ref_opt: Option<ChunkRef>)
                    -> Result<Option<Vec<u8>>, Self::Err> {
@@ -58,12 +58,12 @@ impl HashTreeBackend for MemoryBackend {
         Ok(guarded_chunks.get(&hash.bytes).map(|&(_, _, ref chunk)| chunk.clone()))
     }
 
-    fn fetch_payload(&mut self, hash: &Hash) -> Result<Option<Vec<u8>>, Self::Err> {
+    fn fetch_payload(&self, hash: &Hash) -> Result<Option<Vec<u8>>, Self::Err> {
         let guarded_chunks = self.chunks.lock().unwrap();
         Ok(guarded_chunks.get(&hash.bytes).and_then(|&(_, ref payload, _)| payload.clone()))
     }
 
-    fn fetch_persistent_ref(&mut self, hash: &Hash) -> Result<Option<ChunkRef>, Self::Err> {
+    fn fetch_persistent_ref(&self, hash: &Hash) -> Result<Option<ChunkRef>, Self::Err> {
         let guarded_chunks = self.chunks.lock().unwrap();
         match guarded_chunks.get(&hash.bytes) {
             Some(&(ref level, _, ref chunk)) => {
@@ -82,7 +82,7 @@ impl HashTreeBackend for MemoryBackend {
         }
     }
 
-    fn insert_chunk(&mut self,
+    fn insert_chunk(&self,
                     hash: &Hash,
                     level: i64,
                     payload: Option<Vec<u8>>,

@@ -21,6 +21,7 @@ use std::str;
 use std::sync::{Mutex, atomic};
 use time;
 
+use backend::StoreBackend;
 use key;
 use util::{PathHandler, FileIterator};
 
@@ -72,14 +73,14 @@ impl FileEntry {
     }
 }
 
-pub struct InsertPathHandler {
+pub struct InsertPathHandler<B: StoreBackend> {
     count: atomic::AtomicIsize,
     last_print: Mutex<time::Timespec>,
-    key_store: Mutex<key::StoreProcess<FileIterator>>,
+    key_store: Mutex<key::StoreProcess<FileIterator, B>>,
 }
 
-impl InsertPathHandler {
-    pub fn new(key_store: key::StoreProcess<FileIterator>) -> InsertPathHandler {
+impl<B: StoreBackend> InsertPathHandler<B> {
+    pub fn new(key_store: key::StoreProcess<FileIterator, B>) -> InsertPathHandler<B> {
         InsertPathHandler {
             count: atomic::AtomicIsize::new(0),
             last_print: Mutex::new(time::now().to_timespec()),
@@ -88,7 +89,7 @@ impl InsertPathHandler {
     }
 }
 
-impl PathHandler<Option<u64>> for InsertPathHandler {
+impl<B: StoreBackend> PathHandler<Option<u64>> for InsertPathHandler<B> {
     type DirItem = fs::DirEntry;
     type DirIter = fs::ReadDir;
 

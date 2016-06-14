@@ -12,55 +12,63 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::sync::Arc;
+
+use backend::StoreBackend;
 use blob;
 use errors::RetryError;
 use hash;
 use key::MsgError;
 use hash::tree::HashTreeBackend;
 
-#[derive(Clone)]
-pub struct HashStoreBackend {
-    hash_index: hash::HashIndex,
-    blob_store: blob::StoreProcess,
+pub struct HashStoreBackend<B> {
+    hash_index: Arc<hash::HashIndex>,
+    blob_store: Arc<blob::BlobStore<B>>,
+}
+impl<B> Clone for HashStoreBackend<B> {
+    fn clone(&self) -> HashStoreBackend<B> {
+        HashStoreBackend {
+            hash_index: self.hash_index.clone(),
+            blob_store: self.blob_store.clone(),
+        }
+    }
 }
 
-impl HashStoreBackend {
-    pub fn new(hash_index: hash::HashIndex, blob_store: blob::StoreProcess) -> HashStoreBackend {
+impl<B: StoreBackend> HashStoreBackend<B> {
+    pub fn new(hash_index: Arc<hash::HashIndex>, blob_store: Arc<blob::BlobStore<B>>) -> HashStoreBackend<B> {
         HashStoreBackend {
             hash_index: hash_index,
             blob_store: blob_store,
         }
     }
 
-    fn fetch_chunk_from_hash(&mut self, hash: &hash::Hash) -> Result<Option<Vec<u8>>, MsgError> {
+    fn fetch_chunk_from_hash(&self, hash: &hash::Hash) -> Result<Option<Vec<u8>>, MsgError> {
         assert!(!hash.bytes.is_empty());
         match try!(self.hash_index.fetch_persistent_ref(hash)) {
-            Some(chunk_ref) => self.fetch_chunk_from_persistent_ref(chunk_ref),
-            _ => Ok(None),  // TODO: Do we need to distinguish `missing` from `unknown ref`?
+            None => Ok(None),
+            Some(chunk_ref) => self.fetch_chunk_from_persistent_ref(&chunk_ref)
         }
     }
 
-    fn fetch_chunk_from_persistent_ref(&mut self,
-                                       chunk_ref: blob::ChunkRef)
+    fn fetch_chunk_from_persistent_ref(&self,
+                                       chunk_ref: &blob::ChunkRef)
                                        -> Result<Option<Vec<u8>>, MsgError> {
-        match try!(self.blob_store.send_reply(blob::Msg::Retrieve(chunk_ref))) {
-            blob::Reply::RetrieveOk(chunk) => Ok(Some(chunk)),
-            _ => Ok(None),
-        }
+        let res = try!(self.blob_store.retrieve(chunk_ref));
+        Ok(res)
     }
 }
 
-impl HashTreeBackend for HashStoreBackend {
+impl<B: StoreBackend> HashTreeBackend for HashStoreBackend<B> {
     type Err = MsgError;
 
-    fn fetch_chunk(&mut self,
+    fn fetch_chunk(&self,
                    hash: &hash::Hash,
                    persistent_ref: Option<blob::ChunkRef>)
                    -> Result<Option<Vec<u8>>, MsgError> {
         assert!(!hash.bytes.is_empty());
 
         let data_opt = if let Some(r) = persistent_ref {
-            try!(self.fetch_chunk_from_persistent_ref(r))
+            try!(self.fetch_chunk_from_persistent_ref(&r))
         } else {
             try!(self.fetch_chunk_from_hash(&hash))
         };
@@ -78,7 +86,7 @@ impl HashTreeBackend for HashStoreBackend {
         }))
     }
 
-    fn fetch_persistent_ref(&mut self,
+    fn fetch_persistent_ref(&self,
                             hash: &hash::Hash)
                             -> Result<Option<blob::ChunkRef>, MsgError> {
         assert!(!hash.bytes.is_empty());
@@ -92,14 +100,14 @@ impl HashTreeBackend for HashStoreBackend {
         }
     }
 
-    fn fetch_payload(&mut self, hash: &hash::Hash) -> Result<Option<Vec<u8>>, MsgError> {
+    fn fetch_payload(&self, hash: &hash::Hash) -> Result<Option<Vec<u8>>, MsgError> {
         match try!(self.hash_index.fetch_payload(hash)) {
             Some(p) => Ok(p), // done
             None => Ok(None), // done
         }
     }
 
-    fn insert_chunk(&mut self,
+    fn insert_chunk(&self,
                     hash: &hash::Hash,
                     level: i64,
                     payload: Option<Vec<u8>>,
@@ -133,14 +141,10 @@ impl HashTreeBackend for HashStoreBackend {
                 } else {
                     blob::Kind::TreeBranch
                 };
-                match try!(self.blob_store.send_reply(blob::Msg::Store(chunk, kind, callback))) {
-                    blob::Reply::StoreOk(chunk_ref) => {
-                        hash_entry.persistent_ref = Some(chunk_ref.clone());
-                        try!(self.hash_index.update_reserved(hash_entry));
-                        Ok(chunk_ref)
-                    }
-                    _ => Err(From::from("Unexpected reply for message Store from BlobStore.")),
-                }
+                let chunk_ref = try!(self.blob_store.store(chunk, kind, callback));
+                hash_entry.persistent_ref = Some(chunk_ref.clone());
+                try!(self.hash_index.update_reserved(hash_entry));
+                Ok(chunk_ref)
             }
         }
     }

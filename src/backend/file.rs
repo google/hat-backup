@@ -24,7 +24,7 @@ use backend::StoreBackend;
 
 pub struct FileBackend {
     root: PathBuf,
-    read_cache: Mutex<BTreeMap<Vec<u8>, Result<Vec<u8>, String>>>,
+    read_cache: Mutex<BTreeMap<Vec<u8>, Result<Option<Vec<u8>>, String>>>,
     max_cache_size: usize,
 }
 
@@ -37,15 +37,38 @@ impl FileBackend {
         }
     }
 
-    fn guarded_cache_get(&self, name: &[u8]) -> Option<Result<Vec<u8>, String>> {
-        self.read_cache.lock().unwrap().get(name).cloned()
+    fn guarded_cache_get(&self, name: &[u8]) -> Option<Result<Option<Vec<u8>>, String>> {
+        match self.read_cache.lock() {
+            Err(e) => Some(Err(e.to_string())),
+            Ok(cache) => cache.get(name).map(|v| v.clone())
+        }
+    }
+
+    fn get(&self, name: &[u8]) -> Result<Option<Vec<u8>>, String> {
+        // Read key:
+        let path = {
+            let mut p = self.root.clone();
+            p.push(&name.to_hex());
+            p
+        };
+
+        match fs::File::open(&path) {
+            Err(_) => Ok(None),
+            Ok(mut fd) => {
+                let mut buf = Vec::new();
+                match fd.read_to_end(&mut buf) {
+                    Ok(_) => Ok(Some(buf)),
+                    Err(e) => Err(e.to_string()),
+                }
+            }
+        }
     }
 
     fn guarded_cache_delete(&self, name: &[u8]) {
         self.read_cache.lock().unwrap().remove(name);
     }
 
-    fn guarded_cache_put(&self, name: Vec<u8>, result: Result<Vec<u8>, String>) {
+    fn guarded_cache_put(&self, name: Vec<u8>, result: Result<Option<Vec<u8>>, String>) {
         let mut cache = self.read_cache.lock().unwrap();
         if cache.len() >= self.max_cache_size {
             cache.clear();
@@ -70,26 +93,14 @@ impl StoreBackend for FileBackend {
         }
     }
 
-    fn retrieve(&self, name: &[u8]) -> Result<Vec<u8>, String> {
+    fn retrieve(&self, name: &[u8]) -> Result<Option<Vec<u8>>, String> {
         // Check for key in cache:
         let value_opt = self.guarded_cache_get(name);
         if let Some(r) = value_opt {
             return r;
         }
 
-        // Read key:
-        let path = {
-            let mut p = self.root.clone();
-            p.push(&name.to_hex());
-            p
-        };
-
-        let mut fd = fs::File::open(&path).unwrap();
-        let mut buf = Vec::new();
-        let res = match fd.read_to_end(&mut buf) {
-            Ok(_) => Ok(buf),
-            Err(e) => Err(e.to_string()),
-        };
+        let res = self.get(name);
 
         // Update cache to contain key:
         self.guarded_cache_put(name.to_vec(), res.clone());

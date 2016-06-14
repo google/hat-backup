@@ -57,10 +57,10 @@ impl HashRef {
 pub trait HashTreeBackend: Clone {
     type Err: fmt::Debug;
 
-    fn fetch_chunk(&mut self, &Hash, Option<ChunkRef>) -> Result<Option<Vec<u8>>, Self::Err>;
-    fn fetch_payload(&mut self, &Hash) -> Result<Option<Vec<u8>>, Self::Err>;
-    fn fetch_persistent_ref(&mut self, &Hash) -> Result<Option<ChunkRef>, Self::Err>;
-    fn insert_chunk(&mut self,
+    fn fetch_chunk(&self, &Hash, Option<ChunkRef>) -> Result<Option<Vec<u8>>, Self::Err>;
+    fn fetch_payload(&self, &Hash) -> Result<Option<Vec<u8>>, Self::Err>;
+    fn fetch_persistent_ref(&self, &Hash) -> Result<Option<ChunkRef>, Self::Err>;
+    fn insert_chunk(&self,
                     &Hash,
                     i64,
                     Option<Vec<u8>>,
@@ -308,7 +308,7 @@ pub enum ReaderResult<B> {
 impl<B: HashTreeBackend> SimpleHashTreeReader<B> {
     /// Creates a new `HashTreeReader` that reads through the `backend` the blocks of the hash tree
     /// defined by `root_hash` and `root_ref`.
-    pub fn open(mut backend: B,
+    pub fn open(backend: B,
                 root_hash: &Hash,
                 root_ref: Option<ChunkRef>)
                 -> Result<Option<ReaderResult<B>>, B::Err> {
