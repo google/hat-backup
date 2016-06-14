@@ -14,8 +14,6 @@
 
 //! Local state for known snapshots.
 
-use std::sync::{Mutex, MutexGuard};
-
 use diesel;
 use diesel::prelude::*;
 use diesel::sqlite::SqliteConnection;
@@ -56,12 +54,9 @@ pub struct Status {
 }
 
 
-pub struct InternalSnapshotIndex {
+pub struct SnapshotIndex {
     conn: SqliteConnection,
 }
-
-pub struct SnapshotIndex(Mutex<InternalSnapshotIndex>);
-
 
 fn tag_to_work_status(tag: tags::Tag) -> WorkStatus {
     match tag {
@@ -84,11 +79,11 @@ fn work_status_to_tag(status: WorkStatus) -> tags::Tag {
     }
 }
 
-impl InternalSnapshotIndex {
-    pub fn new(path: &str) -> Result<InternalSnapshotIndex, DieselError> {
+impl SnapshotIndex {
+    pub fn new(path: &str) -> Result<SnapshotIndex, DieselError> {
         let conn = try!(SqliteConnection::establish(path));
 
-        let si = InternalSnapshotIndex { conn: conn };
+        let si = SnapshotIndex { conn: conn };
 
         let dir = try!(diesel::migrations::find_migrations_directory());
         try!(diesel::migrations::run_pending_migrations_in_directory(&si.conn,
@@ -97,6 +92,11 @@ impl InternalSnapshotIndex {
 
         try!(si.conn.begin_transaction());
         Ok(si)
+    }
+
+    #[cfg(test)]
+    pub fn new_for_testing() -> Result<SnapshotIndex, DieselError> {
+        SnapshotIndex::new(":memory:")
     }
 
     fn last_insert_rowid(&self) -> i64 {
@@ -115,7 +115,8 @@ impl InternalSnapshotIndex {
             .expect("Error reading family")
     }
 
-    fn delete_snapshot(&self, info: Info) {
+    /// Delete snapshot.
+    pub fn delete(&self, info: Info) {
         use self::schema::snapshots::dsl::*;
 
         let count = diesel::delete(snapshots.find(info.unique_id)
@@ -156,10 +157,11 @@ impl InternalSnapshotIndex {
             .and_then(|x| x)
     }
 
-    fn get_snapshot_info(&mut self,
-                         family_name_: &str,
-                         snapshot_id_: i64)
-                         -> Option<(Info, hash::Hash, Option<blob::ChunkRef>)> {
+    /// Lookup exact snapshot info from family and snapshot id.
+    pub fn lookup(&mut self,
+                  family_name_: &str,
+                  snapshot_id_: i64)
+                  -> Option<(Info, hash::Hash, Option<blob::ChunkRef>)> {
         use self::schema::snapshots::dsl::*;
         use self::schema::family::dsl::{family, name};
 
@@ -182,7 +184,7 @@ impl InternalSnapshotIndex {
         })
     }
 
-    fn reserve_snapshot(&mut self, family_: String) -> Info {
+    pub fn reserve(&mut self, family_: String) -> Info {
         use self::schema::snapshots::dsl::*;
 
         let family_id_ = self.get_or_create_family_id(&family_);
@@ -211,11 +213,11 @@ impl InternalSnapshotIndex {
         }
     }
 
-    fn update(&mut self,
-              snapshot_: &Info,
-              msg_: &str,
-              hash_: &hash::Hash,
-              tree_ref_: &blob::ChunkRef) {
+    fn update_internal(&mut self,
+                       snapshot_: &Info,
+                       msg_: &str,
+                       hash_: &hash::Hash,
+                       tree_ref_: &blob::ChunkRef) {
         use self::schema::snapshots::dsl::*;
 
         diesel::update(snapshots.find(snapshot_.unique_id))
@@ -224,6 +226,11 @@ impl InternalSnapshotIndex {
                   tree_ref.eq(Some(tree_ref_.as_bytes()))))
             .execute(&self.conn)
             .expect("Error updating snapshot");
+    }
+
+    /// Update existing snapshot.
+    pub fn update(&mut self, snapshot: &Info, hash: &hash::Hash, tree_ref: &blob::ChunkRef) {
+        self.update_internal(snapshot, "anonymous", hash, tree_ref);
     }
 
     fn set_tag(&mut self, snapshot_: &Info, tag_: tags::Tag) {
@@ -235,9 +242,28 @@ impl InternalSnapshotIndex {
             .expect("Error updating snapshot");
     }
 
-    fn latest_snapshot(&mut self,
-                       family: &str)
-                       -> Option<(Info, hash::Hash, Option<blob::ChunkRef>)> {
+    /// ReadyCommit.
+    pub fn ready_commit(&mut self, snapshot: &Info) {
+        self.set_tag(snapshot, tags::Tag::Complete)
+    }
+
+    /// Register a new snapshot by its family name, hash and persistent reference.
+    pub fn commit(&mut self, snapshot: &Info) {
+        self.set_tag(snapshot, tags::Tag::Done)
+    }
+
+    /// We are deleting this snapshot.
+    pub fn will_delete(&mut self, snapshot: &Info) {
+        self.set_tag(snapshot, tags::Tag::WillDelete)
+    }
+
+    /// We are ready to delete of this snapshot.
+    pub fn ready_delete(&mut self, snapshot: &Info) {
+        self.set_tag(snapshot, tags::Tag::ReadyDelete)
+    }
+
+    /// Extract latest snapshot data for family.
+    pub fn latest(&mut self, family: &str) -> Option<(Info, hash::Hash, Option<blob::ChunkRef>)> {
         let family_id_opt = self.get_family_id(&family);
         family_id_opt.and_then(|family_id_| {
             use self::schema::snapshots::dsl::*;
@@ -260,7 +286,7 @@ impl InternalSnapshotIndex {
         })
     }
 
-    fn list_all(&mut self, skip_tag: Option<tags::Tag>) -> Vec<Status> {
+    fn list(&mut self, skip_tag: Option<tags::Tag>) -> Vec<Status> {
         use diesel::*;
         use self::schema::snapshots::dsl::*;
         use self::schema::family::dsl::family;
@@ -304,15 +330,26 @@ impl InternalSnapshotIndex {
             .collect()
     }
 
-    fn recover(&mut self,
-               snapshot_id_: i64,
-               family: &str,
-               msg_: &str,
-               hash_: &[u8],
-               tree_ref_: &blob::ChunkRef,
-               work_opt_: Option<WorkStatus>) {
+    /// List incomplete snapshots (either committing or deleting).
+    pub fn list_not_done(&mut self) -> Vec<Status> {
+        self.list(Some(tags::Tag::Done) /* not_tag */)
+    }
+
+    /// List all snapshots.
+    pub fn list_all(&mut self) -> Vec<Status> {
+        self.list(None)
+    }
+
+    /// Recover snapshot information.
+    pub fn recover(&mut self,
+                   snapshot_id_: i64,
+                   family: &str,
+                   msg_: &str,
+                   hash_: &[u8],
+                   tree_ref_: &blob::ChunkRef,
+                   work_opt_: Option<WorkStatus>) {
         let family_id_ = self.get_or_create_family_id(&family);
-        let insert = match self.get_snapshot_info(family, snapshot_id_) {
+        let insert = match self.lookup(family, snapshot_id_) {
             Some((_info, h, r)) => {
                 if h.bytes != hash_ || r.is_none() || &r.unwrap() != tree_ref_ {
                     panic!("Snapshot already exists, but with different hash");
@@ -341,96 +378,9 @@ impl InternalSnapshotIndex {
         }
     }
 
-    fn flush(&mut self) {
+    /// Flush the hash index to clear internal buffers and commit the underlying database.
+    pub fn flush(&mut self) {
         self.conn.commit_transaction().unwrap();
         self.conn.begin_transaction().unwrap();
-    }
-}
-
-impl SnapshotIndex {
-    pub fn new(path: &str) -> Result<SnapshotIndex, DieselError> {
-        InternalSnapshotIndex::new(path).map(|index| SnapshotIndex(Mutex::new(index)))
-    }
-
-    #[cfg(test)]
-    pub fn new_for_testing() -> Result<SnapshotIndex, DieselError> {
-        SnapshotIndex::new(":memory:")
-    }
-
-    fn lock(&self) -> MutexGuard<InternalSnapshotIndex> {
-        self.0.lock().expect("index-process has failed")
-    }
-
-    pub fn reserve(&self, family: String) -> Info {
-        self.lock().reserve_snapshot(family)
-    }
-
-    /// Update existing snapshot.
-    pub fn update(&self, snapshot: &Info, hash: &hash::Hash, tree_ref: &blob::ChunkRef) {
-        self.lock().update(snapshot, "anonymous", hash, tree_ref);
-    }
-
-    /// ReadyCommit.
-    pub fn ready_commit(&self, snapshot: &Info) {
-        self.lock().set_tag(snapshot, tags::Tag::Complete)
-    }
-
-    /// Register a new snapshot by its family name, hash and persistent reference.
-    pub fn commit(&self, snapshot: &Info) {
-        self.lock().set_tag(snapshot, tags::Tag::Done)
-    }
-
-    /// Extract latest snapshot data for family.
-    pub fn latest(&self, name: &str) -> Option<(Info, hash::Hash, Option<blob::ChunkRef>)> {
-        self.lock().latest_snapshot(name)
-    }
-
-    /// Lookup exact snapshot info from family and snapshot id.
-    pub fn lookup(&self,
-                  name: &str,
-                  id: i64)
-                  -> Option<(Info, hash::Hash, Option<blob::ChunkRef>)> {
-        self.lock().get_snapshot_info(name, id)
-    }
-
-    /// We are deleting this snapshot.
-    pub fn will_delete(&self, snapshot: &Info) {
-        self.lock().set_tag(snapshot, tags::Tag::WillDelete)
-    }
-
-    /// We are ready to delete of this snapshot.
-    pub fn ready_delete(&self, snapshot: &Info) {
-        self.lock().set_tag(snapshot, tags::Tag::ReadyDelete)
-    }
-
-    /// Delete snapshot.
-    pub fn delete(&self, snapshot: Info) {
-        self.lock().delete_snapshot(snapshot)
-    }
-
-    /// List incomplete snapshots (either committing or deleting).
-    pub fn list_not_done(&self) -> Vec<Status> {
-        self.lock().list_all(Some(tags::Tag::Done) /* not_tag */)
-    }
-
-    /// List all snapshots.
-    pub fn list_all(&self) -> Vec<Status> {
-        self.lock().list_all(None)
-    }
-
-    /// Flush the hash index to clear internal buffers and commit the underlying database.
-    pub fn flush(&self) {
-        self.lock().flush()
-    }
-
-    /// Recover snapshot information.
-    pub fn recover(&self,
-                   snapshot_id: i64,
-                   family_name: &str,
-                   msg: &str,
-                   hash: &[u8],
-                   tree_ref: &blob::ChunkRef,
-                   work_opt: Option<WorkStatus>) {
-        self.lock().recover(snapshot_id, family_name, msg, hash, tree_ref, work_opt)
     }
 }
