@@ -116,7 +116,7 @@ impl gc::GcBackend for GcBackend {
 
 pub struct Hat<B: StoreBackend, G: gc::Gc<GcBackend>> {
     repository_root: Option<PathBuf>,
-    snapshot_index: Arc<snapshot::SnapshotIndex>,
+    snapshot_index: snapshot::SnapshotIndex,
     blob_store: Arc<blob::BlobStore<B>>,
     hash_index: Arc<hash::HashIndex>,
     gc: G,
@@ -168,7 +168,7 @@ impl<B: StoreBackend> HatRc<B> {
         let snapshot_index_path = snapshot_index_name(repository_root.clone());
         let blob_index_path = blob_index_name(repository_root.clone());
         let hash_index_path = hash_index_name(repository_root.clone());
-        let si_p = Arc::new(try!(snapshot::SnapshotIndex::new(&snapshot_index_path)));
+        let si_p = try!(snapshot::SnapshotIndex::new(&snapshot_index_path));
         let bi_p = Arc::new(try!(blob::BlobIndex::new(&blob_index_path)));
         let hi_p = Arc::new(try!(hash::HashIndex::new(&hash_index_path)));
 
@@ -199,7 +199,7 @@ impl<B: StoreBackend> HatRc<B> {
         // If provided, we cycle the possible poison values to give every process one.
         let mut poison = poison_after.iter().cycle();
 
-        let si_p = Arc::new(snapshot::SnapshotIndex::new_for_testing().unwrap());
+        let si_p = snapshot::SnapshotIndex::new_for_testing().unwrap();
         let bi_p = Arc::new(blob::BlobIndex::new_for_testing().unwrap());
         let hi_p = Arc::new(hash::HashIndex::new_for_testing(poison.next().cloned()).unwrap());
 
@@ -665,7 +665,7 @@ impl<B: StoreBackend> HatRc<B> {
         Ok(())
     }
 
-    pub fn flush_snapshot_index(&self) {
+    pub fn flush_snapshot_index(&mut self) {
         self.snapshot_index.flush();
     }
 
@@ -674,7 +674,7 @@ impl<B: StoreBackend> HatRc<B> {
         Ok(())
     }
 
-    pub fn checkout_in_dir(&self,
+    pub fn checkout_in_dir(&mut self,
                            family_name: String,
                            output_dir: PathBuf)
                            -> Result<(), HatError> {

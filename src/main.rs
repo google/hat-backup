@@ -118,7 +118,7 @@ fn main() {
             let path = cmd.value_of("PATH").unwrap();
 
             let backend = Arc::new(backend::FileBackend::new(blob_dir()));
-            let hat = hat::Hat::open_repository(PathBuf::from("repo"), backend, MAX_BLOB_SIZE)
+            let mut hat = hat::Hat::open_repository(PathBuf::from("repo"), backend, MAX_BLOB_SIZE)
                 .unwrap();
 
             hat.checkout_in_dir(name, PathBuf::from(path)).unwrap();
