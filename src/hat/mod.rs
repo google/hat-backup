@@ -144,7 +144,8 @@ fn hash_index_name(root: PathBuf) -> String {
 struct SnapshotLister<'a, B: StoreBackend> {
     backend: &'a key::HashStoreBackend<B>,
     family: &'a Family<B>,
-    queue: Vec<(hash::Hash, Option<blob::ChunkRef>)>, // Invariant: Only save the chunkref if it is a directory
+    // Invariant: Only save the chunkref if it is a directory
+    queue: Vec<(hash::Hash, Option<blob::ChunkRef>)>,
 }
 
 impl<'a, B: StoreBackend> SnapshotLister<'a, B> {
@@ -185,7 +186,8 @@ impl<'a, B: StoreBackend> Iterator for SnapshotLister<'a, B> {
 fn list_snapshot<'a, B: StoreBackend>(backend: &'a key::HashStoreBackend<B>,
                                       family: &'a Family<B>,
                                       dir_hash: hash::Hash,
-                                      dir_ref: blob::ChunkRef) -> SnapshotLister<'a, B> {
+                                      dir_ref: blob::ChunkRef)
+                                      -> SnapshotLister<'a, B> {
     SnapshotLister {
         backend: backend,
         family: family,
