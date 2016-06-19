@@ -28,14 +28,15 @@ pub fn setup_hat<B: StoreBackend>(backend: Arc<B>, poison_after: &[i64]) -> HatR
     HatRc::new_for_testing(backend, max_blob_size, poison_after).unwrap()
 }
 
-fn setup_family(poison_after: Option<Vec<i64>>) -> (Arc<MemoryBackend>, HatRc<MemoryBackend>, Family<MemoryBackend>) {
+fn setup_family(poison_after: Option<Vec<i64>>)
+                -> (Arc<MemoryBackend>, HatRc<MemoryBackend>, Family<MemoryBackend>) {
     let poison = poison_after.unwrap_or(vec![]);
 
     let backend = Arc::new(MemoryBackend::new());
     let hat = setup_hat(backend.clone(), &poison[..]);
 
     let family = "familyname".to_string();
-    let fam = hat.open_family_with_poison(family.clone(), poison.last().cloned()).unwrap();
+    let fam = hat.open_family_with_poison(family, poison.last().cloned()).unwrap();
 
     (backend, hat, fam)
 }
@@ -56,7 +57,9 @@ pub fn entry(name: Vec<u8>) -> key::Entry {
     }
 }
 
-fn snapshot_files<B: StoreBackend>(family: &Family<B>, files: Vec<(&str, Vec<u8>)>) -> Result<(), HatError> {
+fn snapshot_files<B: StoreBackend>(family: &Family<B>,
+                                   files: Vec<(&str, Vec<u8>)>)
+                                   -> Result<(), HatError> {
     for (name, contents) in files {
         try!(family.snapshot_direct(entry(name.bytes().collect()),
                                     false,

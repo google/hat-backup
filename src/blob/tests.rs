@@ -24,15 +24,14 @@ fn identity() {
     fn prop(chunks: Vec<Vec<u8>>) -> bool {
         let backend = Arc::new(MemoryBackend::new());
 
-        let local_backend = backend.clone();
         let blob_index = Arc::new(BlobIndex::new_for_testing().unwrap());
-        let bs_p = BlobStore::new(blob_index, local_backend, 1024);
+        let bs_p = BlobStore::new(blob_index, backend.clone(), 1024);
 
         let mut ids = Vec::new();
         for chunk in chunks.iter() {
-            ids.push((bs_p.store(chunk.to_owned(),
-                             Kind::TreeLeaf,
-                             Box::new(move |_| {})).unwrap(), chunk));
+            ids.push((bs_p.store(chunk.to_owned(), Kind::TreeLeaf, Box::new(move |_| {}))
+                .unwrap(),
+                      chunk));
         }
 
         assert!(bs_p.flush().is_ok());
@@ -62,15 +61,14 @@ fn identity_with_excessive_flushing() {
     fn prop(chunks: Vec<Vec<u8>>) -> bool {
         let backend = Arc::new(MemoryBackend::new());
 
-        let local_backend = backend.clone();
         let blob_index = Arc::new(BlobIndex::new_for_testing().unwrap());
-        let bs_p = BlobStore::new(blob_index, local_backend, 1024);
+        let bs_p = BlobStore::new(blob_index, backend.clone(), 1024);
 
         let mut ids = Vec::new();
         for chunk in chunks.iter() {
-            ids.push((bs_p.store(chunk.to_owned(),
-                             Kind::TreeLeaf,
-                             Box::new(move |_| {})).unwrap(), chunk));
+            ids.push((bs_p.store(chunk.to_owned(), Kind::TreeLeaf, Box::new(move |_| {}))
+                .unwrap(),
+                      chunk));
             assert!(bs_p.flush().is_ok());
             let &(ref id, chunk) = ids.last().unwrap();
             assert_eq!(bs_p.retrieve(id).unwrap().unwrap(), &chunk[..]);

@@ -115,7 +115,7 @@ impl<B> Clone for Store<B> {
         Store {
             index: self.index.clone(),
             hash_index: self.hash_index.clone(),
-            blob_store: self.blob_store.clone()
+            blob_store: self.blob_store.clone(),
         }
     }
 }

@@ -142,11 +142,11 @@ fn hash_index_name(root: PathBuf) -> String {
 }
 
 fn list_snapshot<B: StoreBackend>(backend: &key::HashStoreBackend<B>,
-                 out: &mut Vec<hash::Hash>,
-                 family: &Family<B>,
-                 dir_hash: &hash::Hash,
-                 dir_ref: blob::ChunkRef)
-                 -> Result<(), HatError> {
+                                  out: &mut Vec<hash::Hash>,
+                                  family: &Family<B>,
+                                  dir_hash: &hash::Hash,
+                                  dir_ref: blob::ChunkRef)
+                                  -> Result<(), HatError> {
     for (entry, hash, pref) in try!(family.fetch_dir_data(dir_hash, dir_ref, backend.clone())) {
         if entry.data_hash.is_some() {
             // File.
@@ -203,8 +203,10 @@ impl<B: StoreBackend> HatRc<B> {
         let bi_p = Arc::new(blob::BlobIndex::new_for_testing().unwrap());
         let hi_p = Arc::new(hash::HashIndex::new_for_testing(poison.next().cloned()).unwrap());
 
-        let bs_p =
-            Arc::new(blob::BlobStore::new_with_poison(bi_p, backend, max_blob_size, poison.next().cloned()));
+        let bs_p = Arc::new(blob::BlobStore::new_with_poison(bi_p,
+                                                             backend,
+                                                             max_blob_size,
+                                                             poison.next().cloned()));
 
         let gc_backend = GcBackend { hash_index: hi_p.clone() };
         let gc = gc::Gc::new(gc_backend);

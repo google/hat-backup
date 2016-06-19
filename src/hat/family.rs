@@ -49,7 +49,7 @@ impl<B: StoreBackend> Clone for Family<B> {
         Family {
             name: self.name.clone(),
             key_store: self.key_store.clone(),
-            key_store_process: self.key_store_process.clone()
+            key_store_process: self.key_store_process.clone(),
         }
     }
 }
@@ -124,7 +124,9 @@ impl<B: StoreBackend> Family<B> {
         Ok(())
     }
 
-    pub fn list_from_key_store(&self, dir_id: Option<u64>) -> Result<Vec<key::DirElem<B>>, HatError> {
+    pub fn list_from_key_store(&self,
+                               dir_id: Option<u64>)
+                               -> Result<Vec<key::DirElem<B>>, HatError> {
         match try!(self.key_store_process.send_reply(key::Msg::ListDir(dir_id))) {
             key::Reply::ListResult(ls) => Ok(ls),
             _ => Err(From::from("Unexpected result from key store")),

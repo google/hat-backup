@@ -35,7 +35,9 @@ impl<B> Clone for HashStoreBackend<B> {
 }
 
 impl<B: StoreBackend> HashStoreBackend<B> {
-    pub fn new(hash_index: Arc<hash::HashIndex>, blob_store: Arc<blob::BlobStore<B>>) -> HashStoreBackend<B> {
+    pub fn new(hash_index: Arc<hash::HashIndex>,
+               blob_store: Arc<blob::BlobStore<B>>)
+               -> HashStoreBackend<B> {
         HashStoreBackend {
             hash_index: hash_index,
             blob_store: blob_store,
@@ -46,7 +48,7 @@ impl<B: StoreBackend> HashStoreBackend<B> {
         assert!(!hash.bytes.is_empty());
         match try!(self.hash_index.fetch_persistent_ref(hash)) {
             None => Ok(None),
-            Some(chunk_ref) => self.fetch_chunk_from_persistent_ref(&chunk_ref)
+            Some(chunk_ref) => self.fetch_chunk_from_persistent_ref(&chunk_ref),
         }
     }
 
@@ -86,9 +88,7 @@ impl<B: StoreBackend> HashTreeBackend for HashStoreBackend<B> {
         }))
     }
 
-    fn fetch_persistent_ref(&self,
-                            hash: &hash::Hash)
-                            -> Result<Option<blob::ChunkRef>, MsgError> {
+    fn fetch_persistent_ref(&self, hash: &hash::Hash) -> Result<Option<blob::ChunkRef>, MsgError> {
         assert!(!hash.bytes.is_empty());
         loop {
             match self.hash_index.fetch_persistent_ref(hash) {

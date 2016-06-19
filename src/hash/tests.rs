@@ -184,11 +184,8 @@ fn identity_append1() {
 
 #[test]
 fn identity_append5() {
-    let blocks: Vec<Vec<u8>> = vec![b"foo".to_vec(),
-                                    b"bar".to_vec(),
-                                    b"baz".to_vec(),
-                                    b"qux".to_vec(),
-                                    b"norf".to_vec()];
+    let blocks: Vec<Vec<u8>> =
+        vec![b"foo".to_vec(), b"bar".to_vec(), b"baz".to_vec(), b"qux".to_vec(), b"norf".to_vec()];
 
     let backend = MemoryBackend::new();
     let mut ht = SimpleHashTreeWriter::new(4, backend.clone());
