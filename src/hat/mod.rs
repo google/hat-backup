@@ -141,23 +141,58 @@ fn hash_index_name(root: PathBuf) -> String {
     concat_filename(root, "hash_index.sqlite3")
 }
 
-fn list_snapshot<B: StoreBackend>(backend: &key::HashStoreBackend<B>,
-                                  out: &mut Vec<hash::Hash>,
-                                  family: &Family<B>,
-                                  dir_hash: &hash::Hash,
-                                  dir_ref: blob::ChunkRef)
-                                  -> Result<(), HatError> {
-    for (entry, hash, pref) in try!(family.fetch_dir_data(dir_hash, dir_ref, backend.clone())) {
-        if entry.data_hash.is_some() {
-            // File.
-            out.push(hash);
-        } else {
-            // Directory.
-            out.push(hash.clone());
-            try!(list_snapshot(backend, out, family, &hash, pref));
+struct SnapshotLister<'a, B: StoreBackend> {
+    backend: &'a key::HashStoreBackend<B>,
+    family: &'a Family<B>,
+    // Invariant: Only save the chunkref if it is a directory
+    queue: Vec<(hash::Hash, Option<blob::ChunkRef>)>,
+}
+
+impl<'a, B: StoreBackend> SnapshotLister<'a, B> {
+    fn fetch(&mut self, hash: &hash::Hash, chunk: blob::ChunkRef) -> Result<(), HatError> {
+        let res = try!(self.family.fetch_dir_data(hash, chunk, self.backend.clone()));
+        for (entry, hash, pref) in res.into_iter().rev() {
+            if entry.data_hash.is_some() {
+                self.queue.push((hash, None));
+            } else {
+                self.queue.push((hash, Some(pref)));
+            }
         }
+        Ok(())
     }
-    Ok(())
+}
+
+impl<'a, B: StoreBackend> Iterator for SnapshotLister<'a, B> {
+    type Item = Result<hash::Hash, HatError>;
+    fn next(&mut self) -> Option<Result<hash::Hash, HatError>> {
+        let (hash, chunk) = match self.queue.pop() {
+            None => return None,
+            Some((hash, chunk)) => (hash, chunk),
+        };
+
+        if let Some(chunk) = chunk {
+            if let Err(e) = self.fetch(&hash, chunk) {
+                // We yield the error now, but save the hash so
+                // we can output it next time
+                self.queue.push((hash, None));
+                return Some(Err(e));
+            }
+        }
+
+        Some(Ok(hash))
+    }
+}
+
+fn list_snapshot<'a, B: StoreBackend>(backend: &'a key::HashStoreBackend<B>,
+                                      family: &'a Family<B>,
+                                      dir_hash: hash::Hash,
+                                      dir_ref: blob::ChunkRef)
+                                      -> SnapshotLister<'a, B> {
+    SnapshotLister {
+        backend: backend,
+        family: family,
+        queue: vec![(dir_hash, Some(dir_ref))],
+    }
 }
 
 impl<B: StoreBackend> HatRc<B> {
@@ -759,19 +794,13 @@ impl<B: StoreBackend> HatRc<B> {
             let &mut Hat { ref hash_index, ref mut gc, .. } = self;
 
             let listing = || {
-                let mut files = Vec::new();
-                list_snapshot(&hash_backend, &mut files, &family, &dir_hash, dir_ref).unwrap();
-
                 let (id_sender, id_receiver) = mpsc::channel();
-                for hash in files {
+                for hash in list_snapshot(&hash_backend, &family, dir_hash, dir_ref) {
+                    let hash = hash.unwrap();
                     match hash_index.get_id(&hash).expect("Hash index failed") {
                         Some(id) => id_sender.send(id).unwrap(),
                         None => panic!("Unexpected reply from hash index."),
                     }
-                }
-                match hash_index.get_id(&dir_hash).expect("Hash index failed") {
-                    Some(id) => id_sender.send(id).unwrap(),
-                    None => panic!("Unexpected reply from hash index."),
                 }
                 id_receiver
             };
