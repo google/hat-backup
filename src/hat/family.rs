@@ -16,7 +16,7 @@ use std::fs;
 use std::io::Write;
 use std::path::PathBuf;
 use std::str;
-use std::sync::{Arc, mpsc};
+use std::sync::mpsc;
 use capnp;
 
 use backend::StoreBackend;
@@ -24,7 +24,7 @@ use blob;
 use hash;
 use key;
 use root_capnp;
-use util::{self, FileIterator, FnBox};
+use util::{FileIterator, PathHandler, FnBox};
 use errors::HatError;
 use hat::insert_path_handler::InsertPathHandler;
 
@@ -57,7 +57,7 @@ impl<B: StoreBackend> Clone for Family<B> {
 impl<B: StoreBackend> Family<B> {
     pub fn snapshot_dir(&self, dir: PathBuf) {
         let handler = InsertPathHandler::new(self.key_store_process.clone());
-        util::iterate_recursively((PathBuf::from(&dir), None), &Arc::new(handler));
+        handler.recurse(PathBuf::from(&dir), None);
     }
 
     pub fn snapshot_direct(&self,
