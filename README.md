@@ -31,7 +31,7 @@ provided for development and experimentation purposes only.
 
 Roadmap to a first stable release
 ---------------------------------
-**Cleanup:** 
+**Cleanup:**
 
 I am currently focusing on reaching a feature complete and useful state and as a result, I am skipping quickly over some implementation details. The following items will have to be revisited and cleaned up before a stable release:
 
