@@ -18,7 +18,7 @@ use test::Bencher;
 use backend::DevNullBackend;
 use hat::HatRc;
 use hat::family::Family;
-use hat::tests::{setup_hat, entry};
+use hat::tests::{entry, setup_hat};
 use util::FileIterator;
 
 

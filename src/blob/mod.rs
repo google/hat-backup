@@ -33,7 +33,7 @@ mod schema;
 #[cfg(test)]
 pub mod tests;
 
-pub use self::index::{BlobIndex, BlobDesc};
+pub use self::index::{BlobDesc, BlobIndex};
 
 
 error_type! {

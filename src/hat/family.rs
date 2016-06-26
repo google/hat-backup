@@ -24,7 +24,7 @@ use blob;
 use hash;
 use key;
 use root_capnp;
-use util::{FileIterator, PathHandler, FnBox};
+use util::{FileIterator, FnBox, PathHandler};
 use errors::HatError;
 use hat::insert_path_handler::InsertPathHandler;
 

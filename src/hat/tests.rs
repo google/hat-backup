@@ -15,7 +15,7 @@
 use quickcheck;
 use std::sync::Arc;
 
-use backend::{StoreBackend, MemoryBackend};
+use backend::{MemoryBackend, StoreBackend};
 use errors::HatError;
 use hat::HatRc;
 use hat::family::Family;

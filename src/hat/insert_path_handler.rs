@@ -23,7 +23,7 @@ use time;
 
 use backend::StoreBackend;
 use key;
-use util::{PathHandler, FileIterator};
+use util::{FileIterator, PathHandler};
 
 struct FileEntry {
     key_entry: key::Entry,

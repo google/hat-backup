@@ -23,7 +23,7 @@ use std::sync::{Arc, Mutex};
 
 use std::sync::mpsc;
 
-use hash::{UpdateFn, GcData};
+use hash::{GcData, UpdateFn};
 use snapshot;
 use tags;
 

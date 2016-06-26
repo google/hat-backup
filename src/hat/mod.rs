@@ -15,7 +15,7 @@
 use std::fs;
 use std::path::PathBuf;
 use std::str;
-use std::sync::{mpsc, Arc};
+use std::sync::{Arc, mpsc};
 use std::thread;
 use capnp;
 
@@ -515,18 +515,12 @@ impl<B: StoreBackend> HatRc<B> {
                         }
                         (None, snapshot::WorkStatus::RecoverInProgress) => {
                             println!("Resuming recovery of: {}", snapshot.family_name);
-                            let hash = match &snapshot.hash {
-                                &Some(ref h) => h,
-                                &None => {
-                                    return Err(From::from("recovered snapshot must have a hash"))
-                                }
-                            };
-                            let tree = match snapshot.tree_ref {
-                                Some(tr) => try!(blob::ChunkRef::from_bytes(&mut &tr[..])),
-                                None => {
-                                    return Err(From::from("Recovered hash tree has no root hash"))
-                                }
-                            };
+                            let hash = try!(snapshot.hash
+                                .as_ref()
+                                .ok_or("Recovered snapshot without hash"));
+                            let tree_ref = try!(snapshot.tree_ref
+                                .ok_or("Recovered hash tree has no root hash"));
+                            let tree = try!(blob::ChunkRef::from_bytes(&mut &tree_ref[..]));
                             try!(self.recover_snapshot(snapshot.family_name,
                                                        snapshot.info,
                                                        hash,
