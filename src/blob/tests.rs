@@ -14,7 +14,7 @@
 
 use blob::*;
 
-use backend::{StoreBackend, MemoryBackend};
+use backend::{MemoryBackend, StoreBackend};
 
 use std::sync::Arc;
 use quickcheck;

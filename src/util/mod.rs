@@ -28,5 +28,5 @@ pub use self::fnbox::FnBox;
 pub use self::infowriter::InfoWriter;
 pub use self::listdir::{HasPath, PathHandler};
 pub use self::periodic_timer::PeriodicTimer;
-pub use self::process::{Process, MsgHandler};
+pub use self::process::{MsgHandler, Process};
 pub use self::unique_priority_queue::UniquePriorityQueue;

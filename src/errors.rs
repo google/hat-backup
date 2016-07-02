@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::{fmt, error};
+use std::{error, fmt};
 
 pub use self::hat_error::HatError;
 pub use self::diesel_error::DieselError;

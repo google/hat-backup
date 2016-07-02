@@ -52,7 +52,7 @@
 
 use std::fmt;
 use std::thread;
-use std::sync::{mpsc, Arc, Mutex};
+use std::sync::{Arc, Mutex, mpsc};
 
 
 enum InternalMsg<M> {

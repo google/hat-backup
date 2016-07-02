@@ -15,7 +15,7 @@
 use key::*;
 use std::sync::Arc;
 
-use backend::{StoreBackend, MemoryBackend};
+use backend::{MemoryBackend, StoreBackend};
 use util::Process;
 
 use rand::Rng;

@@ -15,12 +15,12 @@
 //! External API for creating and manipulating snapshots.
 
 use std::borrow::Cow;
-use std::sync::{mpsc, Arc};
+use std::sync::{Arc, mpsc};
 
 use backend::StoreBackend;
 use blob;
 use hash;
-use hash::tree::{SimpleHashTreeWriter, SimpleHashTreeReader, ReaderResult};
+use hash::tree::{ReaderResult, SimpleHashTreeReader, SimpleHashTreeWriter};
 
 use util::{FnBox, MsgHandler, Process};
 use errors::{DieselError, LockError, RetryError};
@@ -35,7 +35,7 @@ mod tests;
 mod benchmarks;
 
 pub use self::hash_store_backend::HashStoreBackend;
-pub use self::index::{KeyIndex, Entry};
+pub use self::index::{Entry, KeyIndex};
 
 
 error_type! {

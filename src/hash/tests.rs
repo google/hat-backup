@@ -16,7 +16,7 @@ use hash::tree::*;
 
 use std::sync::{Arc, Mutex};
 
-use blob::{Kind, ChunkRef};
+use blob::{ChunkRef, Kind};
 use hash::Hash;
 use key;
 

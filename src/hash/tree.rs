@@ -23,7 +23,7 @@ use capnp;
 use root_capnp;
 
 use blob::{ChunkRef, Kind};
-use hash::{Entry, Hash, HASHBYTES};
+use hash::{Entry, HASHBYTES, Hash};
 
 #[cfg(test)]
 use quickcheck;
