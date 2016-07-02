@@ -118,21 +118,21 @@ fn blob_reuse() {
         kind: Kind::TreeLeaf,
     };
     let mut b = Blob::new(100);
-    b.try_append(vec![1,2,3], &c).unwrap();
-    b.try_append(vec![4,5,6], &c).unwrap();
+    b.try_append(vec![1, 2, 3], &c).unwrap();
+    b.try_append(vec![4, 5, 6], &c).unwrap();
 
     let mut out = Vec::new();
     b.into_bytes(&mut out);
 
-    assert_eq!(&[1,2,3,4,5,6], &out[0..6]);
+    assert_eq!(&[1, 2, 3, 4, 5, 6], &out[0..6]);
 
-    b.try_append(vec![1,2], &c).unwrap();
-    b.try_append(vec![1,2], &c).unwrap();
-    b.try_append(vec![1,2], &c).unwrap();
+    b.try_append(vec![1, 2], &c).unwrap();
+    b.try_append(vec![1, 2], &c).unwrap();
+    b.try_append(vec![1, 2], &c).unwrap();
 
     out.clear();
     b.into_bytes(&mut out);
-    assert_eq!(&[1,2,1,2,1,2], &out[0..6]);
+    assert_eq!(&[1, 2, 1, 2, 1, 2], &out[0..6]);
 }
 
 #[test]
