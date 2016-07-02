@@ -498,8 +498,8 @@ impl HashIndex {
     }
 
     #[cfg(test)]
-    pub fn new_for_testing(poison: Option<i64>) -> Result<HashIndex, DieselError> {
-        HashIndex::new_with_poison(":memory:", poison)
+    pub fn new_for_testing() -> Result<HashIndex, DieselError> {
+        HashIndex::new(":memory:")
     }
 
     fn new_with_poison(path: &str, poison: Option<i64>) -> Result<HashIndex, DieselError> {

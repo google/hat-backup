@@ -52,7 +52,7 @@
 
 use std::fmt;
 use std::thread;
-use std::sync::{Arc, Mutex, mpsc};
+use std::sync::mpsc;
 
 
 enum InternalMsg<M> {
@@ -67,8 +67,6 @@ enum InternalReply<R, E> {
 
 pub struct Process<Msg, Reply, E> {
     sender: mpsc::SyncSender<(InternalMsg<Msg>, mpsc::Sender<InternalReply<Reply, E>>)>,
-    poison_after: Option<i64>,
-    poisoned: Arc<Mutex<bool>>,
 }
 
 /// When cloning a `process` we clone the input-channel, allowing multiple threads to share the same
@@ -77,8 +75,6 @@ impl<Msg: Send, Reply: Send, E> Clone for Process<Msg, Reply, E> {
     fn clone(&self) -> Process<Msg, Reply, E> {
         Process {
             sender: self.sender.clone(),
-            poison_after: None,
-            poisoned: self.poisoned.clone(),
         }
     }
 }
@@ -101,21 +97,9 @@ impl<Msg: 'static + Send, Reply: 'static + Send, E> Process<Msg, Reply, E> {
               E: 'static + From<mpsc::RecvError> + fmt::Debug + Send,
               F: FnOnce() -> Result<H, E>
     {
-        Process::new_with_poison(handler_proc, None)
-    }
-
-    pub fn new_with_poison<H, F>(handler_proc: F,
-                                 poison_after: Option<i64>)
-                                 -> Result<Process<Msg, Reply, E>, E>
-        where H: 'static + MsgHandler<Msg, Reply, Err = E> + Send,
-              E: 'static + From<mpsc::RecvError> + fmt::Debug + Send,
-              F: FnOnce() -> Result<H, E>
-    {
         let (sender, receiver) = mpsc::sync_channel(10);
         let p = Process {
             sender: sender,
-            poison_after: poison_after,
-            poisoned: Arc::new(Mutex::new(false)),
         };
 
         try!(p.start(receiver, handler_proc));
@@ -132,10 +116,7 @@ impl<Msg: 'static + Send, Reply: 'static + Send, E> Process<Msg, Reply, E> {
               E: 'static + From<mpsc::RecvError> + fmt::Debug + Send,
               F: FnOnce() -> Result<H, E>
     {
-        let poison_after = self.poison_after;
         let mut my_handler = try!(handler_proc());
-
-        let poisoned = self.poisoned.clone();
 
         thread::spawn(move || {
             // fork handler
@@ -169,29 +150,8 @@ impl<Msg: 'static + Send, Reply: 'static + Send, E> Process<Msg, Reply, E> {
                 }
                 Ok(())
             };
-            let mut do_loop = || {
-                match poison_after {
-                    Some(msg_count) => {
-                        for _ in 0..msg_count {
-                            if let Ok(m) = receiver.recv() {
-                                try!(handle_msg(m))
-                            } else {
-                                return Ok(());  // Clean shutdown.
-                            }
-                        }
-                        return Err("Process has reached message limit".to_string());
-                    }
-                    None => {
-                        while let Ok(m) = receiver.recv() {
-                            try!(handle_msg(m))
-                        }
-                    }
-                };
-                Ok(())
-            };
-            while let Err(e) = do_loop() {
-                *poisoned.lock().unwrap() = true;  // This process is in a polluted state.
-                warn!("Poisoned process: {:?}", e);
+            while let Ok(m) = receiver.recv() {
+               handle_msg(m).unwrap()
             }
         });
 
@@ -203,10 +163,6 @@ impl<Msg: 'static + Send, Reply: 'static + Send, E> Process<Msg, Reply, E> {
         where E: From<String>
     {
         let (sender, receiver) = mpsc::channel();
-
-        if !*self.poisoned.lock().unwrap() {
-            return Err(From::from("This process has not been poisoned".to_string()));
-        }
 
         if let Err(e) = self.sender.send((InternalMsg::Reset, sender)) {
             return Err(From::from(format!("Could not send Reset message; process looks dead: {}",
@@ -227,10 +183,6 @@ impl<Msg: 'static + Send, Reply: 'static + Send, E> Process<Msg, Reply, E> {
         where E: From<String>
     {
         let (sender, receiver) = mpsc::channel();
-
-        if *self.poisoned.lock().unwrap() {
-            return Err(From::from("Refusing to forward message to poisoned process".to_string()));
-        }
 
         if let Err(e) = self.sender.send((InternalMsg::Msg(msg), sender)) {
             return Err(From::from(format!("Could not send message; process looks dead: {}", e)));
