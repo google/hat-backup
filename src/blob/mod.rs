@@ -110,7 +110,7 @@ impl<B: StoreBackend> StoreInner<B> {
     }
 
     fn store(&mut self,
-             mut chunk: Vec<u8>,
+             chunk: Vec<u8>,
              kind: Kind,
              callback: Box<FnBox<ChunkRef, ()>>)
              -> ChunkRef {
@@ -253,10 +253,6 @@ impl<B: StoreBackend> BlobStore<B> {
                  -> Result<ChunkRef, LockError> {
         let mut guard = try!(self.lock());
         let res = guard.0.store(chunk, kind, callback);
-        drop(guard);
-
-        let inner: Arc<Mutex<(StoreInner<B>, Option<i64>)>> = self.0.clone();
-
         Ok(res)
     }
 
