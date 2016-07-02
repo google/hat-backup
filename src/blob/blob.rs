@@ -132,7 +132,7 @@ impl Blob {
         assert!(out.len() + footer.len() <= self.max_size);
         let left = self.max_size - out.len() - footer.len();
         if left > 0 {
-            out.append(&mut randombytes(left));
+            out.append(&mut vec![0; left]);
         }
         out.append(&mut footer);
 
