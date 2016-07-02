@@ -227,21 +227,12 @@ impl<B: StoreBackend> HatRc<B> {
     }
 
     #[cfg(test)]
-    pub fn new_for_testing(backend: Arc<B>,
-                           max_blob_size: usize,
-                           poison_after: &[i64])
-                           -> Result<HatRc<B>, HatError> {
-        // If provided, we cycle the possible poison values to give every process one.
-        let mut poison = poison_after.iter().cycle();
-
+    pub fn new_for_testing(backend: Arc<B>, max_blob_size: usize) -> Result<HatRc<B>, HatError> {
         let si_p = snapshot::SnapshotIndex::new_for_testing().unwrap();
         let bi_p = Arc::new(blob::BlobIndex::new_for_testing().unwrap());
-        let hi_p = Arc::new(hash::HashIndex::new_for_testing(poison.next().cloned()).unwrap());
+        let hi_p = Arc::new(hash::HashIndex::new_for_testing().unwrap());
 
-        let bs_p = Arc::new(blob::BlobStore::new_with_poison(bi_p,
-                                                             backend,
-                                                             max_blob_size,
-                                                             poison.next().cloned()));
+        let bs_p = Arc::new(blob::BlobStore::new(bi_p, backend, max_blob_size));
 
         let gc_backend = GcBackend { hash_index: hi_p.clone() };
         let gc = gc::Gc::new(gc_backend);
@@ -265,13 +256,6 @@ impl<B: StoreBackend> HatRc<B> {
     }
 
     pub fn open_family(&self, name: String) -> Result<Family<B>, HatError> {
-        self.open_family_with_poison(name, None)
-    }
-
-    pub fn open_family_with_poison(&self,
-                                   name: String,
-                                   poison_after: Option<i64>)
-                                   -> Result<Family<B>, HatError> {
         // We setup a standard pipeline of processes:
         // key::Store -> key::Index
         //            -> hash::Index
@@ -287,7 +271,7 @@ impl<B: StoreBackend> HatRc<B> {
         let local_ks = key::Store::new(ki_p.clone(),
                                        self.hash_index.clone(),
                                        self.blob_store.clone());
-        let ks_p = try!(Process::new_with_poison(move || local_ks, poison_after));
+        let ks_p = try!(Process::new(move || local_ks));
 
         let ks = try!(key::Store::new(ki_p, self.hash_index.clone(), self.blob_store.clone()));
 

@@ -39,8 +39,7 @@ mod benchmarks;
 
 pub static HASHBYTES: usize = sha512::DIGESTBYTES;
 
-pub struct HashIndex(Mutex<IndexInner>);
-type IndexInner = (InternalHashIndex, Option<i64>);
+pub struct HashIndex(Mutex<InternalHashIndex>);
 
 
 /// A wrapper around Hash digests.
@@ -494,51 +493,31 @@ impl InternalHashIndex {
 
 impl HashIndex {
     pub fn new(path: &str) -> Result<HashIndex, DieselError> {
-        HashIndex::new_with_poison(path, None)
+        HashIndex::new_internal(path)
     }
 
     #[cfg(test)]
-    pub fn new_for_testing(poison: Option<i64>) -> Result<HashIndex, DieselError> {
-        HashIndex::new_with_poison(":memory:", poison)
+    pub fn new_for_testing() -> Result<HashIndex, DieselError> {
+        HashIndex::new(":memory:")
     }
 
-    fn new_with_poison(path: &str, poison: Option<i64>) -> Result<HashIndex, DieselError> {
-        InternalHashIndex::new(path).map(|index| HashIndex(Mutex::new((index, poison))))
+    fn new_internal(path: &str) -> Result<HashIndex, DieselError> {
+        InternalHashIndex::new(path).map(|index| HashIndex(Mutex::new((index))))
     }
 
-    fn lock_ignore_poison(&self) -> Result<MutexGuard<IndexInner>, LockError> {
+    fn lock(&self) -> Result<MutexGuard<InternalHashIndex>, LockError> {
         match self.0.lock() {
-            Err(_) => return Err(LockError::Poisoned),
+            Err(_) => Err(LockError::Poisoned),
             Ok(lock) => Ok(lock),
         }
     }
 
-    fn lock(&self) -> Result<MutexGuard<IndexInner>, LockError> {
-        let mut guard = try!(self.lock_ignore_poison());
-
-        match &mut guard.1 {
-            &mut None => (),
-            &mut Some(0) => return Err(LockError::RequestLimitReached),
-            &mut Some(ref mut n) => {
-                *n -= 1;
-            }
-        }
-
-        Ok(guard)
-    }
-
     /// Reset in-memory state.
     pub fn reset(&self) -> Result<(), LockError> {
-        let mut state = try!(self.lock_ignore_poison());
+        let mut state = try!(self.lock());
 
-        // Only reset a poisoned state.
-        assert_eq!(state.1, Some(0));
-
-        state.0.queue = UniquePriorityQueue::new();
-        state.0.refresh_id_counter();
-
-        // Unpoison:
-        state.1 = None;
+        state.queue = UniquePriorityQueue::new();
+        state.refresh_id_counter();
 
         Ok(())
     }
@@ -546,30 +525,30 @@ impl HashIndex {
     /// Locate the local ID of this hash.
     pub fn get_id(&self, hash: &Hash) -> Result<Option<i64>, LockError> {
         assert!(!hash.bytes.is_empty());
-        Ok(try!(self.lock()).0.locate(&hash).map(|entry| entry.id))
+        Ok(try!(self.lock()).locate(&hash).map(|entry| entry.id))
     }
 
     /// Locate hash entry from its ID.
     pub fn get_hash(&self, id: i64) -> Result<Option<Entry>, LockError> {
-        Ok(try!(self.lock()).0.locate_by_id(id))
+        Ok(try!(self.lock()).locate_by_id(id))
     }
 
     /// Check whether this `Hash` already exists in the system.
     pub fn hash_exists(&self, hash: &Hash) -> Result<bool, LockError> {
         assert!(!hash.bytes.is_empty());
-        Ok(try!(self.lock()).0.locate(hash).is_some())
+        Ok(try!(self.lock()).locate(hash).is_some())
     }
 
     /// Locate the local payload of the `Hash`.
     pub fn fetch_payload(&self, hash: &Hash) -> Result<Option<Option<Vec<u8>>>, LockError> {
         assert!(!hash.bytes.is_empty());
-        Ok(try!(self.lock()).0.locate(hash).map(|queue_entry| queue_entry.payload))
+        Ok(try!(self.lock()).locate(hash).map(|queue_entry| queue_entry.payload))
     }
 
     /// Locate the persistent reference (external blob reference) for this `Hash`.
     pub fn fetch_persistent_ref(&self, hash: &Hash) -> Result<Option<blob::ChunkRef>, RetryError> {
         assert!(!hash.bytes.is_empty());
-        match try!(self.lock()).0.locate(hash) {
+        match try!(self.lock()).locate(hash) {
             Some(ref queue_entry) if queue_entry.persistent_ref.is_none() => Err(RetryError::Retry),
             Some(queue_entry) => Ok(Some(queue_entry.persistent_ref.expect("persistent_ref"))),
             None => Ok(None),
@@ -584,10 +563,10 @@ impl HashIndex {
         // storage. This allows us to continue after a crash without needing to scan
         // through and delete uncommitted entries.
         let mut guard = try!(self.lock());
-        match guard.0.locate(&hash_entry.hash) {
+        match guard.locate(&hash_entry.hash) {
             Some(entry) => Ok(ReserveResult::HashKnown(entry.id)),
             None => {
-                let id = guard.0.reserve(hash_entry);
+                let id = guard.reserve(hash_entry);
                 Ok(ReserveResult::ReserveOk(id))
             }
         }
@@ -598,7 +577,7 @@ impl HashIndex {
     /// references to the `Hash` to be created before it is committed).
     pub fn update_reserved(&self, hash_entry: Entry) -> Result<(), LockError> {
         assert!(!hash_entry.hash.bytes.is_empty());
-        try!(self.lock()).0.update_reserved(hash_entry);
+        try!(self.lock()).update_reserved(hash_entry);
         Ok(())
     }
 
@@ -608,50 +587,50 @@ impl HashIndex {
         // Ignore poison setup since commit is often triggered by callbacks with no error
         // handling options.
         assert!(!hash.bytes.is_empty());
-        try!(self.lock_ignore_poison()).0.commit(hash, persistent_ref);
+        try!(self.lock()).commit(hash, persistent_ref);
         Ok(())
     }
 
     /// List all hash entries.
     pub fn list(&self) -> Result<Vec<Entry>, LockError> {
-        Ok(try!(self.lock()).0.list())
+        Ok(try!(self.lock()).list())
     }
 
     /// Permanently delete hash by its ID.
     pub fn delete(&self, id: i64) -> Result<(), LockError> {
-        try!(self.lock()).0.delete(id);
+        try!(self.lock()).delete(id);
         Ok(())
     }
 
     /// API related to tagging, which is useful to indicate state during operation stages.
     /// It operates directly on the underlying IDs.
     pub fn set_tag(&self, id: i64, tag: tags::Tag) -> Result<(), LockError> {
-        try!(self.lock()).0.set_tag(Some(id), tag);
+        try!(self.lock()).set_tag(Some(id), tag);
         Ok(())
     }
 
     /// API related to tagging, which is useful to indicate state during operation stages.
     /// It operates directly on the underlying IDs.
     pub fn set_all_tags(&self, tag: tags::Tag) -> Result<(), LockError> {
-        try!(self.lock()).0.set_tag(None, tag);
+        try!(self.lock()).set_tag(None, tag);
         Ok(())
     }
 
     /// API related to tagging, which is useful to indicate state during operation stages.
     /// It operates directly on the underlying IDs.
     pub fn get_tag(&self, id: i64) -> Result<Option<tags::Tag>, LockError> {
-        Ok(try!(self.lock()).0.get_tag(id))
+        Ok(try!(self.lock()).get_tag(id))
     }
 
     /// API related to tagging, which is useful to indicate state during operation stages.
     /// It operates directly on the underlying IDs.
     pub fn get_ids_by_tag(&self, tag: i64) -> Result<Vec<i64>, LockError> {
-        Ok(try!(self.lock()).0.list_ids_by_tag(tag))
+        Ok(try!(self.lock()).list_ids_by_tag(tag))
     }
 
     /// API related to garbage collector metadata tied to (hash id, family id) pairs.
     pub fn read_gc_data(&self, hash_id: i64, family_id: i64) -> Result<GcData, LockError> {
-        Ok(try!(self.lock()).0.read_gc_data(hash_id, family_id))
+        Ok(try!(self.lock()).read_gc_data(hash_id, family_id))
     }
 
     /// API related to garbage collector metadata tied to (hash id, family id) pairs.
@@ -660,7 +639,7 @@ impl HashIndex {
                                        family_id: i64,
                                        update_fn: F)
                                        -> Result<GcData, LockError> {
-        Ok(try!(self.lock()).0.update_gc_data(hash_id, family_id, update_fn))
+        Ok(try!(self.lock()).update_gc_data(hash_id, family_id, update_fn))
     }
 
     /// API related to garbage collector metadata tied to (hash id, family id) pairs.
@@ -668,21 +647,21 @@ impl HashIndex {
                                                                      family_id: i64,
                                                                      update_fns: I)
                                                                      -> Result<(), LockError> {
-        try!(self.lock()).0.update_family_gc_data(family_id, update_fns);
+        try!(self.lock()).update_family_gc_data(family_id, update_fns);
         Ok(())
     }
 
     /// Manual commit. This also disables automatic periodic commit.
     pub fn manual_commit(&self) -> Result<(), LockError> {
         let mut guard = try!(self.lock());
-        guard.0.flush();
-        guard.0.flush_periodically = false;
+        guard.flush();
+        guard.flush_periodically = false;
         Ok(())
     }
 
     /// Flush the hash index to clear internal buffers and commit the underlying database.
     pub fn flush(&self) -> Result<(), LockError> {
-        try!(self.lock()).0.flush();
+        try!(self.lock()).flush();
         Ok(())
     }
 }
