@@ -73,9 +73,7 @@ pub struct Process<Msg, Reply, E> {
 /// `process`.
 impl<Msg: Send, Reply: Send, E> Clone for Process<Msg, Reply, E> {
     fn clone(&self) -> Process<Msg, Reply, E> {
-        Process {
-            sender: self.sender.clone(),
-        }
+        Process { sender: self.sender.clone() }
     }
 }
 
@@ -98,9 +96,7 @@ impl<Msg: 'static + Send, Reply: 'static + Send, E> Process<Msg, Reply, E> {
               F: FnOnce() -> Result<H, E>
     {
         let (sender, receiver) = mpsc::sync_channel(10);
-        let p = Process {
-            sender: sender,
-        };
+        let p = Process { sender: sender };
 
         try!(p.start(receiver, handler_proc));
 
@@ -151,7 +147,7 @@ impl<Msg: 'static + Send, Reply: 'static + Send, E> Process<Msg, Reply, E> {
                 Ok(())
             };
             while let Ok(m) = receiver.recv() {
-               handle_msg(m).unwrap()
+                handle_msg(m).unwrap()
             }
         });
 

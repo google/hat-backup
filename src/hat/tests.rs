@@ -27,8 +27,7 @@ pub fn setup_hat<B: StoreBackend>(backend: Arc<B>) -> HatRc<B> {
     HatRc::new_for_testing(backend, max_blob_size).unwrap()
 }
 
-fn setup_family()
-                -> (Arc<MemoryBackend>, HatRc<MemoryBackend>, Family<MemoryBackend>) {
+fn setup_family() -> (Arc<MemoryBackend>, HatRc<MemoryBackend>, Family<MemoryBackend>) {
     let backend = Arc::new(MemoryBackend::new());
     let hat = setup_hat(backend.clone());
 

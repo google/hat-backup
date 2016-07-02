@@ -227,16 +227,12 @@ impl<B: StoreBackend> HatRc<B> {
     }
 
     #[cfg(test)]
-    pub fn new_for_testing(backend: Arc<B>,
-                           max_blob_size: usize)
-                           -> Result<HatRc<B>, HatError> {
+    pub fn new_for_testing(backend: Arc<B>, max_blob_size: usize) -> Result<HatRc<B>, HatError> {
         let si_p = snapshot::SnapshotIndex::new_for_testing().unwrap();
         let bi_p = Arc::new(blob::BlobIndex::new_for_testing().unwrap());
         let hi_p = Arc::new(hash::HashIndex::new_for_testing().unwrap());
 
-        let bs_p = Arc::new(blob::BlobStore::new(bi_p,
-                                                             backend,
-                                                             max_blob_size));
+        let bs_p = Arc::new(blob::BlobStore::new(bi_p, backend, max_blob_size));
 
         let gc_backend = GcBackend { hash_index: hi_p.clone() };
         let gc = gc::Gc::new(gc_backend);
