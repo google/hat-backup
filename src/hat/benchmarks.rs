@@ -23,9 +23,8 @@ use util::FileIterator;
 
 
 fn setup_family() -> (HatRc<DevNullBackend>, Family<DevNullBackend>) {
-    let empty = vec![];
     let backend = Arc::new(DevNullBackend);
-    let hat = setup_hat(backend, &empty[..]);
+    let hat = setup_hat(backend);
 
     let family = "familyname".to_string();
     let fam = hat.open_family(family).unwrap();
