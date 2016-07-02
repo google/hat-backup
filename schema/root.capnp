@@ -80,7 +80,3 @@ struct FileList {
 struct MetaFooterEntry {
 	length @0 :Int64;
 }
-
-struct MetaFooter {
-	entries @0 :List(MetaFooterEntry);
-}
