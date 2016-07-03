@@ -14,8 +14,7 @@
 
 //! External API for creating and manipulating snapshots.
 
-use std::borrow::Cow;
-use std::sync::{Arc, mpsc};
+use std::sync::Arc;
 
 use backend::StoreBackend;
 use blob;
@@ -41,14 +40,6 @@ pub use self::index::{Entry, KeyIndex};
 error_type! {
     #[derive(Debug)]
     pub enum MsgError {
-        Recv(mpsc::RecvError) {
-            cause;
-        },
-        Message(Cow<'static, str>) {
-            desc (e) &**e;
-            from (s: &'static str) s.into();
-            from (s: String) s.into();
-        },
         Blobs(blob::MsgError) {
             cause;
         },
@@ -125,16 +116,16 @@ impl<B: StoreBackend> Store<B> {
     pub fn new(index: Arc<index::KeyIndex>,
                hash_index: Arc<hash::HashIndex>,
                blob_store: Arc<blob::BlobStore<B>>)
-               -> Result<Store<B>, MsgError> {
-        Ok(Store {
+               -> Store<B> {
+        Store {
             index: index,
             hash_index: hash_index,
             blob_store: blob_store,
-        })
+        }
     }
 
     #[cfg(test)]
-    pub fn new_for_testing(backend: Arc<B>) -> Result<Store<B>, MsgError> {
+    pub fn new_for_testing(backend: Arc<B>) -> Result<Store<B>, DieselError> {
         let ki_p = Arc::new(try!(index::KeyIndex::new_for_testing()));
         let hi_p = Arc::new(try!(hash::HashIndex::new_for_testing()));
         let blob_index = Arc::new(try!(blob::BlobIndex::new_for_testing()));
@@ -176,12 +167,6 @@ fn file_size_warning(name: &[u8], wanted: u64, got: u64) {
 
 impl<IT: Iterator<Item = Vec<u8>>, B: StoreBackend> MsgHandler<Msg<IT>, Reply<B>> for Store<B> {
     type Err = MsgError;
-
-    fn reset(&mut self) -> Result<(), MsgError> {
-        try!(self.blob_store.reset());
-        self.hash_index.reset();
-        Ok(())
-    }
 
     fn handle<F: FnOnce(Result<Reply<B>, MsgError>)>(&mut self,
                                                      msg: Msg<IT>,

@@ -74,14 +74,12 @@ pub trait MsgHandler<Msg, Reply>: 'static + Send {
                                                    msg: Msg,
                                                    callback: F)
                                                    -> Result<(), Self::Err>;
-
-    fn reset(&mut self) -> Result<(), Self::Err>;
 }
 
 impl<Msg, Reply, E> Process<Msg, Reply, E>
     where Msg: 'static + Send,
           Reply: 'static + Send,
-          E: 'static + Send + From<mpsc::RecvError> + fmt::Debug
+          E: 'static + Send + fmt::Debug
 {
     /// Create and start a new process using `handler`.
     pub fn new<H>(mut handler: H) -> Process<Msg, Reply, E>
@@ -96,15 +94,11 @@ impl<Msg, Reply, E> Process<Msg, Reply, E>
                     did_reply = true;
                     rep.send(r).expect("Message reply ignored");
                 });
-                match ret {
-                    Ok(()) => assert!(did_reply),
-                    Err(e) => {
-                        if did_reply {
-                            panic!("Encountered unrecoverable error: {:?}", e);
-                        } else {
-                            rep.send(Err(e)).expect("Message reply ignored");
-                        }
-                    }
+                match (ret, did_reply) {
+                    (Ok(()), true) => (),
+                    (Ok(()), false) => panic!("Handler returned without replying"),
+                    (Err(e), true) => panic!("Encountered unrecoverable error: {:?}", e),
+                    (Err(e), false) => rep.send(Err(e)).expect("Message reply ignored"),
                 }
             }
         });
@@ -115,18 +109,10 @@ impl<Msg, Reply, E> Process<Msg, Reply, E>
     /// Synchronous send.
     ///
     /// Will always wait for a reply from the receiving `process`.
-    pub fn send_reply(&self, msg: Msg) -> Result<Reply, E>
-        where E: From<String>
-    {
+    pub fn send_reply(&self, msg: Msg) -> Result<Reply, E> {
         let (sender, receiver) = mpsc::channel();
 
-        if let Err(e) = self.sender.send((msg, sender)) {
-            return Err(From::from(format!("Could not send message; process looks dead: {}", e)));
-        }
-
-        match receiver.recv() {
-            Err(e) => Err(From::from(format!("Could not read reply: {}", e))),
-            Ok(reply) => reply,
-        }
+        self.sender.send((msg, sender)).expect("Could not send message; process looks dead");
+        receiver.recv().expect("Could not read reply")
     }
 }

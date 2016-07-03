@@ -213,11 +213,6 @@ impl BlobIndex {
         self.0.lock().expect("index-process has failed")
     }
 
-    /// Reset in-memory state.
-    pub fn reset(&self) {
-        self.lock().refresh_next_id();
-    }
-
     /// Reserve an internal `BlobDesc` for a new blob.
     pub fn reserve(&self) -> BlobDesc {
         self.lock().reserve()

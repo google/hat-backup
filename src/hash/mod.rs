@@ -505,14 +505,6 @@ impl HashIndex {
         self.0.lock().expect("Hash index was poisoned")
     }
 
-    /// Reset in-memory state.
-    pub fn reset(&self) {
-        let mut state = self.lock();
-
-        state.queue = UniquePriorityQueue::new();
-        state.refresh_id_counter();
-    }
-
     /// Locate the local ID of this hash.
     pub fn get_id(&self, hash: &Hash) -> Option<i64> {
         assert!(!hash.bytes.is_empty());

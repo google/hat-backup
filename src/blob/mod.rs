@@ -171,13 +171,6 @@ impl<B: StoreBackend> StoreInner<B> {
         }
     }
 
-    fn reset(&mut self) {
-        self.blob_index.reset();
-        self.blob_refs.clear();
-        self.blob_data.clear();
-        self.reserve_new_blob();
-    }
-
     fn store(&mut self,
              mut chunk: Vec<u8>,
              kind: Kind,
@@ -272,18 +265,6 @@ impl<B: StoreBackend> BlobStore<B> {
                            -> BlobStore<B> {
         BlobStore(Arc::new(Mutex::new((StoreInner::new(index, backend, max_blob_size),
                                        poison_after))))
-    }
-
-    /// Reset in-memory state of a poisoned process, making it available again.
-    pub fn reset(&self) -> Result<(), MsgError> {
-        let mut guard = try!(self.lock_ignore_poison());
-        if guard.1 != Some(0) {
-            return Err(From::from("This process has not been poisoned".to_string()));
-        }
-        guard.1 = None;
-
-        guard.0.reset();
-        Ok(())
     }
 
     fn lock_ignore_poison(&self) -> Result<MutexGuard<(StoreInner<B>, Option<i64>)>, LockError> {
