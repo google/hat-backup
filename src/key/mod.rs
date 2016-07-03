@@ -148,7 +148,7 @@ impl<B: StoreBackend> Store<B> {
 
     pub fn flush(&mut self) -> Result<(), MsgError> {
         try!(self.blob_store.flush());
-        try!(self.hash_index.flush());
+        self.hash_index.flush();
         try!(self.index.flush());
 
         Ok(())
@@ -179,7 +179,7 @@ impl<IT: Iterator<Item = Vec<u8>>, B: StoreBackend> MsgHandler<Msg<IT>, Reply<B>
 
     fn reset(&mut self) -> Result<(), MsgError> {
         try!(self.blob_store.reset());
-        try!(self.hash_index.reset());
+        self.hash_index.reset();
         Ok(())
     }
 
@@ -233,7 +233,7 @@ impl<IT: Iterator<Item = Vec<u8>>, B: StoreBackend> MsgHandler<Msg<IT>, Reply<B>
                                        org_entry.created == entry.created => {
                         if chunk_it_opt.is_some() && entry.data_hash.is_some() {
                             let hash = hash::Hash { bytes: entry.data_hash.clone().unwrap() };
-                            if try!(self.hash_index.hash_exists(&hash)) {
+                            if self.hash_index.hash_exists(&hash) {
                                 // Short-circuit: We have the data.
                                 return reply_ok!(Reply::Id(entry.id.unwrap()));
                             }

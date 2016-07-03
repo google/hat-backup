@@ -39,11 +39,7 @@ impl error::Error for LockError {
 }
 
 #[derive(Clone, Copy, Debug)]
-pub enum RetryError {
-    Poisoned,
-    RequestLimitReached,
-    Retry,
-}
+pub struct RetryError;
 
 impl fmt::Display for RetryError {
     fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
@@ -53,20 +49,7 @@ impl fmt::Display for RetryError {
 
 impl error::Error for RetryError {
     fn description(&self) -> &str {
-        match *self {
-            RetryError::Poisoned => "Poisoned",
-            RetryError::RequestLimitReached => "Request limit reached",
-            RetryError::Retry => "Retry request",
-        }
-    }
-}
-
-impl From<LockError> for RetryError {
-    fn from(e: LockError) -> RetryError {
-        match e {
-            LockError::Poisoned => RetryError::Poisoned,
-            LockError::RequestLimitReached => RetryError::RequestLimitReached,
-        }
+        "Retry request"
     }
 }
 
@@ -75,6 +58,7 @@ mod hat_error {
     use std::borrow::Cow;
     use std::sync::mpsc;
     use capnp;
+    use void;
 
     use blob;
     use key;
@@ -108,6 +92,12 @@ mod hat_error {
             DieselError(super::DieselError) {
                 cause;
             }
+        }
+    }
+
+    impl From<void::Void> for HatError {
+        fn from(val: void::Void) -> HatError {
+            void::unreachable(val)
         }
     }
 }

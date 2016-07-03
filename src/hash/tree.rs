@@ -58,8 +58,8 @@ pub trait HashTreeBackend: Clone {
     type Err: fmt::Debug;
 
     fn fetch_chunk(&self, &Hash, Option<ChunkRef>) -> Result<Option<Vec<u8>>, Self::Err>;
-    fn fetch_payload(&self, &Hash) -> Result<Option<Vec<u8>>, Self::Err>;
-    fn fetch_persistent_ref(&self, &Hash) -> Result<Option<ChunkRef>, Self::Err>;
+    fn fetch_payload(&self, &Hash) -> Option<Vec<u8>>;
+    fn fetch_persistent_ref(&self, &Hash) -> Option<ChunkRef>;
     fn insert_chunk(&self, &Hash, i64, Option<Vec<u8>>, Vec<u8>) -> Result<ChunkRef, Self::Err>;
 }
 
@@ -312,7 +312,7 @@ impl<B: HashTreeBackend> SimpleHashTreeReader<B> {
         }
 
         let pref = if let None = root_ref {
-                try!(backend.fetch_persistent_ref(root_hash))
+                backend.fetch_persistent_ref(root_hash)
             } else {
                 root_ref
             }

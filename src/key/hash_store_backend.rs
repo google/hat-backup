@@ -88,22 +88,21 @@ impl<B: StoreBackend> HashTreeBackend for HashStoreBackend<B> {
         }))
     }
 
-    fn fetch_persistent_ref(&self, hash: &hash::Hash) -> Result<Option<blob::ChunkRef>, MsgError> {
+    fn fetch_persistent_ref(&self, hash: &hash::Hash) -> Option<blob::ChunkRef> {
         assert!(!hash.bytes.is_empty());
         loop {
             match self.hash_index.fetch_persistent_ref(hash) {
-                Ok(Some(r)) => return Ok(Some(r)), // done
-                Ok(None) => return Ok(None), // done
-                Err(RetryError::Retry) => (),  // continue loop
-                Err(err) => return Err(From::from(err)),
+                Ok(Some(r)) => return Some(r), // done
+                Ok(None) => return None, // done
+                Err(RetryError) => (),  // continue loop
             }
         }
     }
 
-    fn fetch_payload(&self, hash: &hash::Hash) -> Result<Option<Vec<u8>>, MsgError> {
-        match try!(self.hash_index.fetch_payload(hash)) {
-            Some(p) => Ok(p), // done
-            None => Ok(None), // done
+    fn fetch_payload(&self, hash: &hash::Hash) -> Option<Vec<u8>> {
+        match self.hash_index.fetch_payload(hash) {
+            Some(p) => p, // done
+            None => None, // done
         }
     }
 
@@ -122,10 +121,10 @@ impl<B: StoreBackend> HashTreeBackend for HashStoreBackend<B> {
             persistent_ref: None,
         };
 
-        match try!(self.hash_index.reserve(&hash_entry)) {
+        match self.hash_index.reserve(&hash_entry) {
             hash::ReserveResult::HashKnown(..) => {
                 // Someone came before us: piggyback on their result.
-                Ok(try!(self.fetch_persistent_ref(hash))
+                Ok(self.fetch_persistent_ref(hash)
                     .expect("Could not find persistent_ref for known chunk."))
             }
             hash::ReserveResult::ReserveOk(..) => {
@@ -134,7 +133,7 @@ impl<B: StoreBackend> HashTreeBackend for HashStoreBackend<B> {
 
                 let local_hash = hash.clone();
                 let callback = Box::new(move |chunk_ref: blob::ChunkRef| {
-                    local_hash_index.commit(&local_hash, chunk_ref).unwrap();
+                    local_hash_index.commit(&local_hash, chunk_ref);
                 });
                 let kind = if level == 0 {
                     blob::Kind::TreeLeaf
@@ -143,7 +142,7 @@ impl<B: StoreBackend> HashTreeBackend for HashStoreBackend<B> {
                 };
                 let chunk_ref = try!(self.blob_store.store(chunk, kind, callback));
                 hash_entry.persistent_ref = Some(chunk_ref.clone());
-                try!(self.hash_index.update_reserved(hash_entry));
+                self.hash_index.update_reserved(hash_entry);
                 Ok(chunk_ref)
             }
         }

@@ -58,16 +58,16 @@ impl HashTreeBackend for MemoryBackend {
         Ok(guarded_chunks.get(&hash.bytes).map(|&(_, _, ref chunk)| chunk.clone()))
     }
 
-    fn fetch_payload(&self, hash: &Hash) -> Result<Option<Vec<u8>>, Self::Err> {
+    fn fetch_payload(&self, hash: &Hash) -> Option<Vec<u8>> {
         let guarded_chunks = self.chunks.lock().unwrap();
-        Ok(guarded_chunks.get(&hash.bytes).and_then(|&(_, ref payload, _)| payload.clone()))
+        guarded_chunks.get(&hash.bytes).and_then(|&(_, ref payload, _)| payload.clone())
     }
 
-    fn fetch_persistent_ref(&self, hash: &Hash) -> Result<Option<ChunkRef>, Self::Err> {
+    fn fetch_persistent_ref(&self, hash: &Hash) -> Option<ChunkRef> {
         let guarded_chunks = self.chunks.lock().unwrap();
         match guarded_chunks.get(&hash.bytes) {
             Some(&(ref level, _, ref chunk)) => {
-                Ok(Some(ChunkRef {
+                Some(ChunkRef {
                     blob_id: hash.bytes.clone(),
                     offset: 0,
                     length: chunk.len(),
@@ -76,9 +76,9 @@ impl HashTreeBackend for MemoryBackend {
                     } else {
                         Kind::TreeBranch
                     },
-                }))
+                })
             }
-            None => Ok(None),
+            None => None,
         }
     }
 
