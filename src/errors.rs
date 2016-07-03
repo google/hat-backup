@@ -18,32 +18,7 @@ pub use self::hat_error::HatError;
 pub use self::diesel_error::DieselError;
 
 #[derive(Clone, Copy, Debug)]
-pub enum LockError {
-    Poisoned,
-    RequestLimitReached,
-}
-
-impl fmt::Display for LockError {
-    fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
-        (self as &fmt::Debug).fmt(f)
-    }
-}
-
-impl error::Error for LockError {
-    fn description(&self) -> &str {
-        match *self {
-            LockError::Poisoned => "Poisoned",
-            LockError::RequestLimitReached => "Request limit reached",
-        }
-    }
-}
-
-#[derive(Clone, Copy, Debug)]
-pub enum RetryError {
-    Poisoned,
-    RequestLimitReached,
-    Retry,
-}
+pub struct RetryError;
 
 impl fmt::Display for RetryError {
     fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
@@ -53,20 +28,7 @@ impl fmt::Display for RetryError {
 
 impl error::Error for RetryError {
     fn description(&self) -> &str {
-        match *self {
-            RetryError::Poisoned => "Poisoned",
-            RetryError::RequestLimitReached => "Request limit reached",
-            RetryError::Retry => "Retry request",
-        }
-    }
-}
-
-impl From<LockError> for RetryError {
-    fn from(e: LockError) -> RetryError {
-        match e {
-            LockError::Poisoned => RetryError::Poisoned,
-            LockError::RequestLimitReached => RetryError::RequestLimitReached,
-        }
+        "Retry request"
     }
 }
 
@@ -75,8 +37,8 @@ mod hat_error {
     use std::borrow::Cow;
     use std::sync::mpsc;
     use capnp;
+    use void;
 
-    use blob;
     use key;
 
     error_type! {
@@ -86,9 +48,6 @@ mod hat_error {
                 cause;
             },
             Keys(key::MsgError) {
-                cause;
-            },
-            Blobs(blob::MsgError) {
                 cause;
             },
             DataSerialization(capnp::Error) {
@@ -102,12 +61,15 @@ mod hat_error {
                 from (s: &'static str) s.into();
                 from (s: String) s.into();
             },
-            LockError(super::LockError) {
-                cause;
-            },
             DieselError(super::DieselError) {
                 cause;
             }
+        }
+    }
+
+    impl From<void::Void> for HatError {
+        fn from(val: void::Void) -> HatError {
+            void::unreachable(val)
         }
     }
 }

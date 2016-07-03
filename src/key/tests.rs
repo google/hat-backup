@@ -209,7 +209,7 @@ fn verify_filesystem<B: StoreBackend>(fs: &FileSystem, ks_p: &StoreProcess<Entry
 fn identity() {
     fn prop(size: u8) -> bool {
         let backend = Arc::new(MemoryBackend::new());
-        let ks_p = Process::new(move || Store::new_for_testing(backend)).unwrap();
+        let ks_p = Process::new(Store::new_for_testing(backend).unwrap());
 
         let mut fs = rng_filesystem(size as usize);
         insert_and_update_fs(&mut fs, &ks_p);
