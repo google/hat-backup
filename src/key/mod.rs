@@ -14,8 +14,8 @@
 
 //! External API for creating and manipulating snapshots.
 
+use std::sync::Arc;
 use std::borrow::Cow;
-use std::sync::{Arc, mpsc};
 
 use backend::StoreBackend;
 use blob;
@@ -23,7 +23,7 @@ use hash;
 use hash::tree::{ReaderResult, SimpleHashTreeReader, SimpleHashTreeWriter};
 
 use util::{FnBox, MsgHandler, Process};
-use errors::{DieselError, LockError, RetryError};
+use errors::{DieselError, RetryError};
 
 mod schema;
 mod index;
@@ -41,21 +41,12 @@ pub use self::index::{Entry, KeyIndex};
 error_type! {
     #[derive(Debug)]
     pub enum MsgError {
-        Recv(mpsc::RecvError) {
-            cause;
-        },
         Message(Cow<'static, str>) {
             desc (e) &**e;
             from (s: &'static str) s.into();
             from (s: String) s.into();
         },
-        Blobs(blob::MsgError) {
-            cause;
-        },
         RetryError(RetryError) {
-            cause;
-        },
-        LockError(LockError) {
             cause;
         },
         DieselError(DieselError) {
@@ -125,16 +116,16 @@ impl<B: StoreBackend> Store<B> {
     pub fn new(index: Arc<index::KeyIndex>,
                hash_index: Arc<hash::HashIndex>,
                blob_store: Arc<blob::BlobStore<B>>)
-               -> Result<Store<B>, MsgError> {
-        Ok(Store {
+               -> Store<B> {
+        Store {
             index: index,
             hash_index: hash_index,
             blob_store: blob_store,
-        })
+        }
     }
 
     #[cfg(test)]
-    pub fn new_for_testing(backend: Arc<B>, max_blob_size: usize) -> Result<Store<B>, MsgError> {
+    pub fn new_for_testing(backend: Arc<B>, max_blob_size: usize) -> Result<Store<B>, DieselError> {
         let ki_p = Arc::new(try!(index::KeyIndex::new_for_testing()));
         let hi_p = Arc::new(try!(hash::HashIndex::new_for_testing()));
         let blob_index = Arc::new(try!(blob::BlobIndex::new_for_testing()));
@@ -147,8 +138,8 @@ impl<B: StoreBackend> Store<B> {
     }
 
     pub fn flush(&mut self) -> Result<(), MsgError> {
-        try!(self.blob_store.flush());
-        try!(self.hash_index.flush());
+        self.blob_store.flush();
+        self.hash_index.flush();
         try!(self.index.flush());
 
         Ok(())
@@ -176,12 +167,6 @@ fn file_size_warning(name: &[u8], wanted: u64, got: u64) {
 
 impl<IT: Iterator<Item = Vec<u8>>, B: StoreBackend> MsgHandler<Msg<IT>, Reply<B>> for Store<B> {
     type Err = MsgError;
-
-    fn reset(&mut self) -> Result<(), MsgError> {
-        try!(self.blob_store.reset());
-        try!(self.hash_index.reset());
-        Ok(())
-    }
 
     fn handle<F: FnOnce(Result<Reply<B>, MsgError>)>(&mut self,
                                                      msg: Msg<IT>,
@@ -233,7 +218,7 @@ impl<IT: Iterator<Item = Vec<u8>>, B: StoreBackend> MsgHandler<Msg<IT>, Reply<B>
                                        org_entry.created == entry.created => {
                         if chunk_it_opt.is_some() && entry.data_hash.is_some() {
                             let hash = hash::Hash { bytes: entry.data_hash.clone().unwrap() };
-                            if try!(self.hash_index.hash_exists(&hash)) {
+                            if self.hash_index.hash_exists(&hash) {
                                 // Short-circuit: We have the data.
                                 return reply_ok!(Reply::Id(entry.id.unwrap()));
                             }

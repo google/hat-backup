@@ -1,5 +1,3 @@
-use sodiumoxide::randombytes::randombytes;
-
 use capnp;
 use root_capnp;
 
