@@ -18,80 +18,19 @@ use std::mem;
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::thread;
 
-use capnp;
-use root_capnp;
-
 use backend::StoreBackend;
 use tags;
 use util::FnBox;
 
 
+mod blob;
 mod index;
 mod schema;
 #[cfg(test)]
 pub mod tests;
 
+pub use self::blob::{Blob, ChunkRef, Kind};
 pub use self::index::{BlobDesc, BlobIndex};
-
-#[derive(Debug, Clone, Eq, PartialEq)]
-pub enum Kind {
-    TreeBranch = 1,
-    TreeLeaf = 2,
-}
-
-#[derive(Debug, Clone, Eq, PartialEq)]
-pub struct ChunkRef {
-    pub blob_id: Vec<u8>,
-    pub offset: usize,
-    pub length: usize,
-    pub kind: Kind,
-}
-
-impl ChunkRef {
-    pub fn from_bytes(bytes: &mut &[u8]) -> Result<ChunkRef, capnp::Error> {
-        let reader = try!(capnp::serialize_packed::read_message(bytes,
-                                                       capnp::message::ReaderOptions::new()));
-        let root = try!(reader.get_root::<root_capnp::chunk_ref::Reader>());
-
-        Ok(try!(ChunkRef::read_msg(&root)))
-    }
-
-    pub fn as_bytes(&self) -> Vec<u8> {
-        let mut message = ::capnp::message::Builder::new_default();
-        {
-            let mut root = message.init_root::<root_capnp::chunk_ref::Builder>();
-            self.populate_msg(root.borrow());
-        }
-
-        let mut out = Vec::new();
-        capnp::serialize_packed::write_message(&mut out, &message).unwrap();
-
-        out
-    }
-
-    pub fn populate_msg(&self, msg: root_capnp::chunk_ref::Builder) {
-        let mut msg = msg;
-        msg.set_blob_id(&self.blob_id[..]);
-        msg.set_offset(self.offset as i64);
-        msg.set_length(self.length as i64);
-        match self.kind {
-            Kind::TreeLeaf => msg.init_kind().set_tree_leaf(()),
-            Kind::TreeBranch => msg.init_kind().set_tree_branch(()),
-        }
-    }
-
-    pub fn read_msg(msg: &root_capnp::chunk_ref::Reader) -> Result<ChunkRef, capnp::Error> {
-        Ok(ChunkRef {
-            blob_id: try!(msg.get_blob_id()).to_owned(),
-            offset: msg.get_offset() as usize,
-            length: msg.get_length() as usize,
-            kind: match try!(msg.get_kind().which()) {
-                root_capnp::chunk_ref::kind::TreeBranch(()) => Kind::TreeBranch,
-                root_capnp::chunk_ref::kind::TreeLeaf(()) => Kind::TreeLeaf,
-            },
-        })
-    }
-}
 
 
 pub struct BlobStore<B>(Arc<Mutex<StoreInner<B>>>);
@@ -101,11 +40,8 @@ pub struct StoreInner<B> {
 
     blob_index: Arc<BlobIndex>,
     blob_desc: BlobDesc,
-
-    blob_data: Vec<u8>,
     blob_refs: Vec<(ChunkRef, Box<FnBox<ChunkRef, ()>>)>,
-
-    max_blob_size: usize,
+    blob: Blob,
 }
 
 impl<B: StoreBackend> StoreInner<B> {
@@ -115,8 +51,7 @@ impl<B: StoreBackend> StoreInner<B> {
             blob_index: index,
             blob_desc: Default::default(),
             blob_refs: Vec::new(),
-            blob_data: Vec::with_capacity(max_blob_size),
-            max_blob_size: max_blob_size,
+            blob: Blob::new(max_blob_size),
         };
         bs.reserve_new_blob();
         bs
@@ -127,17 +62,19 @@ impl<B: StoreBackend> StoreInner<B> {
     }
 
     fn flush(&mut self) {
-        if self.blob_data.len() == 0 {
+        let length = self.blob.upperbound_len();
+        if length == 0 {
             return;
         }
 
         // Replace blob id
         let old_blob_desc = self.reserve_new_blob();
 
-        let old_blob = mem::replace(&mut self.blob_data, Vec::with_capacity(self.max_blob_size));
+        let mut data = Vec::with_capacity(length);
+        self.blob.into_bytes(&mut data);
 
         self.blob_index.in_air(&old_blob_desc);
-        self.backend.store(&old_blob_desc.name[..], &old_blob[..]).expect("Store operation failed");
+        self.backend.store(&old_blob_desc.name[..], &data[..]).expect("Store operation failed");
         self.blob_index.commit_done(&old_blob_desc);
 
         // Go through callbacks
@@ -146,14 +83,8 @@ impl<B: StoreBackend> StoreInner<B> {
         }
     }
 
-    fn maybe_flush(&mut self) {
-        if self.blob_data.len() >= self.max_blob_size {
-            self.flush();
-        }
-    }
-
     fn store(&mut self,
-             mut chunk: Vec<u8>,
+             chunk: Vec<u8>,
              kind: Kind,
              callback: Box<FnBox<ChunkRef, ()>>)
              -> ChunkRef {
@@ -169,16 +100,21 @@ impl<B: StoreBackend> StoreInner<B> {
             return id;
         }
 
-        let id = ChunkRef {
+        let mut id = ChunkRef {
             blob_id: self.blob_desc.name.clone(),
-            offset: self.blob_data.len(),
+            offset: self.blob.chunk_len(),
             length: chunk.len(),
             kind: kind,
         };
 
+        if let Err(chunk) = self.blob.try_append(chunk, &id) {
+            self.flush();
+
+            id.blob_id = self.blob_desc.name.clone();
+            id.offset = 0;
+            self.blob.try_append(chunk, &id).unwrap();
+        }
         self.blob_refs.push((id.clone(), callback));
-        self.blob_data.append(&mut chunk);
-        drop(chunk);  // now empty.
 
         // To avoid unnecessary blocking, we reply with the ID *before* possibly flushing.
         id
@@ -252,16 +188,7 @@ impl<B: StoreBackend> BlobStore<B> {
                  callback: Box<FnBox<ChunkRef, ()>>)
                  -> ChunkRef {
         let mut guard = self.lock();
-        let res = guard.store(chunk, kind, callback);
-        drop(guard);
-
-        let inner: Arc<Mutex<StoreInner<B>>> = self.0.clone();
-        thread::spawn(move || {
-            let mut guard = inner.lock().unwrap();
-            guard.maybe_flush();
-        });
-
-        res
+        guard.store(chunk, kind, callback)
     }
 
     /// Retrieve the data chunk identified by `ChunkRef`.

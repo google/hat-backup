@@ -23,7 +23,7 @@ use util::FileIterator;
 
 
 pub fn setup_hat<B: StoreBackend>(backend: Arc<B>) -> HatRc<B> {
-    let max_blob_size = 1024 * 1024;
+    let max_blob_size = 4 * 1024 * 1024;
     HatRc::new_for_testing(backend, max_blob_size).unwrap()
 }
 

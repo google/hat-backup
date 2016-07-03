@@ -125,11 +125,11 @@ impl<B: StoreBackend> Store<B> {
     }
 
     #[cfg(test)]
-    pub fn new_for_testing(backend: Arc<B>) -> Result<Store<B>, DieselError> {
+    pub fn new_for_testing(backend: Arc<B>, max_blob_size: usize) -> Result<Store<B>, DieselError> {
         let ki_p = Arc::new(try!(index::KeyIndex::new_for_testing()));
         let hi_p = Arc::new(try!(hash::HashIndex::new_for_testing()));
         let blob_index = Arc::new(try!(blob::BlobIndex::new_for_testing()));
-        let bs_p = Arc::new(blob::BlobStore::new(blob_index, backend, 1024));
+        let bs_p = Arc::new(blob::BlobStore::new(blob_index, backend, max_blob_size));
         Ok(Store {
             index: ki_p,
             hash_index: hi_p,
