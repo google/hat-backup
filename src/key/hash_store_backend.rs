@@ -140,7 +140,7 @@ impl<B: StoreBackend> HashTreeBackend for HashStoreBackend<B> {
                 } else {
                     blob::Kind::TreeBranch
                 };
-                let chunk_ref = try!(self.blob_store.store(chunk, kind, callback));
+                let chunk_ref = self.blob_store.store(chunk, kind, callback);
                 hash_entry.persistent_ref = Some(chunk_ref.clone());
                 self.hash_index.update_reserved(hash_entry);
                 Ok(chunk_ref)

@@ -14,7 +14,6 @@
 
 //! Combines data chunks into larger blobs to be stored externally.
 
-use std::borrow::Cow;
 use std::mem;
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::thread;
@@ -23,7 +22,6 @@ use capnp;
 use root_capnp;
 
 use backend::StoreBackend;
-use errors::LockError;
 use tags;
 use util::FnBox;
 
@@ -34,23 +32,6 @@ mod schema;
 pub mod tests;
 
 pub use self::index::{BlobDesc, BlobIndex};
-
-
-error_type! {
-    #[derive(Debug)]
-    pub enum MsgError {
-        Lock(LockError) {
-            cause;
-        },
-        Message(Cow<'static, str>) {
-            desc (e) &**e;
-            from (s: &'static str) s.into();
-            from (s: String) s.into();
-        },
-    }
-}
-
-
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub enum Kind {
@@ -113,7 +94,7 @@ impl ChunkRef {
 }
 
 
-pub struct BlobStore<B>(Arc<Mutex<(StoreInner<B>, Option<i64>)>>);
+pub struct BlobStore<B>(Arc<Mutex<StoreInner<B>>>);
 
 pub struct StoreInner<B> {
     backend: Arc<B>,
@@ -255,37 +236,11 @@ impl<B: StoreBackend> StoreInner<B> {
 
 impl<B: StoreBackend> BlobStore<B> {
     pub fn new(index: Arc<BlobIndex>, backend: Arc<B>, max_blob_size: usize) -> BlobStore<B> {
-        BlobStore::new_with_poison(index, backend, max_blob_size, None)
+        BlobStore(Arc::new(Mutex::new(StoreInner::new(index, backend, max_blob_size))))
     }
 
-    pub fn new_with_poison(index: Arc<BlobIndex>,
-                           backend: Arc<B>,
-                           max_blob_size: usize,
-                           poison_after: Option<i64>)
-                           -> BlobStore<B> {
-        BlobStore(Arc::new(Mutex::new((StoreInner::new(index, backend, max_blob_size),
-                                       poison_after))))
-    }
-
-    fn lock_ignore_poison(&self) -> Result<MutexGuard<(StoreInner<B>, Option<i64>)>, LockError> {
-        match self.0.lock() {
-            Err(_) => return Err(LockError::Poisoned),
-            Ok(lock) => Ok(lock),
-        }
-    }
-
-    fn lock(&self) -> Result<MutexGuard<(StoreInner<B>, Option<i64>)>, LockError> {
-        let mut guard = try!(self.lock_ignore_poison());
-
-        match &mut guard.1 {
-            &mut None => (),
-            &mut Some(0) => return Err(LockError::RequestLimitReached),
-            &mut Some(ref mut n) => {
-                *n -= 1;
-            }
-        }
-
-        Ok(guard)
+    fn lock(&self) -> MutexGuard<StoreInner<B>> {
+        self.0.lock().expect("Blob store was poisoned")
     }
 
     /// Store a new data chunk into the current blob. The callback is triggered after the blob
@@ -295,71 +250,56 @@ impl<B: StoreBackend> BlobStore<B> {
                  chunk: Vec<u8>,
                  kind: Kind,
                  callback: Box<FnBox<ChunkRef, ()>>)
-                 -> Result<ChunkRef, LockError> {
-        let mut guard = try!(self.lock());
-        let res = guard.0.store(chunk, kind, callback);
+                 -> ChunkRef {
+        let mut guard = self.lock();
+        let res = guard.store(chunk, kind, callback);
         drop(guard);
 
-        let inner: Arc<Mutex<(StoreInner<B>, Option<i64>)>> = self.0.clone();
+        let inner: Arc<Mutex<StoreInner<B>>> = self.0.clone();
         thread::spawn(move || {
             let mut guard = inner.lock().unwrap();
-            guard.0.maybe_flush();
+            guard.maybe_flush();
         });
 
-        Ok(res)
+        res
     }
 
     /// Retrieve the data chunk identified by `ChunkRef`.
-    pub fn retrieve(&self, id: &ChunkRef) -> Result<Option<Vec<u8>>, MsgError> {
-        let mut guard = try!(self.lock());
-        let res = try!(guard.0.retrieve(id));
-        Ok(res)
+    pub fn retrieve(&self, id: &ChunkRef) -> Result<Option<Vec<u8>>, String> {
+        self.lock().retrieve(id)
     }
 
     /// Store a full named blob (used for writing root).
-    pub fn store_named(&self, name: &str, data: &[u8]) -> Result<(), MsgError> {
-        let mut guard = try!(self.lock());
-        try!(guard.0.store_named(name, data));
-        Ok(())
+    pub fn store_named(&self, name: &str, data: &[u8]) -> Result<(), String> {
+        self.lock().store_named(name, data)
     }
 
     /// Retrieve full named blob.
-    pub fn retrieve_named(&self, name: &str) -> Result<Option<Vec<u8>>, MsgError> {
-        let mut guard = try!(self.lock());
-        let res = try!(guard.0.retrieve_named(name));
-        Ok(res)
+    pub fn retrieve_named(&self, name: &str) -> Result<Option<Vec<u8>>, String> {
+        self.lock().retrieve_named(name)
     }
 
     /// Reinstall a blob recovered from external storage.
-    pub fn recover(&self, chunk: ChunkRef) -> Result<(), LockError> {
-        let mut guard = try!(self.lock());
-        guard.0.recover(chunk);
-        Ok(())
+    pub fn recover(&self, chunk: ChunkRef) {
+        self.lock().recover(chunk)
     }
 
-    pub fn tag(&self, chunk: ChunkRef, tag: tags::Tag) -> Result<(), LockError> {
-        let mut guard = try!(self.lock());
-        guard.0.tag(chunk, tag);
-        Ok(())
+    pub fn tag(&self, chunk: ChunkRef, tag: tags::Tag) {
+        self.lock().tag(chunk, tag)
     }
 
-    pub fn tag_all(&self, tag: tags::Tag) -> Result<(), LockError> {
-        let mut guard = try!(self.lock());
-        guard.0.tag_all(tag);
-        Ok(())
+    pub fn tag_all(&self, tag: tags::Tag) {
+        self.lock().tag_all(tag)
     }
 
-    pub fn delete_by_tag(&self, tag: tags::Tag) -> Result<(), MsgError> {
-        let mut guard = try!(self.lock());
-        try!(guard.0.delete_by_tag(tag));
-        Ok(())
+    pub fn delete_by_tag(&self, tag: tags::Tag) -> Result<(), String> {
+        self.lock().delete_by_tag(tag)
     }
 
     /// Flush the current blob, independent of its size.
-    pub fn flush(&self) -> Result<(), LockError> {
-        let mut guard = try!(self.lock());
-        guard.0.flush();
-        guard.0.blob_index.flush();
-        Ok(())
+    pub fn flush(&self) {
+        let mut guard = self.lock();
+        guard.flush();
+        guard.blob_index.flush();
     }
 }

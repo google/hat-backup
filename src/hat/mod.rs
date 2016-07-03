@@ -352,7 +352,7 @@ impl<B: StoreBackend> HatRc<B> {
             let pref = entry.persistent_ref.clone().unwrap();
 
             // Make sure we have the blob described.
-            try!(blobs.recover(pref.clone()));
+            blobs.recover(pref.clone());
 
             // Now insert the hash information if needed.
             let id = match hashes.reserve(entry) {
@@ -393,7 +393,7 @@ impl<B: StoreBackend> HatRc<B> {
         });
 
         try!(self.gc.register(&info, id_receiver));
-        try!(self.flush_blob_store());
+        self.flush_blob_store();
 
         // Recover final root hash for the snapshot.
         try!(recover_entry(&self.hash_index,
@@ -627,7 +627,7 @@ impl<B: StoreBackend> HatRc<B> {
 
         // Push any remaining data to external storage.
         // This also flushes our hashes from the memory index, so we can tag them.
-        try!(self.flush_blob_store());
+        self.flush_blob_store();
 
         // Tag 2:
         // We update the snapshot entry with the tree hash, which we then register.
@@ -682,9 +682,8 @@ impl<B: StoreBackend> HatRc<B> {
         self.snapshot_index.flush();
     }
 
-    pub fn flush_blob_store(&self) -> Result<(), HatError> {
-        try!(self.blob_store.flush());
-        Ok(())
+    pub fn flush_blob_store(&self) {
+        self.blob_store.flush();
     }
 
     pub fn checkout_in_dir(&mut self,
@@ -835,19 +834,19 @@ impl<B: StoreBackend> HatRc<B> {
         self.hash_index.flush();
         // Mark used blobs.
         let entries = self.hash_index.list();
-        try!(self.blob_store.tag_all(tags::Tag::InProgress));
+        self.blob_store.tag_all(tags::Tag::InProgress);
 
         let mut live_blobs = 0;
         for entry in entries.into_iter() {
             if let Some(pref) = entry.persistent_ref {
                 live_blobs += 1;
-                try!(self.blob_store.tag(pref, tags::Tag::Reserved));
+                self.blob_store.tag(pref, tags::Tag::Reserved);
             }
         }
         // Anything still marked "in progress" is not referenced by any hash.
         try!(self.blob_store.delete_by_tag(tags::Tag::InProgress));
-        try!(self.blob_store.tag_all(tags::Tag::Done));
-        try!(self.blob_store.flush());
+        self.blob_store.tag_all(tags::Tag::Done);
+        self.blob_store.flush();
 
         Ok((deleted_hashes, live_blobs))
     }

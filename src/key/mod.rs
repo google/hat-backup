@@ -15,6 +15,7 @@
 //! External API for creating and manipulating snapshots.
 
 use std::sync::Arc;
+use std::borrow::Cow;
 
 use backend::StoreBackend;
 use blob;
@@ -22,7 +23,7 @@ use hash;
 use hash::tree::{ReaderResult, SimpleHashTreeReader, SimpleHashTreeWriter};
 
 use util::{FnBox, MsgHandler, Process};
-use errors::{DieselError, LockError, RetryError};
+use errors::{DieselError, RetryError};
 
 mod schema;
 mod index;
@@ -40,13 +41,12 @@ pub use self::index::{Entry, KeyIndex};
 error_type! {
     #[derive(Debug)]
     pub enum MsgError {
-        Blobs(blob::MsgError) {
-            cause;
+        Message(Cow<'static, str>) {
+            desc (e) &**e;
+            from (s: &'static str) s.into();
+            from (s: String) s.into();
         },
         RetryError(RetryError) {
-            cause;
-        },
-        LockError(LockError) {
             cause;
         },
         DieselError(DieselError) {
@@ -138,7 +138,7 @@ impl<B: StoreBackend> Store<B> {
     }
 
     pub fn flush(&mut self) -> Result<(), MsgError> {
-        try!(self.blob_store.flush());
+        self.blob_store.flush();
         self.hash_index.flush();
         try!(self.index.flush());
 
