@@ -269,10 +269,10 @@ impl<B: StoreBackend> HatRc<B> {
 
         let ki_p = Arc::new(try!(key::KeyIndex::new(&key_index_path)));
 
-        let local_ks = key::Store::new(ki_p.clone(),
-                                       self.hash_index.clone(),
-                                       self.blob_store.clone());
-        let ks_p = try!(Process::new(move || local_ks));
+        let local_ks = try!(key::Store::new(ki_p.clone(),
+                                            self.hash_index.clone(),
+                                            self.blob_store.clone()));
+        let ks_p = Process::new(local_ks);
 
         let ks = try!(key::Store::new(ki_p, self.hash_index.clone(), self.blob_store.clone()));
 
