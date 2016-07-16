@@ -107,24 +107,24 @@ fn blobid_identity() {
 
 #[test]
 fn blob_reuse() {
-    let c = ChunkRef {
+    let mut c = ChunkRef {
         blob_id: Vec::new(),
         offset: 0,
         length: 1,
         kind: Kind::TreeLeaf,
     };
     let mut b = Blob::new(100);
-    b.try_append(vec![1, 2, 3], &c).unwrap();
-    b.try_append(vec![4, 5, 6], &c).unwrap();
+    b.try_append(vec![1, 2, 3], &mut c).unwrap();
+    b.try_append(vec![4, 5, 6], &mut c).unwrap();
 
     let mut out = Vec::new();
     b.into_bytes(&mut out);
 
     assert_eq!(&[1, 2, 3, 4, 5, 6], &out[0..6]);
 
-    b.try_append(vec![1, 2], &c).unwrap();
-    b.try_append(vec![1, 2], &c).unwrap();
-    b.try_append(vec![1, 2], &c).unwrap();
+    b.try_append(vec![1, 2], &mut c).unwrap();
+    b.try_append(vec![1, 2], &mut c).unwrap();
+    b.try_append(vec![1, 2], &mut c).unwrap();
 
     out.clear();
     b.into_bytes(&mut out);
@@ -138,7 +138,7 @@ fn blob_identity() {
         let mut b = Blob::new(max_size);
         for chunk in chunks.iter() {
             if let Err(_) = b.try_append(chunk.clone(),
-                                         &ChunkRef {
+                                         &mut ChunkRef {
                                              blob_id: Vec::new(),
                                              offset: 0,
                                              length: chunk.len(),
@@ -159,7 +159,7 @@ fn blob_identity() {
 
         assert_eq!(max_size, out.len());
 
-        let crefs = Blob::chunk_refs_from_bytes(&out).unwrap();
+        let crefs = Blob::new(max_size).chunk_refs_from_bytes(&out).unwrap();
         assert_eq!(chunks.len(), crefs.len());
 
         // Check recovered ChunkRefs.

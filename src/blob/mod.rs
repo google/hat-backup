@@ -23,13 +23,15 @@ use tags;
 use util::FnBox;
 
 
+mod chunk;
 mod blob;
 mod index;
 mod schema;
 #[cfg(test)]
 pub mod tests;
 
-pub use self::blob::{Blob, ChunkRef, Kind};
+pub use self::chunk::{ChunkRef, Kind};
+pub use self::blob::Blob;
 pub use self::index::{BlobDesc, BlobIndex};
 
 
@@ -107,12 +109,12 @@ impl<B: StoreBackend> StoreInner<B> {
             kind: kind,
         };
 
-        if let Err(chunk) = self.blob.try_append(chunk, &id) {
+        if let Err(chunk) = self.blob.try_append(chunk, &mut id) {
             self.flush();
 
             id.blob_id = self.blob_desc.name.clone();
             id.offset = 0;
-            self.blob.try_append(chunk, &id).unwrap();
+            self.blob.try_append(chunk, &mut id).unwrap();
         }
         self.blob_refs.push((id.clone(), callback));
 

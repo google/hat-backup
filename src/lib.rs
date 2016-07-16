@@ -48,6 +48,7 @@ extern crate quickcheck;
 // Submodules
 pub mod backend;
 mod blob;
+mod crypto;
 mod errors;
 mod gc;
 mod hash;
