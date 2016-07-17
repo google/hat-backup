@@ -52,11 +52,18 @@ impl Iterator for FileIterator {
         let chunk_size = 128 * 1024;
         match self {
             &mut FileIterator::File(ref mut f) => {
+                let mut read = 0;
                 let mut buf = vec![0u8; chunk_size];
-                match f.read(&mut buf[..]) {
-                    Err(_) => None,
-                    Ok(size) if size == 0 => None,
-                    Ok(size) => Some(buf[..size].to_vec()),
+                while read < chunk_size {
+                    read += match f.read(&mut buf[read..]) {
+                        Err(_) | Ok(0) => break,
+                        Ok(size) => size,
+                    }
+                }
+                if read == 0 {
+                    None
+                } else {
+                    Some(buf[..read].to_vec())
                 }
             }
             #[cfg(test)]
