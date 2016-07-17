@@ -18,7 +18,7 @@ use std::io::Read;
 use std::path::PathBuf;
 
 pub enum FileIterator {
-    File(fs::File),
+    File(io::BufReader<fs::File>),
     #[cfg(test)]
     Buf(Vec<u8>, usize),
     #[cfg(all(test, feature = "benchmarks"))]
@@ -28,7 +28,7 @@ pub enum FileIterator {
 impl FileIterator {
     pub fn new(path: &PathBuf) -> io::Result<FileIterator> {
         match fs::File::open(path) {
-            Ok(f) => Ok(FileIterator::File(f)),
+            Ok(f) => Ok(FileIterator::File(io::BufReader::new(f))),
             Err(e) => Err(e),
         }
     }
