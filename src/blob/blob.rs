@@ -96,8 +96,8 @@ impl Blob {
             return Ok(Vec::new());
         }
 
-        let footer_vec = self.master_key.unseal(CipherTextRef::new(bytes)).into_vec();
-        let mut footer_pos = &footer_vec[..];
+        let (_rest, footer_vec) = self.master_key.unseal(CipherTextRef::new(bytes));
+        let mut footer_pos = footer_vec.as_ref();
 
         let mut crefs = Vec::new();
         while footer_pos.len() > 0 {

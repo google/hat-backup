@@ -1,5 +1,6 @@
 use sodiumoxide::crypto::stream;
 use blob::{ChunkRef, Kind};
+use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 
 
 pub struct PlainText(Vec<u8>);
@@ -24,6 +25,9 @@ impl PlainText {
     }
     pub fn into_vec(self) -> Vec<u8> {
         self.0
+    }
+    pub fn as_ref(&self) -> &[u8] {
+        &self.0[..]
     }
 }
 
@@ -106,76 +110,50 @@ impl FixedKey {
         FixedKey { key: key }
     }
 
-    fn fixed_key_seal(&self, pt: PlainText) -> CipherText {
+    pub fn seal(&self, pt: PlainText) -> CipherText {
         // TODO(jos): WIP: Plug in encryption/crypto here.
         // Seal with our fixed key.
         let nonce = stream::xsalsa20::gen_nonce();
-        let mut version = vec![pt.len() as u8, 0, 0, 1];
         let mut ct = CipherText(pt.0);
 
-        // Add nonce.
-        ct.0.extend_from_slice(nonce.as_ref());
+        // Serialize ciphertext length.
+        let mut ct_len = vec![];
+        ct_len.write_u64::<LittleEndian>(ct.len() as u64).unwrap();
+        assert_eq!(ct_len.len(), 8);
 
-        // Add version with size of ciphertext.
-        assert!(ct.len() < 255);
-        version[0] = ct.len() as u8;
-        ct.0.extend_from_slice(&version[..]);
+        // Add nonce and ciphertext length.
+        ct.0.extend_from_slice(nonce.as_ref());
+        ct.0.extend_from_slice(&ct_len[..]);
+        // Add version.
+        ct.0.extend_from_slice(&[1]);
         ct
     }
 
-    fn ciphertext_and_version<'a>(ct: CipherTextRef<'a>) -> (CipherTextRef<'a>, CipherTextRef<'a>) {
-        let (rest, version) = ct.split_from_right(4);
-
-        assert_eq!(1, version.0[3]);
-        assert_eq!(0, version.0[2]);
-        assert_eq!(0, version.0[1]);
-        assert!(rest.len() >= version.0[0] as usize);
-
+    fn version<'a>(ct: CipherTextRef<'a>) -> (CipherTextRef<'a>, CipherTextRef<'a>) {
+        let (rest, version) = ct.split_from_right(1);
+        assert_eq!(1, version.0[0]);
         (rest, version)
     }
 
-    fn fixed_key_unseal<'a, 'b>(&'a self, ct: CipherTextRef<'b>) -> (CipherTextRef<'b>, PlainText) {
+    fn ciphertext_and_nonce<'a>(ct: CipherTextRef<'a>) -> (CipherTextRef<'a>, CipherTextRef<'a>, &'a [u8]) {
+        let (rest, mut ct_len_ref) = ct.split_from_right(8);
+        let ct_len = ct_len_ref.0.read_u64::<LittleEndian>().unwrap();
+        let (rest, nonce) = rest.split_from_right(stream::xsalsa20::NONCEBYTES);
+        let (rest, ct) = rest.split_from_right(ct_len as usize);
+        (rest, ct, nonce.0)
+    }
+
+    pub fn unseal<'a, 'b>(&'a self, ct: CipherTextRef<'b>) -> (CipherTextRef<'b>, PlainText) {
         // TODO(jos): WIP: Plug in encryption/crypto here.
         // Unseal with our fixed key.
 
         // Recover version with size of ciphertext.
-        let (ct, version) = Self::ciphertext_and_version(ct);
-        let ct_len = version.0[0] as usize;
-        let (rest, ct) = ct.split_from_right(ct_len);
-
-        // Recover nonce.
-        let (ct, nonce) = ct.split_from_right(stream::xsalsa20::NONCEBYTES);
-        let nonce = stream::xsalsa20::Nonce::from_slice(nonce.0);
+        let (rest, _) = Self::version(ct);
+        let (rest, ct, nonce) = Self::ciphertext_and_nonce(rest);
+        let nonce = stream::xsalsa20::Nonce::from_slice(nonce);
         // TODO(jos): WIP: Use nonce to decrypt ct.
         drop(nonce);
 
         (rest, PlainText(ct.0.to_vec()))
-    }
-
-    pub fn seal(&self, pt: PlainText) -> CipherText {
-        // Seal plaintext with random key stored in reference.
-        let mut cref = ChunkRef {
-            blob_id: vec![],
-            offset: 0,
-            length: pt.0.len(),
-            kind: Kind::TreeLeaf,
-        };
-        let mut ct = RefKey::seal(&mut cref, pt);
-
-        // Seal reference with our fixed master key.
-        ct.append(&mut self.fixed_key_seal(PlainText(cref.as_bytes())));
-        ct
-    }
-
-    pub fn unseal(&self, ct: CipherTextRef) -> PlainText {
-        assert!(ct.len() >= 4);
-
-        // Recover ChunkRef which contains the random key.
-        let (ct, pt_cref) = self.fixed_key_unseal(ct);
-        let cref = ChunkRef::from_bytes(&mut &pt_cref.0[..]).unwrap();
-        let (_, ct) = ct.split_from_right(cref.length);
-
-        // Use ChunkRef to decrypt remaining CipherText.
-        RefKey::unseal(&cref, ct)
     }
 }

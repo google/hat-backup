@@ -26,6 +26,7 @@ extern crate test;
 extern crate time;
 
 // Rust crates.
+extern crate byteorder;
 extern crate capnp;
 extern crate sodiumoxide;
 extern crate libsodium_sys;

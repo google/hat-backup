@@ -17,6 +17,7 @@ capnpc = "*"
 syntex = "0.31.0"
 
 [dependencies]
+byteorder = "*"
 capnp = "*"
 clap = "*"
 env_logger = "*"
