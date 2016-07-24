@@ -135,7 +135,8 @@ impl FixedKey {
         (rest, version)
     }
 
-    fn ciphertext_and_nonce<'a>(ct: CipherTextRef<'a>) -> (CipherTextRef<'a>, CipherTextRef<'a>, &'a [u8]) {
+    fn ciphertext_and_nonce<'a>(ct: CipherTextRef<'a>)
+                                -> (CipherTextRef<'a>, CipherTextRef<'a>, &'a [u8]) {
         let (rest, mut ct_len_ref) = ct.split_from_right(8);
         let ct_len = ct_len_ref.0.read_u64::<LittleEndian>().unwrap();
         let (rest, nonce) = rest.split_from_right(stream::xsalsa20::NONCEBYTES);
