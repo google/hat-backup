@@ -17,14 +17,8 @@ impl PlainText {
         pt.0.append(&mut bytes);
         pt
     }
-    pub fn append(&mut self, mut other: PlainText) {
-        self.0.append(&mut other.0);
-    }
     pub fn len(&self) -> usize {
         self.0.len()
-    }
-    pub fn into_vec(self) -> Vec<u8> {
-        self.0
     }
     pub fn as_ref(&self) -> &[u8] {
         &self.0[..]
@@ -49,9 +43,6 @@ impl CipherText {
     pub fn empty_into(&mut self, out: &mut CipherText) {
         out.0.append(&mut self.0)
     }
-    pub fn into_vec(self) -> Vec<u8> {
-        self.0
-    }
     pub fn random_pad_upto(&mut self, final_size: usize) {
         let size = self.len();
         if final_size > size {
@@ -61,8 +52,8 @@ impl CipherText {
             stream::salsa20::stream_xor_inplace(&mut self.0[size..], &nonce, &key);
         }
     }
-    pub fn as_ref(&self) -> CipherTextRef {
-        CipherTextRef(self.0.as_ref())
+    pub fn into_vec(self) -> Vec<u8> {
+        self.0
     }
 }
 
