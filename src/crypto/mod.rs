@@ -9,11 +9,28 @@ pub struct CipherTextRef<'a>(&'a [u8]);
 
 
 pub mod desc {
-    pub use sodiumoxide::crypto::secretbox::xsalsa20poly1305::{KEYBYTES, Key, MACBYTES, Nonce, NONCEBYTES};
+    pub use sodiumoxide::crypto::secretbox::xsalsa20poly1305::{KEYBYTES, Key, MACBYTES,
+                                                               NONCEBYTES, Nonce};
+
+    pub fn fixed_key_overhead() -> usize {
+        // MAC for the plaintext being sealed + the footer.
+        MACBYTES + footer_cipher_bytes()
+    }
+
+    pub fn footer_plain_bytes() -> usize {
+        // Footer contains a Nonce and a LittleEndian u64.
+        NONCEBYTES + 8
+    }
+
+    pub fn footer_cipher_bytes() -> usize {
+        footer_plain_bytes() + MACBYTES
+    }
+
 }
 
 mod imp {
     pub use sodiumoxide::crypto::secretbox::xsalsa20poly1305::{gen_key, gen_nonce, open, seal};
+
 }
 
 
@@ -29,11 +46,11 @@ impl PlainText {
     pub fn len(&self) -> usize {
         self.0.len()
     }
-    pub fn as_ref(&self) -> &[u8] {
-        &self.0
-    }
     pub fn to_ciphertext(&self, nonce: &desc::Nonce, key: &desc::Key) -> CipherText {
         CipherText(imp::seal(&self.0, &nonce, &key))
+    }
+    pub fn as_bytes(&self) -> &[u8] {
+        &self.0
     }
 }
 
@@ -67,6 +84,9 @@ impl CipherText {
     pub fn into_vec(self) -> Vec<u8> {
         self.0
     }
+    pub fn as_bytes(&self) -> &[u8] {
+        &self.0
+    }
 }
 
 impl<'a> CipherTextRef<'a> {
@@ -83,7 +103,7 @@ impl<'a> CipherTextRef<'a> {
         assert!(self.len() >= len);
         (self.slice(0, self.len() - len), self.slice(self.len() - len, self.len()))
     }
-    pub fn as_ref(&self) -> &[u8] {
+    pub fn as_bytes(&self) -> &[u8] {
         &self.0
     }
     pub fn to_plaintext(&self, nonce: &desc::Nonce, key: &desc::Key) -> Result<PlainText, ()> {
@@ -119,14 +139,6 @@ impl FixedKey {
         FixedKey { key: key }
     }
 
-    fn foot_pt_size() -> usize {
-        desc::NONCEBYTES + 8
-    }
-
-    fn foot_ct_size() -> usize {
-        Self::foot_pt_size() + desc::MACBYTES
-    }
-
     pub fn tie_knot(&self, pt: PlainText) -> CipherText {
         let nonce = imp::gen_nonce();
         let mut ct = pt.to_ciphertext(&nonce, &self.key);
@@ -135,7 +147,7 @@ impl FixedKey {
         let ct_len = ct.len();
         let mut foot_pt = PlainText(nonce.as_ref().to_owned());
         foot_pt.0.write_u64::<LittleEndian>(ct_len as u64).unwrap();
-        assert_eq!(foot_pt.len(), Self::foot_pt_size());
+        assert_eq!(foot_pt.len(), desc::footer_plain_bytes());
 
         // Tie the knot by sealing the nonce and ciphertext length.
         assert!(ct_len > desc::NONCEBYTES);
@@ -148,13 +160,14 @@ impl FixedKey {
 
     fn untie_knot<'a>(&self, ct: CipherTextRef<'a>) -> Result<(CipherTextRef<'a>, PlainText), ()> {
         // Partial untie of knot: recover footer with nonce and ciphertext length.
-        let foot_size = Self::foot_ct_size();
+        let foot_size = desc::footer_cipher_bytes();
         let (rest, foot_ct) = ct.split_from_right(foot_size);
-        let nonce = desc::Nonce::from_slice(&rest.as_ref()[rest.len() - desc::NONCEBYTES..]).unwrap();
+        let nonce = desc::Nonce::from_slice(&rest.as_bytes()[rest.len() - desc::NONCEBYTES..])
+            .unwrap();
         let foot_pt = try!(foot_ct.to_plaintext(&nonce, &self.key));
 
-        let nonce = desc::Nonce::from_slice(&foot_pt.as_ref()[..desc::NONCEBYTES]).unwrap();
-        let ct_len = (&foot_pt.as_ref()[desc::NONCEBYTES..]).read_u64::<LittleEndian>().unwrap();
+        let nonce = desc::Nonce::from_slice(&foot_pt.as_bytes()[..desc::NONCEBYTES]).unwrap();
+        let ct_len = (&foot_pt.as_bytes()[desc::NONCEBYTES..]).read_u64::<LittleEndian>().unwrap();
 
         // Complete untie: recover plaintext.
         let (rest, ct) = rest.split_from_right(ct_len as usize);
@@ -162,14 +175,14 @@ impl FixedKey {
     }
 
     pub fn seal(&self, pt: PlainText) -> CipherText {
+        // Seal with fixed key.
         self.tie_knot(pt)
     }
 
-    pub fn unseal<'a, 'b>(&'a self, ct: CipherTextRef<'b>) -> Result<(CipherTextRef<'b>, PlainText), ()> {
-        // TODO(jos): WIP: Plug in encryption/crypto here.
-        // Unseal with our fixed key.
-
-        // Recover size of ciphertext.
+    pub fn unseal<'a, 'b>(&'a self,
+                          ct: CipherTextRef<'b>)
+                          -> Result<(CipherTextRef<'b>, PlainText), ()> {
+        // Unseal with fixed key.
         self.untie_knot(ct)
     }
 }

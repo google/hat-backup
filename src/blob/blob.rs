@@ -18,22 +18,14 @@ impl Blob {
     pub fn new(max_size: usize) -> Blob {
         // TODO(jos): Plug an actual crypto key through somehow.
         let fake_crypto_key = [0; crypto::desc::KEYBYTES];
-        let master_key = crypto::FixedKey::new(crypto::desc::Key::from_slice(&fake_crypto_key).unwrap());
-
-        let mut len = 0;
-        let mut i = max_size;
-        while i > 0 {
-            len = len | i;
-            i = i >> 1;
-        }
-
-        let overhead = master_key.seal(PlainText::new(vec![0; len])).len() - len + 2;
+        let master_key = crypto::FixedKey::new(crypto::desc::Key::from_slice(&fake_crypto_key)
+            .unwrap());
 
         Blob {
             master_key: master_key,
             chunks: CipherText::new(Vec::with_capacity(max_size)),
             footer: Vec::with_capacity(max_size / 2),
-            overhead: overhead,
+            overhead: crypto::desc::fixed_key_overhead(),
             max_size: max_size,
         }
     }
@@ -98,7 +90,7 @@ impl Blob {
         }
 
         let (_rest, footer_vec) = self.master_key.unseal(CipherTextRef::new(bytes)).unwrap();
-        let mut footer_pos = footer_vec.as_ref();
+        let mut footer_pos = footer_vec.as_bytes();
 
         let mut crefs = Vec::new();
         while footer_pos.len() > 0 {
