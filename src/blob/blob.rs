@@ -17,7 +17,8 @@ pub struct Blob {
 impl Blob {
     pub fn new(max_size: usize) -> Blob {
         // TODO(jos): Plug an actual crypto key through somehow.
-        let master_key = crypto::FixedKey::new(Vec::new());
+        let fake_crypto_key = [0; crypto::desc::KEYBYTES];
+        let master_key = crypto::FixedKey::new(crypto::desc::Key::from_slice(&fake_crypto_key).unwrap());
 
         let mut len = 0;
         let mut i = max_size;
@@ -96,7 +97,7 @@ impl Blob {
             return Ok(Vec::new());
         }
 
-        let (_rest, footer_vec) = self.master_key.unseal(CipherTextRef::new(bytes));
+        let (_rest, footer_vec) = self.master_key.unseal(CipherTextRef::new(bytes)).unwrap();
         let mut footer_pos = footer_vec.as_ref();
 
         let mut crefs = Vec::new();

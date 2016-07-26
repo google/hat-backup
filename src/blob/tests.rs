@@ -113,7 +113,7 @@ fn blob_reuse() {
         length: 1,
         kind: Kind::TreeLeaf,
     };
-    let mut b = Blob::new(100);
+    let mut b = Blob::new(1000);
     b.try_append(vec![1, 2, 3], &mut c).unwrap();
     b.try_append(vec![4, 5, 6], &mut c).unwrap();
 
