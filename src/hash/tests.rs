@@ -76,6 +76,8 @@ impl HashTreeBackend for MemoryBackend {
                     } else {
                         Kind::TreeBranch
                     },
+                    packing: None,
+                    key: None,
                 })
             }
             None => None,
@@ -106,6 +108,8 @@ impl HashTreeBackend for MemoryBackend {
             } else {
                 Kind::TreeBranch
             },
+            packing: None,
+            key: None,
         }))
     }
 }

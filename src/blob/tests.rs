@@ -98,6 +98,8 @@ fn blobid_identity() {
             offset: offset,
             length: length,
             kind: Kind::TreeBranch,
+            packing: None,
+            key: None,
         };
         let blob_id_bytes = blob_id.as_bytes();
         ChunkRef::from_bytes(&mut &blob_id_bytes[..]).unwrap() == blob_id
@@ -112,6 +114,8 @@ fn blob_reuse() {
         offset: 0,
         length: 1,
         kind: Kind::TreeLeaf,
+        packing: None,
+        key: None,
     };
     let mut b = Blob::new(1000);
     b.try_append(vec![1, 2, 3], &mut c).unwrap();
@@ -143,6 +147,8 @@ fn blob_identity() {
                                              offset: 0,
                                              length: chunk.len(),
                                              kind: Kind::TreeLeaf,
+                                             packing: None,
+                                             key: None,
                                          }) {
                 assert!(b.upperbound_len() + chunk.len() + 50 >= max_size);
                 break;

@@ -15,6 +15,10 @@
 
 @0x81f586f4d873f6ac;
 
+struct Encoding {
+
+}
+
 struct Snapshot {
 	id @0 :Int64;
 
@@ -38,6 +42,17 @@ struct ChunkRef {
 	kind :union {
 		treeBranch @3 :Void;
 		treeLeaf @4 :Void;
+	}
+
+	packing :union {
+		none @5 :Void;
+		gzip @6 :Void;
+		snappy @7 :Void;
+	}
+
+	key :union {
+		none @8 :Void;
+		xsalsa20Poly1305 @9 :Data;
 	}
 }
 

@@ -109,6 +109,8 @@ fn test_hash_refs_identity() {
             offset: n,
             length: n,
             kind: Kind::TreeBranch,
+            packing: None,
+            key: None,
         };
         let mut v = vec![];
         for _ in 0..count {

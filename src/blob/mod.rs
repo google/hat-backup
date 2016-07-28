@@ -96,6 +96,8 @@ impl<B: StoreBackend> StoreInner<B> {
                 offset: 0,
                 length: 0,
                 kind: kind,
+                packing: None,
+                key: None,
             };
             let cb_id = id.clone();
             thread::spawn(move || callback.call(cb_id));
@@ -107,6 +109,8 @@ impl<B: StoreBackend> StoreInner<B> {
             offset: self.blob.chunk_len(),
             length: chunk.len(),
             kind: kind,
+            packing: None,
+            key: None,
         };
 
         if let Err(chunk) = self.blob.try_append(chunk, &mut id) {
