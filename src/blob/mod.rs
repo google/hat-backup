@@ -19,6 +19,7 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use std::thread;
 
 use backend::StoreBackend;
+use errors;
 use tags;
 use util::FnBox;
 
@@ -34,11 +35,11 @@ pub use self::chunk::{ChunkRef, Key, Kind, Packing};
 pub use self::blob::Blob;
 pub use self::index::{BlobDesc, BlobIndex};
 
-
 pub struct BlobStore<B>(Arc<Mutex<StoreInner<B>>>);
 
 pub struct StoreInner<B> {
     backend: Arc<B>,
+    max_blob_size: usize,
 
     blob_index: Arc<BlobIndex>,
     blob_desc: BlobDesc,
@@ -53,6 +54,7 @@ impl<B: StoreBackend> StoreInner<B> {
             blob_index: index,
             blob_desc: Default::default(),
             blob_refs: Vec::new(),
+            max_blob_size: max_blob_size,
             blob: Blob::new(max_blob_size),
         };
         bs.reserve_new_blob();
@@ -137,13 +139,36 @@ impl<B: StoreBackend> StoreInner<B> {
         }
     }
 
-    fn store_named(&mut self, name: &str, data: &[u8]) -> Result<(), String> {
-        try!(self.backend.store(name.as_bytes(), data));
+    fn store_named(&mut self, name: &str, data: Vec<u8>) -> Result<(), String> {
+        assert!(data.len() < self.max_blob_size);
+        let mut blob = Blob::new(self.max_blob_size);
+        blob.try_append(
+            data,
+            &mut ChunkRef{
+                blob_id: vec![],
+                offset:0,
+                length: 0,
+                kind: Kind::TreeLeaf,
+                packing: None,
+                key: None,
+            }).unwrap();
+
+        let mut ct = vec![];
+        blob.into_bytes(&mut ct);
+
+        try!(self.backend.store(name.as_bytes(), &ct[..]));
         Ok(())
     }
 
-    fn retrieve_named(&mut self, name: &str) -> Result<Option<Vec<u8>>, String> {
-        self.backend.retrieve(name.as_bytes())
+    fn retrieve_named(&mut self, name: &str) -> Result<Option<Vec<u8>>, errors::HatError> {
+        match try!(self.backend.retrieve(name.as_bytes())) {
+            None => Ok(None),
+            Some(ct) => {
+                let crefs = try!(self.blob.chunk_refs_from_bytes(&ct));
+                assert_eq!(crefs.len(), 1);
+                Ok(Some(try!(Blob::read_chunk(&ct, &crefs[0]))))
+            }
+        }
     }
 
     fn recover(&mut self, chunk: ChunkRef) {
@@ -203,12 +228,12 @@ impl<B: StoreBackend> BlobStore<B> {
     }
 
     /// Store a full named blob (used for writing root).
-    pub fn store_named(&self, name: &str, data: &[u8]) -> Result<(), String> {
+    pub fn store_named(&self, name: &str, data: Vec<u8>) -> Result<(), String> {
         self.lock().store_named(name, data)
     }
 
     /// Retrieve full named blob.
-    pub fn retrieve_named(&self, name: &str) -> Result<Option<Vec<u8>>, String> {
+    pub fn retrieve_named(&self, name: &str) -> Result<Option<Vec<u8>>, errors::HatError> {
         self.lock().retrieve_named(name)
     }
 

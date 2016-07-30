@@ -15,7 +15,7 @@
 use crypto;
 use crypto::{CipherText, CipherTextRef, PlainText};
 
-use super::{ChunkRef, Kind};
+use super::{ChunkRef};
 use capnp;
 
 
