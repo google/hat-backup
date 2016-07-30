@@ -17,7 +17,6 @@ use crypto::{CipherText, CipherTextRef, PlainText};
 
 use super::{ChunkRef, Kind};
 use capnp;
-use root_capnp;
 
 
 pub struct Blob {
@@ -44,6 +43,17 @@ impl Blob {
         }
     }
 
+    pub fn read_chunk(blob: &[u8], cref: &ChunkRef) -> Result<Vec<u8>, String> {
+        let ct = crypto::CipherTextRef::new(blob);
+        match crypto::RefKey::unseal(&cref, ct) {
+            Ok(pt) => Ok(pt.into_vec()),
+            Err(()) => {
+                Err(From::from(format!("unseal failed: wrong key or corrupt data (offset: {})",
+                                       cref.offset)))
+            }
+        }
+    }
+
     pub fn upperbound_len(&self) -> usize {
         if self.chunks.len() == 0 {
             0
@@ -52,27 +62,28 @@ impl Blob {
         }
     }
 
-    pub fn chunk_len(&self) -> usize {
-        self.chunks.len()
-    }
-
     pub fn try_append(&mut self, chunk: Vec<u8>, mut cref: &mut ChunkRef) -> Result<(), Vec<u8>> {
-        assert!(self.max_size > chunk.len());
+        let mut ct = crypto::RefKey::seal(&mut cref, PlainText::new(chunk));
 
-        let sealed_size = crypto::RefKey::add_sealed_size(chunk.len());
-        let mut entry = cref.as_bytes();
+        cref.offset = self.chunks.len();
+        let mut cref_bytes = cref.as_bytes();
+        assert!(cref_bytes.len() < 255);
 
-        if self.upperbound_len() + entry.len() + sealed_size >= self.max_size {
+        if self.upperbound_len() + cref_bytes.len() + ct.len() >= self.max_size {
+            cref.offset = 0;
+            let chunk = crypto::RefKey::unseal(&cref, ct.as_ref()).unwrap().into_vec();
+            if self.chunks.len() == 0 {
+                panic!("Can never fit chunk of size {} in blob of size {}",
+                       chunk.len(), self.max_size);
+            }
             return Err(chunk);
         }
 
-        self.chunks.append(&mut crypto::RefKey::seal(&mut cref, PlainText::new(chunk)));
+        ct.empty_into(&mut self.chunks);
 
         // Generate footer entry.
-        let size = entry.len();
-        assert!(size < 255);
-        self.footer.push(size as u8);
-        self.footer.append(&mut entry);
+        self.footer.push(cref_bytes.len() as u8);
+        self.footer.append(&mut cref_bytes);
 
         Ok(())
     }

@@ -15,9 +15,6 @@
 
 @0x81f586f4d873f6ac;
 
-struct Encoding {
-
-}
 
 struct Snapshot {
 	id @0 :Int64;
@@ -94,8 +91,4 @@ struct File {
 
 struct FileList {
 	files @0 :List(File);
-}
-
-struct MetaFooterEntry {
-	length @0 :Int64;
 }

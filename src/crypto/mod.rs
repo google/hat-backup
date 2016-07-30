@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use sodiumoxide::crypto::stream;
-use blob::{ChunkRef, Kind};
+use blob::{ChunkRef, Key};
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 
 
@@ -40,11 +40,18 @@ pub mod desc {
         footer_plain_bytes() + MACBYTES
     }
 
+    pub fn static_nonce() -> Nonce {
+        Nonce::from_slice(&[255; NONCEBYTES]).unwrap()
+    }
 }
 
 mod imp {
     pub use sodiumoxide::crypto::secretbox::xsalsa20poly1305::{gen_key, gen_nonce, open, seal};
+}
 
+
+fn wrap_key(key: desc::Key) -> Key {
+    Key::XSalsa20Poly1305(key)
 }
 
 
@@ -65,6 +72,9 @@ impl PlainText {
     }
     pub fn as_bytes(&self) -> &[u8] {
         &self.0
+    }
+    pub fn into_vec(self) -> Vec<u8> {
+        self.0
     }
 }
 
@@ -98,8 +108,8 @@ impl CipherText {
     pub fn into_vec(self) -> Vec<u8> {
         self.0
     }
-    pub fn as_bytes(&self) -> &[u8] {
-        &self.0
+    pub fn as_ref(&self) -> CipherTextRef {
+        CipherTextRef(&self.0[..])
     }
 }
 
@@ -129,18 +139,27 @@ impl<'a> CipherTextRef<'a> {
 pub struct RefKey {}
 
 impl RefKey {
-    pub fn add_sealed_size(size: usize) -> usize {
-        size + 0  // TODO: should be len of seal(.., vec[0; size])
-    }
     pub fn seal(cref: &mut ChunkRef, pt: PlainText) -> CipherText {
         // TODO(jos): WIP: Plug in encryption/crypto here.
         // Update cref with key.
-        cref.length = pt.len();
-        CipherText(pt.0)
+        let key = imp::gen_key();
+        cref.key = Some(wrap_key(key.clone()));
+
+        let ct = pt.to_ciphertext(&desc::static_nonce(), &key);
+        cref.length = ct.len();
+
+        ct
     }
 
-    pub fn unseal(cref: &ChunkRef, ct: CipherTextRef) -> PlainText {
-        PlainText(ct.slice(cref.offset, cref.offset + cref.length).0.to_vec())
+    pub fn unseal(cref: &ChunkRef, ct: CipherTextRef) -> Result<PlainText, ()> {
+        assert!(ct.len() >= cref.offset + cref.length);
+        let ct = ct.slice(cref.offset, cref.offset + cref.length);
+        match cref.key {
+            Some(Key::XSalsa20Poly1305(ref key)) => {
+                Ok(try!(ct.to_plaintext(&desc::static_nonce(), &key)))
+            }
+            _ => panic!("Unknown blob key type"),
+        }
     }
 }
 

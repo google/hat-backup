@@ -30,7 +30,7 @@ mod schema;
 #[cfg(test)]
 pub mod tests;
 
-pub use self::chunk::{ChunkRef, Kind};
+pub use self::chunk::{ChunkRef, Key, Kind, Packing};
 pub use self::blob::Blob;
 pub use self::index::{BlobDesc, BlobIndex};
 
@@ -106,10 +106,11 @@ impl<B: StoreBackend> StoreInner<B> {
 
         let mut id = ChunkRef {
             blob_id: self.blob_desc.name.clone(),
-            offset: self.blob.chunk_len(),
-            length: chunk.len(),
             kind: kind,
             packing: None,
+            // updated by try_append:
+            offset: 0,
+            length: 0,
             key: None,
         };
 
@@ -117,7 +118,6 @@ impl<B: StoreBackend> StoreInner<B> {
             self.flush();
 
             id.blob_id = self.blob_desc.name.clone();
-            id.offset = 0;
             self.blob.try_append(chunk, &mut id).unwrap();
         }
         self.blob_refs.push((id.clone(), callback));
@@ -131,7 +131,7 @@ impl<B: StoreBackend> StoreInner<B> {
             return Ok(Some(Vec::new()));
         }
         match self.backend.retrieve(&id.blob_id[..]) {
-            Ok(Some(blob)) => Ok(Some(blob[id.offset..id.offset + id.length].to_vec())),
+            Ok(Some(blob)) => Ok(Some(try!(Blob::read_chunk(&blob, id)))),
             Ok(None) => Ok(None),
             Err(e) => Err(e),
         }
