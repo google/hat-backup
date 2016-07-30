@@ -15,7 +15,7 @@
 use crypto;
 use crypto::{CipherText, CipherTextRef, PlainText};
 
-use super::{ChunkRef};
+use super::ChunkRef;
 use capnp;
 
 
@@ -74,7 +74,8 @@ impl Blob {
             let chunk = crypto::RefKey::unseal(&cref, ct.as_ref()).unwrap().into_vec();
             if self.chunks.len() == 0 {
                 panic!("Can never fit chunk of size {} in blob of size {}",
-                       chunk.len(), self.max_size);
+                       chunk.len(),
+                       self.max_size);
             }
             return Err(chunk);
         }

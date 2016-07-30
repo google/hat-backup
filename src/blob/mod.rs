@@ -142,16 +142,16 @@ impl<B: StoreBackend> StoreInner<B> {
     fn store_named(&mut self, name: &str, data: Vec<u8>) -> Result<(), String> {
         assert!(data.len() < self.max_blob_size);
         let mut blob = Blob::new(self.max_blob_size);
-        blob.try_append(
-            data,
-            &mut ChunkRef{
-                blob_id: vec![],
-                offset:0,
-                length: 0,
-                kind: Kind::TreeLeaf,
-                packing: None,
-                key: None,
-            }).unwrap();
+        blob.try_append(data,
+                        &mut ChunkRef {
+                            blob_id: vec![],
+                            offset: 0,
+                            length: 0,
+                            kind: Kind::TreeLeaf,
+                            packing: None,
+                            key: None,
+                        })
+            .unwrap();
 
         let mut ct = vec![];
         blob.into_bytes(&mut ct);
