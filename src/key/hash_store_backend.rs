@@ -126,7 +126,7 @@ impl<B: StoreBackend> HashTreeBackend for HashStoreBackend<B> {
             hash::ReserveResult::HashKnown(id) => {
                 // Someone came before us: piggyback on their result.
                 Ok((id, hash::tree::HashRef {
-                    hash: hash.bytes.clone(),
+                    hash: hash.clone(),
                     persistent_ref: self.fetch_persistent_ref(hash)
                         .expect("Could not find persistent_ref for known chunk."),
                 }))
@@ -136,8 +136,7 @@ impl<B: StoreBackend> HashTreeBackend for HashStoreBackend<B> {
                 let local_hash_index = self.hash_index.clone();
 
                 let callback = Box::new(move |href: hash::tree::HashRef| {
-                    local_hash_index.commit(&hash::Hash { bytes: href.hash.clone() },
-                                            href.persistent_ref);
+                    local_hash_index.commit(&href.hash, href.persistent_ref);
                 });
                 let kind = if level == 0 {
                     blob::Kind::TreeLeaf

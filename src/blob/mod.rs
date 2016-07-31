@@ -97,7 +97,7 @@ impl<B: StoreBackend> StoreInner<B> {
              -> HashRef {
         if chunk.is_empty() {
             let href = HashRef {
-                hash: hash.bytes,
+                hash: hash,
                 persistent_ref: ChunkRef {
                     blob_id: vec![0],
                     offset: 0,
@@ -113,7 +113,7 @@ impl<B: StoreBackend> StoreInner<B> {
         }
 
         let mut href = HashRef {
-            hash: hash.bytes,
+            hash: hash,
             persistent_ref: ChunkRef {
                 blob_id: self.blob_desc.name.clone(),
                 kind: kind,
@@ -142,7 +142,7 @@ impl<B: StoreBackend> StoreInner<B> {
             return Ok(Some(Vec::new()));
         }
         match self.backend.retrieve(&cref.blob_id[..]) {
-            Ok(Some(blob)) => Ok(Some(try!(Blob::read_chunk(&blob, &hash.bytes[..], cref)))),
+            Ok(Some(blob)) => Ok(Some(try!(Blob::read_chunk(&blob, hash, cref)))),
             Ok(None) => Ok(None),
             Err(e) => Err(e),
         }
@@ -154,7 +154,7 @@ impl<B: StoreBackend> StoreInner<B> {
         let mut blob = Blob::new(self.max_blob_size);
         blob.try_append(data,
                         &mut HashRef {
-                            hash: hash.bytes.to_owned(),
+                            hash: hash,
                             persistent_ref: ChunkRef {
                                 blob_id: name.as_bytes().to_owned(),
                                 offset: 0,

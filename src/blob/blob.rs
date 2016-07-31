@@ -14,6 +14,7 @@
 
 use crypto;
 use crypto::{CipherText, CipherTextRef, PlainText};
+use hash::Hash;
 use hash::tree::HashRef;
 
 use super::ChunkRef;
@@ -44,9 +45,9 @@ impl Blob {
         }
     }
 
-    pub fn read_chunk(blob: &[u8], hash: &[u8], cref: &ChunkRef) -> Result<Vec<u8>, String> {
+    pub fn read_chunk(blob: &[u8], hash: &Hash, cref: &ChunkRef) -> Result<Vec<u8>, String> {
         let ct = crypto::CipherTextRef::new(blob);
-        match crypto::RefKey::unseal(&hash, &cref, ct) {
+        match crypto::RefKey::unseal(hash, cref, ct) {
             Ok(pt) => Ok(pt.into_vec()),
             Err(()) => {
                 Err(From::from(format!("unseal failed: wrong key or corrupt data (offset: {})",

@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use sodiumoxide::crypto::stream;
+use hash::Hash;
 use hash::tree::HashRef;
 use blob::{ChunkRef, Key};
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
@@ -152,7 +153,7 @@ impl RefKey {
         ct
     }
 
-    pub fn unseal(hash: &[u8], cref: &ChunkRef, ct: CipherTextRef) -> Result<PlainText, ()> {
+    pub fn unseal(hash: &Hash, cref: &ChunkRef, ct: CipherTextRef) -> Result<PlainText, ()> {
         assert!(ct.len() >= cref.offset + cref.length);
         let ct = ct.slice(cref.offset, cref.offset + cref.length);
         match cref.key {

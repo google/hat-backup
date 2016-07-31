@@ -360,7 +360,7 @@ impl<B: StoreBackend> HatRc<B> {
 
             // Make sure we have the blob described.
             blobs.recover(hash::tree::HashRef {
-                hash: entry.hash.bytes.to_owned(),
+                hash: entry.hash.clone(),
                 persistent_ref: pref.clone(),
             });
 

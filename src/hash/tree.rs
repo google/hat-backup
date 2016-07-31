@@ -31,14 +31,14 @@ use quickcheck;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct HashRef {
-    pub hash: Vec<u8>,
+    pub hash: Hash,
     pub persistent_ref: ChunkRef,
 }
 
 impl HashRef {
     fn populate_msg(&self, msg: root_capnp::hash_ref::Builder) {
         let mut msg = msg;
-        msg.set_hash(&self.hash[..]);
+        msg.set_hash(&self.hash.bytes[..]);
         {
             let mut chunk_ref = msg.init_chunk_ref();
             self.persistent_ref.populate_msg(chunk_ref.borrow());
@@ -47,7 +47,7 @@ impl HashRef {
 
     fn read_msg(msg: &root_capnp::hash_ref::Reader) -> Result<HashRef, capnp::Error> {
         Ok(HashRef {
-            hash: try!(msg.get_hash()).to_owned(),
+            hash: Hash { bytes: try!(msg.get_hash()).to_owned() },
             persistent_ref: try!(ChunkRef::read_msg(&try!(msg.get_chunk_ref()))),
         })
     }
@@ -135,7 +135,7 @@ fn test_hash_refs_identity() {
         let mut v = vec![];
         for _ in 0..count {
             v.push(HashRef {
-                hash: hash.clone(),
+                hash: Hash { bytes: hash.clone() },
                 persistent_ref: chunk_ref.clone(),
             });
         }
@@ -269,7 +269,7 @@ impl<B: HashTreeBackend> SimpleHashTreeWriter<B> {
         assert_eq!(self.levels.last().map(|x| x.len()), Some(1));
         let &(_, ref hashref) = self.levels.last().and_then(|x| x.last()).expect("asserted");
 
-        Ok((Hash { bytes: hashref.hash.clone() }, hashref.persistent_ref.clone()))
+        Ok((hashref.hash.clone(), hashref.persistent_ref.clone()))
     }
 }
 
@@ -353,10 +353,9 @@ impl<B: HashTreeBackend> SimpleHashTreeReader<B> {
         let mut hashes = vec![];
         while !self.stack.is_empty() {
             let child = self.stack.pop().expect("!is_empty()");
-
-            let hash = Hash { bytes: child.hash.clone() };
+            let hash = child.hash.clone();
             hashes.push(hash.clone());
-
+            
             match child.persistent_ref.kind {
                 Kind::TreeLeaf => {
                     out.push((None,
@@ -412,10 +411,9 @@ impl<B: HashTreeBackend> SimpleHashTreeReader<B> {
                 Some(ref hash) => assert!(hash != &child.hash),
             }
 
-            let hash = Hash { bytes: child.hash };
             let kind = child.persistent_ref.kind.clone();
             let data = try!(self.backend
-                    .fetch_chunk(&hash, Some(child.persistent_ref)))
+                    .fetch_chunk(&child.hash, Some(child.persistent_ref)))
                 .expect("Invalid hash ref");
 
             match kind {
