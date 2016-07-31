@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use sodiumoxide::crypto::stream;
+use hash::tree::HashRef;
 use blob::{ChunkRef, Key};
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 
@@ -139,19 +140,19 @@ impl<'a> CipherTextRef<'a> {
 pub struct RefKey {}
 
 impl RefKey {
-    pub fn seal(cref: &mut ChunkRef, pt: PlainText) -> CipherText {
+    pub fn seal(href: &mut HashRef, pt: PlainText) -> CipherText {
         // TODO(jos): WIP: Plug in encryption/crypto here.
         // Update cref with key.
         let key = imp::gen_key();
-        cref.key = Some(wrap_key(key.clone()));
+        href.persistent_ref.key = Some(wrap_key(key.clone()));
 
         let ct = pt.to_ciphertext(&desc::static_nonce(), &key);
-        cref.length = ct.len();
+        href.persistent_ref.length = ct.len();
 
         ct
     }
 
-    pub fn unseal(cref: &ChunkRef, ct: CipherTextRef) -> Result<PlainText, ()> {
+    pub fn unseal(hash: &[u8], cref: &ChunkRef, ct: CipherTextRef) -> Result<PlainText, ()> {
         assert!(ct.len() >= cref.offset + cref.length);
         let ct = ct.slice(cref.offset, cref.offset + cref.length);
         match cref.key {

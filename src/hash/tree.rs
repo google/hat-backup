@@ -30,9 +30,9 @@ use quickcheck;
 
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-struct HashRef {
-    hash: Vec<u8>,
-    persistent_ref: ChunkRef,
+pub struct HashRef {
+    pub hash: Vec<u8>,
+    pub persistent_ref: ChunkRef,
 }
 
 impl HashRef {
@@ -51,6 +51,26 @@ impl HashRef {
             persistent_ref: try!(ChunkRef::read_msg(&try!(msg.get_chunk_ref()))),
         })
     }
+
+    pub fn from_bytes(bytes: &mut &[u8]) -> Result<HashRef, capnp::Error> {
+        let reader = try!(
+            capnp::serialize_packed::read_message(bytes, capnp::message::ReaderOptions::new()));
+        let root = try!(reader.get_root::<root_capnp::hash_ref::Reader>());
+        Ok(try!(HashRef::read_msg(&root)))
+    }
+
+    pub fn as_bytes(&self) -> Vec<u8> {
+        let mut message = ::capnp::message::Builder::new_default();
+        {
+            let mut root = message.init_root::<root_capnp::hash_ref::Builder>();
+            self.populate_msg(root.borrow());
+        }
+
+        let mut out = Vec::new();
+        capnp::serialize_packed::write_message(&mut out, &message).unwrap();
+
+        out
+    }
 }
 
 
@@ -65,7 +85,7 @@ pub trait HashTreeBackend: Clone {
                     i64,
                     Option<Vec<i64>>,
                     Vec<u8>)
-                    -> Result<(i64, ChunkRef), Self::Err>;
+                    -> Result<(i64, HashRef), Self::Err>;
 }
 
 
@@ -183,12 +203,7 @@ impl<B: HashTreeBackend> SimpleHashTreeWriter<B> {
                  childs: Option<Vec<i64>>)
                  -> Result<(), B::Err> {
         let hash = Hash::new(&data[..]);
-        let (id, persistent_ref) = try!(self.backend
-            .insert_chunk(&hash, level as i64, childs, data));
-        let hash_ref = HashRef {
-            hash: hash.bytes,
-            persistent_ref: persistent_ref,
-        };
+        let (id, hash_ref) = try!(self.backend.insert_chunk(&hash, level as i64, childs, data));
         self.append_hashref_at(level, id, hash_ref)
     }
 

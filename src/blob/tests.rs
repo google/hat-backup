@@ -14,6 +14,7 @@
 
 use blob::*;
 use backend::{MemoryBackend, StoreBackend};
+use hash;
 
 use std::sync::Arc;
 use quickcheck;
@@ -28,7 +29,11 @@ fn identity() {
 
         let mut ids = Vec::new();
         for chunk in chunks.iter() {
-            ids.push((bs_p.store(chunk.to_owned(), Kind::TreeLeaf, Box::new(move |_| {})), chunk));
+            ids.push((bs_p.store(chunk.to_owned(),
+                                 hash::Hash::new(chunk),
+                                 Kind::TreeLeaf,
+                                 Box::new(move |_| {})),
+                      chunk));
         }
 
         bs_p.flush();
@@ -36,7 +41,7 @@ fn identity() {
         // Non-empty chunks must be in the backend now:
         for &(ref id, chunk) in ids.iter() {
             if chunk.len() > 0 {
-                match backend.retrieve(&id.blob_id[..]) {
+                match backend.retrieve(&id.persistent_ref.blob_id[..]) {
                     Ok(_) => (),
                     Err(e) => panic!(e),
                 }
@@ -45,7 +50,8 @@ fn identity() {
 
         // All chunks must be available through the blob store:
         for &(ref id, chunk) in ids.iter() {
-            assert_eq!(bs_p.retrieve(id).unwrap().unwrap(), &chunk[..]);
+            assert_eq!(bs_p.retrieve(&hash::Hash{bytes:id.hash.clone()}, &id.persistent_ref)
+                       .unwrap().unwrap(), &chunk[..]);
         }
 
         return true;
@@ -63,16 +69,21 @@ fn identity_with_excessive_flushing() {
 
         let mut ids = Vec::new();
         for chunk in chunks.iter() {
-            ids.push((bs_p.store(chunk.to_owned(), Kind::TreeLeaf, Box::new(move |_| {})), chunk));
+            ids.push((bs_p.store(chunk.to_owned(),
+                                 hash::Hash::new(chunk),
+                                 Kind::TreeLeaf,
+                                 Box::new(move |_| {})),
+                      chunk));
             bs_p.flush();
             let &(ref id, chunk) = ids.last().unwrap();
-            assert_eq!(bs_p.retrieve(id).unwrap().unwrap(), &chunk[..]);
+            assert_eq!(bs_p.retrieve(&hash::Hash{bytes:id.hash.clone()}, &id.persistent_ref)
+                       .unwrap().unwrap(), &chunk[..]);
         }
 
         // Non-empty chunks must be in the backend now:
         for &(ref id, chunk) in ids.iter() {
             if chunk.len() > 0 {
-                match backend.retrieve(&id.blob_id[..]) {
+                match backend.retrieve(&id.persistent_ref.blob_id[..]) {
                     Ok(_) => (),
                     Err(e) => panic!(e),
                 }
@@ -81,7 +92,8 @@ fn identity_with_excessive_flushing() {
 
         // All chunks must be available through the blob store:
         for &(ref id, chunk) in ids.iter() {
-            assert_eq!(bs_p.retrieve(id).unwrap().unwrap(), &chunk[..]);
+            assert_eq!(bs_p.retrieve(&hash::Hash{bytes:id.hash.clone()}, &id.persistent_ref)
+                       .unwrap().unwrap(), &chunk[..]);
         }
 
         return true;
@@ -108,14 +120,16 @@ fn blobid_identity() {
 
 #[test]
 fn blob_reuse() {
-    let mut c1 = ChunkRef {
+    let mut c1 = hash::tree::HashRef{
+        hash: vec![],
+        persistent_ref: ChunkRef {
         blob_id: Vec::new(),
         offset: 0,
         length: 0,
         kind: Kind::TreeLeaf,
         packing: None,
         key: None,
-    };
+    }};
     let mut c2 = c1.clone();
 
     let mut b = Blob::new(1000);
@@ -125,8 +139,8 @@ fn blob_reuse() {
     let mut out = Vec::new();
     b.into_bytes(&mut out);
 
-    assert_eq!(vec![1, 2, 3], Blob::read_chunk(&out, &c1).unwrap());
-    assert_eq!(vec![4, 5, 6], Blob::read_chunk(&out, &c2).unwrap());
+    assert_eq!(vec![1, 2, 3], Blob::read_chunk(&out, &c1.hash, &c1.persistent_ref).unwrap());
+    assert_eq!(vec![4, 5, 6], Blob::read_chunk(&out, &c2.hash, &c2.persistent_ref).unwrap());
 
     let mut c3 = c2.clone();
 
@@ -136,9 +150,9 @@ fn blob_reuse() {
 
     out.clear();
     b.into_bytes(&mut out);
-    assert_eq!(vec![1, 2], Blob::read_chunk(&out, &c1).unwrap());
-    assert_eq!(vec![1, 2], Blob::read_chunk(&out, &c2).unwrap());
-    assert_eq!(vec![1, 2], Blob::read_chunk(&out, &c3).unwrap());
+    assert_eq!(vec![1, 2], Blob::read_chunk(&out, &c1.hash, &c1.persistent_ref).unwrap());
+    assert_eq!(vec![1, 2], Blob::read_chunk(&out, &c2.hash, &c2.persistent_ref).unwrap());
+    assert_eq!(vec![1, 2], Blob::read_chunk(&out, &c3.hash, &c3.persistent_ref).unwrap());
 }
 
 #[test]
@@ -148,14 +162,16 @@ fn blob_identity() {
         let mut b = Blob::new(max_size);
         let mut n = 0;
         for chunk in chunks.iter() {
-            let mut cref = ChunkRef {
+            let mut cref = hash::tree::HashRef{
+                hash: vec![],
+                persistent_ref: ChunkRef {
                 blob_id: Vec::new(),
                 offset: 0,
                 length: 0,
                 kind: Kind::TreeLeaf,
                 packing: None,
                 key: None,
-            };
+            }};
             if let Err(_) = b.try_append(chunk.clone(), &mut cref) {
                 assert!(b.upperbound_len() + chunk.len() + cref.as_bytes().len() + 50 >= max_size);
                 break;
@@ -173,8 +189,8 @@ fn blob_identity() {
 
         assert_eq!(max_size, out.len());
 
-        let crefs = Blob::new(max_size).chunk_refs_from_bytes(&out).unwrap();
-        assert_eq!(n, crefs.len());
+        let hrefs = Blob::new(max_size).refs_from_bytes(&out).unwrap();
+        assert_eq!(n, hrefs.len());
 
         // Check recovered ChunkRefs.
         // for (i, cref) in crefs.into_iter().enumerate() {

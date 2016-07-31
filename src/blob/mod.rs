@@ -20,6 +20,8 @@ use std::thread;
 
 use backend::StoreBackend;
 use errors;
+use hash::Hash;
+use hash::tree::HashRef;
 use tags;
 use util::FnBox;
 
@@ -43,7 +45,7 @@ pub struct StoreInner<B> {
 
     blob_index: Arc<BlobIndex>,
     blob_desc: BlobDesc,
-    blob_refs: Vec<(ChunkRef, Box<FnBox<ChunkRef, ()>>)>,
+    blob_refs: Vec<(HashRef, Box<FnBox<HashRef, ()>>)>,
     blob: Blob,
 }
 
@@ -82,58 +84,65 @@ impl<B: StoreBackend> StoreInner<B> {
         self.blob_index.commit_done(&old_blob_desc);
 
         // Go through callbacks
-        while let Some((blobid, callback)) = self.blob_refs.pop() {
-            callback.call(blobid);
+        while let Some((href, callback)) = self.blob_refs.pop() {
+            callback.call(href);
         }
     }
 
     fn store(&mut self,
              chunk: Vec<u8>,
+             hash: Hash,
              kind: Kind,
-             callback: Box<FnBox<ChunkRef, ()>>)
-             -> ChunkRef {
+             callback: Box<FnBox<HashRef, ()>>)
+             -> HashRef {
         if chunk.is_empty() {
-            let id = ChunkRef {
-                blob_id: vec![0],
-                offset: 0,
-                length: 0,
+            let href = HashRef {
+                hash: hash.bytes,
+                persistent_ref: ChunkRef {
+                    blob_id: vec![0],
+                    offset: 0,
+                    length: 0,
+                    kind: kind,
+                    packing: None,
+                    key: None,
+                },
+            };
+            let local_href = href.clone();
+            thread::spawn(move || callback.call(local_href));
+            return href;
+        }
+
+        let mut href = HashRef {
+            hash: hash.bytes,
+            persistent_ref: ChunkRef {
+                blob_id: self.blob_desc.name.clone(),
                 kind: kind,
                 packing: None,
+                // updated by try_append:
+                offset: 0,
+                length: 0,
                 key: None,
-            };
-            let cb_id = id.clone();
-            thread::spawn(move || callback.call(cb_id));
-            return id;
-        }
-
-        let mut id = ChunkRef {
-            blob_id: self.blob_desc.name.clone(),
-            kind: kind,
-            packing: None,
-            // updated by try_append:
-            offset: 0,
-            length: 0,
-            key: None,
+            },
         };
 
-        if let Err(chunk) = self.blob.try_append(chunk, &mut id) {
+        if let Err(chunk) = self.blob.try_append(chunk, &mut href) {
             self.flush();
 
-            id.blob_id = self.blob_desc.name.clone();
-            self.blob.try_append(chunk, &mut id).unwrap();
+            href.persistent_ref.blob_id = self.blob_desc.name.clone();
+            self.blob.try_append(chunk, &mut href).unwrap();
         }
-        self.blob_refs.push((id.clone(), callback));
+        self.blob_refs.push((href.clone(), callback));
 
         // To avoid unnecessary blocking, we reply with the ID *before* possibly flushing.
-        id
+        href
     }
 
-    fn retrieve(&mut self, id: &ChunkRef) -> Result<Option<Vec<u8>>, String> {
-        if id.offset == 0 && id.length == 0 {
+    fn retrieve(&mut self, hash: &Hash, cref: &ChunkRef) -> Result<Option<Vec<u8>>, String> {
+        if cref.offset == 0 && cref.length == 0 {
             return Ok(Some(Vec::new()));
         }
-        match self.backend.retrieve(&id.blob_id[..]) {
-            Ok(Some(blob)) => Ok(Some(try!(Blob::read_chunk(&blob, id)))),
+        match self.backend.retrieve(&cref.blob_id[..]) {
+            Ok(Some(blob)) => Ok(Some(try!(Blob::read_chunk(&blob, &hash.bytes[..], cref)))),
             Ok(None) => Ok(None),
             Err(e) => Err(e),
         }
@@ -141,15 +150,19 @@ impl<B: StoreBackend> StoreInner<B> {
 
     fn store_named(&mut self, name: &str, data: Vec<u8>) -> Result<(), String> {
         assert!(data.len() < self.max_blob_size);
+        let hash = Hash::new(&data[..]);
         let mut blob = Blob::new(self.max_blob_size);
         blob.try_append(data,
-                        &mut ChunkRef {
-                            blob_id: name.as_bytes().to_owned(),
-                            offset: 0,
-                            length: 0,
-                            kind: Kind::TreeLeaf,
-                            packing: None,
-                            key: None,
+                        &mut HashRef {
+                            hash: hash.bytes.to_owned(),
+                            persistent_ref: ChunkRef {
+                                blob_id: name.as_bytes().to_owned(),
+                                offset: 0,
+                                length: 0,
+                                kind: Kind::TreeLeaf,
+                                packing: None,
+                                key: None,
+                            },
                         })
             .unwrap();
 
@@ -164,21 +177,21 @@ impl<B: StoreBackend> StoreInner<B> {
         match try!(self.backend.retrieve(name.as_bytes())) {
             None => Ok(None),
             Some(ct) => {
-                let crefs = try!(self.blob.chunk_refs_from_bytes(&ct));
-                assert_eq!(crefs.len(), 1);
-                let cref = &crefs[0];
-                assert_eq!(name.as_bytes(), &cref.blob_id[..]);
-                Ok(Some(try!(Blob::read_chunk(&ct, cref))))
+                let hrefs = try!(self.blob.refs_from_bytes(&ct));
+                assert_eq!(hrefs.len(), 1);
+                let href = &hrefs[0];
+                assert_eq!(name.as_bytes(), &href.persistent_ref.blob_id[..]);
+                Ok(Some(try!(Blob::read_chunk(&ct, &href.hash, &href.persistent_ref))))
             }
         }
     }
 
-    fn recover(&mut self, chunk: ChunkRef) {
-        if chunk.offset == 0 && chunk.length == 0 {
+    fn recover(&mut self, chunk: HashRef) {
+        if chunk.persistent_ref.offset == 0 && chunk.persistent_ref.length == 0 {
             // This chunk is empty, so there is no blob to recover.
             return;
         }
-        self.blob_index.recover(chunk.blob_id);
+        self.blob_index.recover(chunk.persistent_ref.blob_id);
     }
 
     fn tag(&mut self, chunk: ChunkRef, tag: tags::Tag) {
@@ -217,16 +230,17 @@ impl<B: StoreBackend> BlobStore<B> {
     /// `ChunkRef` as persistent reference).
     pub fn store(&self,
                  chunk: Vec<u8>,
+                 hash: Hash,
                  kind: Kind,
-                 callback: Box<FnBox<ChunkRef, ()>>)
-                 -> ChunkRef {
+                 callback: Box<FnBox<HashRef, ()>>)
+                 -> HashRef {
         let mut guard = self.lock();
-        guard.store(chunk, kind, callback)
+        guard.store(chunk, hash, kind, callback)
     }
 
     /// Retrieve the data chunk identified by `ChunkRef`.
-    pub fn retrieve(&self, id: &ChunkRef) -> Result<Option<Vec<u8>>, String> {
-        self.lock().retrieve(id)
+    pub fn retrieve(&self, hash: &Hash, cref: &ChunkRef) -> Result<Option<Vec<u8>>, String> {
+        self.lock().retrieve(hash, cref)
     }
 
     /// Store a full named blob (used for writing root).
@@ -240,7 +254,7 @@ impl<B: StoreBackend> BlobStore<B> {
     }
 
     /// Reinstall a blob recovered from external storage.
-    pub fn recover(&self, chunk: ChunkRef) {
+    pub fn recover(&self, chunk: HashRef) {
         self.lock().recover(chunk)
     }
 

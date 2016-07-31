@@ -359,7 +359,10 @@ impl<B: StoreBackend> HatRc<B> {
             let pref = entry.persistent_ref.clone().unwrap();
 
             // Make sure we have the blob described.
-            blobs.recover(pref.clone());
+            blobs.recover(hash::tree::HashRef {
+                hash: entry.hash.bytes.to_owned(),
+                persistent_ref: pref.clone(),
+            });
 
             entry.childs = match childs_opt {
                 &None => None,

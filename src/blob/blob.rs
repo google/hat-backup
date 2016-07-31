@@ -14,6 +14,7 @@
 
 use crypto;
 use crypto::{CipherText, CipherTextRef, PlainText};
+use hash::tree::HashRef;
 
 use super::ChunkRef;
 use capnp;
@@ -43,9 +44,9 @@ impl Blob {
         }
     }
 
-    pub fn read_chunk(blob: &[u8], cref: &ChunkRef) -> Result<Vec<u8>, String> {
+    pub fn read_chunk(blob: &[u8], hash: &[u8], cref: &ChunkRef) -> Result<Vec<u8>, String> {
         let ct = crypto::CipherTextRef::new(blob);
-        match crypto::RefKey::unseal(&cref, ct) {
+        match crypto::RefKey::unseal(&hash, &cref, ct) {
             Ok(pt) => Ok(pt.into_vec()),
             Err(()) => {
                 Err(From::from(format!("unseal failed: wrong key or corrupt data (offset: {})",
@@ -62,16 +63,18 @@ impl Blob {
         }
     }
 
-    pub fn try_append(&mut self, chunk: Vec<u8>, mut cref: &mut ChunkRef) -> Result<(), Vec<u8>> {
-        let mut ct = crypto::RefKey::seal(&mut cref, PlainText::new(chunk));
+    pub fn try_append(&mut self, chunk: Vec<u8>, mut href: &mut HashRef) -> Result<(), Vec<u8>> {
+        let mut ct = crypto::RefKey::seal(&mut href, PlainText::new(chunk));
 
-        cref.offset = self.chunks.len();
-        let mut cref_bytes = cref.as_bytes();
-        assert!(cref_bytes.len() < 255);
+        href.persistent_ref.offset = self.chunks.len();
+        let mut href_bytes = href.as_bytes();
+        assert!(href_bytes.len() < 255);
 
-        if self.upperbound_len() + cref_bytes.len() + ct.len() >= self.max_size {
-            cref.offset = 0;
-            let chunk = crypto::RefKey::unseal(&cref, ct.as_ref()).unwrap().into_vec();
+        if self.upperbound_len() + href_bytes.len() + ct.len() >= self.max_size {
+            href.persistent_ref.offset = 0;
+            let chunk = crypto::RefKey::unseal(&href.hash, &href.persistent_ref, ct.as_ref())
+                .unwrap()
+                .into_vec();
             if self.chunks.len() == 0 {
                 panic!("Can never fit chunk of size {} in blob of size {}",
                        chunk.len(),
@@ -83,8 +86,8 @@ impl Blob {
         ct.empty_into(&mut self.chunks);
 
         // Generate footer entry.
-        self.footer.push(cref_bytes.len() as u8);
-        self.footer.append(&mut cref_bytes);
+        self.footer.push(href_bytes.len() as u8);
+        self.footer.append(&mut href_bytes);
 
         Ok(())
     }
@@ -110,7 +113,7 @@ impl Blob {
         out.append(&mut ct.into_vec());
     }
 
-    pub fn chunk_refs_from_bytes(&self, bytes: &[u8]) -> Result<Vec<ChunkRef>, capnp::Error> {
+    pub fn refs_from_bytes(&self, bytes: &[u8]) -> Result<Vec<HashRef>, capnp::Error> {
         if bytes.len() == 0 {
             return Ok(Vec::new());
         }
@@ -118,15 +121,15 @@ impl Blob {
         let (_rest, footer_vec) = self.master_key.unseal(CipherTextRef::new(bytes)).unwrap();
         let mut footer_pos = footer_vec.as_bytes();
 
-        let mut crefs = Vec::new();
+        let mut hrefs = Vec::new();
         while footer_pos.len() > 0 {
             let len = footer_pos[0] as usize;
             assert!(footer_pos.len() > len);
 
-            crefs.push(try!(ChunkRef::from_bytes(&mut &footer_pos[1..1 + len])));
+            hrefs.push(try!(HashRef::from_bytes(&mut &footer_pos[1..1 + len])));
             footer_pos = &footer_pos[len + 1..];
         }
 
-        Ok(crefs)
+        Ok(hrefs)
     }
 }
