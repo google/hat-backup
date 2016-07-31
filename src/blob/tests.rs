@@ -51,7 +51,9 @@ fn identity() {
         // All chunks must be available through the blob store:
         for &(ref id, chunk) in ids.iter() {
             assert_eq!(bs_p.retrieve(&id.hash, &id.persistent_ref)
-                       .unwrap().unwrap(), &chunk[..]);
+                           .unwrap()
+                           .unwrap(),
+                       &chunk[..]);
         }
 
         return true;
@@ -77,7 +79,9 @@ fn identity_with_excessive_flushing() {
             bs_p.flush();
             let &(ref id, chunk) = ids.last().unwrap();
             assert_eq!(bs_p.retrieve(&id.hash, &id.persistent_ref)
-                       .unwrap().unwrap(), &chunk[..]);
+                           .unwrap()
+                           .unwrap(),
+                       &chunk[..]);
         }
 
         // Non-empty chunks must be in the backend now:
@@ -93,7 +97,9 @@ fn identity_with_excessive_flushing() {
         // All chunks must be available through the blob store:
         for &(ref id, chunk) in ids.iter() {
             assert_eq!(bs_p.retrieve(&id.hash, &id.persistent_ref)
-                       .unwrap().unwrap(), &chunk[..]);
+                           .unwrap()
+                           .unwrap(),
+                       &chunk[..]);
         }
 
         return true;
@@ -140,8 +146,10 @@ fn blob_reuse() {
     let mut out = Vec::new();
     b.into_bytes(&mut out);
 
-    assert_eq!(vec![1, 2, 3], Blob::read_chunk(&out, &c1.hash, &c1.persistent_ref).unwrap());
-    assert_eq!(vec![4, 5, 6], Blob::read_chunk(&out, &c2.hash, &c2.persistent_ref).unwrap());
+    assert_eq!(vec![1, 2, 3],
+               Blob::read_chunk(&out, &c1.hash, &c1.persistent_ref).unwrap());
+    assert_eq!(vec![4, 5, 6],
+               Blob::read_chunk(&out, &c2.hash, &c2.persistent_ref).unwrap());
 
     let mut c3 = c2.clone();
 
@@ -151,9 +159,12 @@ fn blob_reuse() {
 
     out.clear();
     b.into_bytes(&mut out);
-    assert_eq!(vec![1, 2], Blob::read_chunk(&out, &c1.hash, &c1.persistent_ref).unwrap());
-    assert_eq!(vec![1, 2], Blob::read_chunk(&out, &c2.hash, &c2.persistent_ref).unwrap());
-    assert_eq!(vec![1, 2], Blob::read_chunk(&out, &c3.hash, &c3.persistent_ref).unwrap());
+    assert_eq!(vec![1, 2],
+               Blob::read_chunk(&out, &c1.hash, &c1.persistent_ref).unwrap());
+    assert_eq!(vec![1, 2],
+               Blob::read_chunk(&out, &c2.hash, &c2.persistent_ref).unwrap());
+    assert_eq!(vec![1, 2],
+               Blob::read_chunk(&out, &c3.hash, &c3.persistent_ref).unwrap());
 }
 
 #[test]

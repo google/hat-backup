@@ -165,10 +165,9 @@ impl<'a> CipherTextRef<'a> {
 
 pub struct RefKey {}
 
+
 impl RefKey {
     pub fn seal(href: &mut HashRef, pt: PlainText) -> CipherText {
-        // TODO(jos): WIP: Plug in encryption/crypto here.
-        // Update cref with key.
         let key = authed::imp::gen_key();
         href.persistent_ref.key = Some(wrap_key(key.clone()));
 
