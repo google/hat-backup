@@ -144,7 +144,7 @@ impl<B: StoreBackend> StoreInner<B> {
         let mut blob = Blob::new(self.max_blob_size);
         blob.try_append(data,
                         &mut ChunkRef {
-                            blob_id: vec![],
+                            blob_id: name.as_bytes().to_owned(),
                             offset: 0,
                             length: 0,
                             kind: Kind::TreeLeaf,
@@ -166,7 +166,9 @@ impl<B: StoreBackend> StoreInner<B> {
             Some(ct) => {
                 let crefs = try!(self.blob.chunk_refs_from_bytes(&ct));
                 assert_eq!(crefs.len(), 1);
-                Ok(Some(try!(Blob::read_chunk(&ct, &crefs[0]))))
+                let cref = &crefs[0];
+                assert_eq!(name.as_bytes(), &cref.blob_id[..]);
+                Ok(Some(try!(Blob::read_chunk(&ct, cref))))
             }
         }
     }
