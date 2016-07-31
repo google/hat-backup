@@ -32,15 +32,15 @@ pub struct Blob {
 impl Blob {
     pub fn new(max_size: usize) -> Blob {
         // TODO(jos): Plug an actual crypto key through somehow.
-        let fake_crypto_key = [0; crypto::desc::KEYBYTES];
-        let master_key = crypto::FixedKey::new(crypto::desc::Key::from_slice(&fake_crypto_key)
+        let fake_crypto_key = [0; crypto::sealed::desc::KEYBYTES];
+        let master_key = crypto::FixedKey::new(crypto::sealed::desc::Key::from_slice(&fake_crypto_key)
             .unwrap());
 
         Blob {
             master_key: master_key,
             chunks: CipherText::new(Vec::with_capacity(max_size)),
             footer: Vec::with_capacity(max_size / 2),
-            overhead: crypto::desc::fixed_key_overhead(),
+            overhead: crypto::sealed::desc::overhead(),
             max_size: max_size,
         }
     }
