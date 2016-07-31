@@ -32,9 +32,20 @@ pub struct Blob {
 impl Blob {
     pub fn new(max_size: usize) -> Blob {
         // TODO(jos): Plug an actual crypto key through somehow.
-        let fake_crypto_key = [0; crypto::sealed::desc::KEYBYTES];
-        let master_key = crypto::FixedKey::new(crypto::sealed::desc::Key::from_slice(&fake_crypto_key)
-            .unwrap());
+        let pubkey = crypto::sealed::desc::PublicKey::from_slice(&[215, 136, 80, 128, 158, 109,
+                                                                   227, 141, 219, 63, 118, 91,
+                                                                   123, 97, 1, 97, 65, 237, 62,
+                                                                   171, 83, 159, 200, 11, 68,
+                                                                   138, 40, 82, 24, 47, 187, 29])
+            .unwrap();
+        let seckey = crypto::sealed::desc::SecretKey::from_slice(&[94, 13, 181, 81, 97, 87, 76,
+                                                                   37, 53, 92, 120, 232, 17, 126,
+                                                                   234, 78, 12, 23, 141, 61, 40,
+                                                                   10, 136, 127, 103, 192, 255,
+                                                                   193, 142, 154, 101, 35])
+            .unwrap();
+
+        let master_key = crypto::FixedKey::new(pubkey, Some(seckey));
 
         Blob {
             master_key: master_key,

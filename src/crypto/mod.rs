@@ -36,26 +36,30 @@ pub mod authed {
 
 pub mod sealed {
     pub mod desc {
-        pub use sodiumoxide::crypto::secretbox::xsalsa20poly1305::{KEYBYTES, Key, MACBYTES,
-                                                                   NONCEBYTES, Nonce};
+        pub use sodiumoxide::crypto::box_::curve25519xsalsa20poly1305::{MACBYTES, PUBLICKEYBYTES,
+                                                                        PublicKey, SECRETKEYBYTES,
+                                                                        SecretKey};
+
+        pub const SEALBYTES: usize = PUBLICKEYBYTES + MACBYTES;
 
         pub fn footer_plain_bytes() -> usize {
-            // Footer contains a Nonce and a LittleEndian u64.
-            NONCEBYTES + 8
+            // Footer contains a LittleEndian u64.
+            8
         }
 
         pub fn footer_cipher_bytes() -> usize {
-            footer_plain_bytes() + MACBYTES
+            footer_plain_bytes() + SEALBYTES
         }
 
         pub fn overhead() -> usize {
             // MAC for the plaintext being sealed + the footer.
-            MACBYTES + footer_cipher_bytes()
+            SEALBYTES + footer_cipher_bytes()
         }
     }
 
     pub mod imp {
-        pub use sodiumoxide::crypto::secretbox::xsalsa20poly1305::{gen_key, gen_nonce, open, seal};
+        pub use sodiumoxide::crypto::box_::curve25519xsalsa20poly1305::gen_keypair;
+        pub use sodiumoxide::crypto::sealedbox::curve25519blake2bxsalsa20poly1305::{open, seal};
     }
 }
 
@@ -84,11 +88,8 @@ impl PlainText {
                          -> CipherText {
         CipherText(authed::imp::seal(&self.0, &nonce, &key))
     }
-    pub fn to_sealed_ciphertext(&self,
-                                nonce: &sealed::desc::Nonce,
-                                key: &sealed::desc::Key)
-                                -> CipherText {
-        CipherText(authed::imp::seal(&self.0, &nonce, &key))
+    pub fn to_sealed_ciphertext(&self, pubkey: &sealed::desc::PublicKey) -> CipherText {
+        CipherText(sealed::imp::seal(&self.0, &pubkey))
     }
     pub fn as_bytes(&self) -> &[u8] {
         &self.0
@@ -147,9 +148,6 @@ impl<'a> CipherTextRef<'a> {
         assert!(self.len() >= len);
         (self.slice(0, self.len() - len), self.slice(self.len() - len, self.len()))
     }
-    pub fn as_bytes(&self) -> &[u8] {
-        &self.0
-    }
     pub fn to_plaintext(&self,
                         nonce: &authed::desc::Nonce,
                         key: &authed::desc::Key)
@@ -157,10 +155,10 @@ impl<'a> CipherTextRef<'a> {
         Ok(PlainText(try!(authed::imp::open(&self.0, &nonce, &key))))
     }
     pub fn to_sealed_plaintext(&self,
-                               nonce: &sealed::desc::Nonce,
-                               key: &sealed::desc::Key)
+                               pubkey: &sealed::desc::PublicKey,
+                               seckey: &sealed::desc::SecretKey)
                                -> Result<PlainText, ()> {
-        Ok(PlainText(try!(sealed::imp::open(&self.0, &nonce, &key))))
+        Ok(PlainText(try!(sealed::imp::open(&self.0, &pubkey, &seckey))))
     }
 }
 
@@ -198,63 +196,51 @@ impl RefKey {
 }
 
 pub struct FixedKey {
-    key: sealed::desc::Key,
+    pubkey: sealed::desc::PublicKey,
+    seckey: Option<sealed::desc::SecretKey>,
 }
 
 impl FixedKey {
-    pub fn new(key: sealed::desc::Key) -> FixedKey {
-        FixedKey { key: key }
+    pub fn new(pubkey: sealed::desc::PublicKey,
+               seckey_opt: Option<sealed::desc::SecretKey>)
+               -> FixedKey {
+        FixedKey {
+            pubkey: pubkey,
+            seckey: seckey_opt,
+        }
     }
 
-    pub fn tie_knot(&self, pt: PlainText) -> CipherText {
-        let nonce = sealed::imp::gen_nonce();
-        let mut ct = pt.to_sealed_ciphertext(&nonce, &self.key);
+    pub fn seal(&self, pt: PlainText) -> CipherText {
+        let mut ct = pt.to_sealed_ciphertext(&self.pubkey);
 
-        // Build footer from nonce and serialized ciphertext length.
-        let ct_len = ct.len();
-        let mut foot_pt = PlainText(nonce.as_ref().to_owned());
-        foot_pt.0.write_u64::<LittleEndian>(ct_len as u64).unwrap();
+        // Add ciphertext length as LittleEndian.
+        let mut foot_pt = PlainText(Vec::with_capacity(8));
+        foot_pt.0.write_u64::<LittleEndian>(ct.len() as u64).unwrap();
         assert_eq!(foot_pt.len(), sealed::desc::footer_plain_bytes());
 
-        // Tie the knot by sealing the nonce and ciphertext length.
-        assert!(ct_len > sealed::desc::NONCEBYTES);
-        let nonce = sealed::desc::Nonce::from_slice(&ct.0[ct_len - sealed::desc::NONCEBYTES..])
-            .unwrap();
-        ct.append(&mut foot_pt.to_sealed_ciphertext(&nonce, &self.key));
+        // Append sealed ciphertext length to full ciphertext.
+        ct.append(&mut foot_pt.to_sealed_ciphertext(&self.pubkey));
+        assert_eq!(ct.len(), pt.len() + sealed::desc::overhead());
+
+        assert!(self.unseal(ct.as_ref()).is_ok());
 
         // Return complete ciphertext.
         ct
     }
 
-    fn untie_knot<'a>(&self, ct: CipherTextRef<'a>) -> Result<(CipherTextRef<'a>, PlainText), ()> {
-        // Partial untie of knot: recover footer with nonce and ciphertext length.
-        let foot_size = sealed::desc::footer_cipher_bytes();
-        let (rest, foot_ct) = ct.split_from_right(foot_size);
-        let nonce = sealed::desc::Nonce::from_slice(&rest.as_bytes()[rest.len() -
-                                                                     sealed::desc::NONCEBYTES..])
-            .unwrap();
-        let foot_pt = try!(foot_ct.to_sealed_plaintext(&nonce, &self.key));
+    pub fn unseal<'a>(&self, ct: CipherTextRef<'a>) -> Result<(CipherTextRef<'a>, PlainText), ()> {
+        let seckey = self.seckey.as_ref().expect("unseal requires access to read-key");
 
-        let nonce =
-            sealed::desc::Nonce::from_slice(&foot_pt.as_bytes()[..sealed::desc::NONCEBYTES])
-                .unwrap();
-        let ct_len =
-            (&foot_pt.as_bytes()[sealed::desc::NONCEBYTES..]).read_u64::<LittleEndian>().unwrap();
+        // Read sealed ciphertext length and unseal it.
+        let (rest, foot_ct) = ct.split_from_right(sealed::desc::footer_cipher_bytes());
+        let foot_pt = try!(foot_ct.to_sealed_plaintext(&self.pubkey, &seckey));
+        assert_eq!(foot_pt.len(), sealed::desc::footer_plain_bytes());
 
-        // Complete untie: recover plaintext.
+        // Parse back from encoded LittleEndian.
+        let ct_len = foot_pt.as_bytes().read_u64::<LittleEndian>().unwrap();
+
+        // Read and unseal original ciphertext.
         let (rest, ct) = rest.split_from_right(ct_len as usize);
-        Ok((rest, try!(ct.to_sealed_plaintext(&nonce, &self.key))))
-    }
-
-    pub fn seal(&self, pt: PlainText) -> CipherText {
-        // Seal with fixed key.
-        self.tie_knot(pt)
-    }
-
-    pub fn unseal<'a, 'b>(&'a self,
-                          ct: CipherTextRef<'b>)
-                          -> Result<(CipherTextRef<'b>, PlainText), ()> {
-        // Unseal with fixed key.
-        self.untie_knot(ct)
+        Ok((rest, try!(ct.to_sealed_plaintext(&self.pubkey, &seckey))))
     }
 }
