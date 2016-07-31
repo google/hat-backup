@@ -41,10 +41,6 @@ pub mod desc {
     pub fn footer_cipher_bytes() -> usize {
         footer_plain_bytes() + MACBYTES
     }
-
-    pub fn static_nonce() -> Nonce {
-        Nonce::from_slice(&[255; NONCEBYTES]).unwrap()
-    }
 }
 
 mod imp {
@@ -147,7 +143,8 @@ impl RefKey {
         let key = imp::gen_key();
         href.persistent_ref.key = Some(wrap_key(key.clone()));
 
-        let ct = pt.to_ciphertext(&desc::static_nonce(), &key);
+        let nonce = desc::Nonce::from_slice(&href.hash.bytes[..desc::NONCEBYTES]).unwrap();
+        let ct = pt.to_ciphertext(&nonce, &key);
         href.persistent_ref.length = ct.len();
 
         ct
@@ -158,7 +155,8 @@ impl RefKey {
         let ct = ct.slice(cref.offset, cref.offset + cref.length);
         match cref.key {
             Some(Key::XSalsa20Poly1305(ref key)) => {
-                Ok(try!(ct.to_plaintext(&desc::static_nonce(), &key)))
+                let nonce = desc::Nonce::from_slice(&hash.bytes[..desc::NONCEBYTES]).unwrap();
+                Ok(try!(ct.to_plaintext(&nonce, &key)))
             }
             _ => panic!("Unknown blob key type"),
         }
