@@ -120,16 +120,17 @@ fn blobid_identity() {
 
 #[test]
 fn blob_reuse() {
-    let mut c1 = hash::tree::HashRef{
+    let mut c1 = hash::tree::HashRef {
         hash: vec![],
         persistent_ref: ChunkRef {
-        blob_id: Vec::new(),
-        offset: 0,
-        length: 0,
-        kind: Kind::TreeLeaf,
-        packing: None,
-        key: None,
-    }};
+            blob_id: Vec::new(),
+            offset: 0,
+            length: 0,
+            kind: Kind::TreeLeaf,
+            packing: None,
+            key: None,
+        },
+    };
     let mut c2 = c1.clone();
 
     let mut b = Blob::new(1000);
@@ -162,16 +163,17 @@ fn blob_identity() {
         let mut b = Blob::new(max_size);
         let mut n = 0;
         for chunk in chunks.iter() {
-            let mut cref = hash::tree::HashRef{
+            let mut cref = hash::tree::HashRef {
                 hash: vec![],
                 persistent_ref: ChunkRef {
-                blob_id: Vec::new(),
-                offset: 0,
-                length: 0,
-                kind: Kind::TreeLeaf,
-                packing: None,
-                key: None,
-            }};
+                    blob_id: Vec::new(),
+                    offset: 0,
+                    length: 0,
+                    kind: Kind::TreeLeaf,
+                    packing: None,
+                    key: None,
+                },
+            };
             if let Err(_) = b.try_append(chunk.clone(), &mut cref) {
                 assert!(b.upperbound_len() + chunk.len() + cref.as_bytes().len() + 50 >= max_size);
                 break;
@@ -193,13 +195,12 @@ fn blob_identity() {
         assert_eq!(n, hrefs.len());
 
         // Check recovered ChunkRefs.
-        // for (i, cref) in crefs.into_iter().enumerate() {
-        // assert!(chunks[i].len() < cref.length);
-        // let chunk = Blob::read_chunk(&out, &cref).unwrap();
-        // assert_eq!(chunks[i].len(), chunk.len());
-        // assert_eq!(&chunks[i], &chunk);
-        // }
-
+        for (i, href) in hrefs.into_iter().enumerate() {
+            assert!(chunks[i].len() < href.persistent_ref.length);
+            let chunk = Blob::read_chunk(&out, &href.hash[..], &href.persistent_ref).unwrap();
+            assert_eq!(chunks[i].len(), chunk.len());
+            assert_eq!(&chunks[i], &chunk);
+        }
 
         true
     }
