@@ -16,6 +16,7 @@ use blob::*;
 use backend::{MemoryBackend, StoreBackend};
 use hash;
 
+use std::collections::HashSet;
 use std::sync::Arc;
 use quickcheck;
 
@@ -216,4 +217,44 @@ fn blob_identity() {
         true
     }
     quickcheck::quickcheck(prop as fn(Vec<Vec<u8>>) -> bool);
+}
+
+fn empty_blocks_blob_ciphertext(blocksize: usize) -> Vec<u8> {
+    let mut blob = Blob::new(1024 * 1024);
+    let block = vec![0u8; blocksize];
+    loop {
+        let mut cref = hash::tree::HashRef {
+            hash: hash::Hash::new(&block[..]),
+            persistent_ref: ChunkRef {
+                blob_id: Vec::new(),
+                offset: 0,
+                length: block.len(),
+                kind: Kind::TreeLeaf,
+                packing: None,
+                key: None,
+            },
+        };
+        match blob.try_append(block.clone(), &mut cref) {
+            Ok(()) => continue,
+            Err(_) => break,
+        }
+    }
+    let mut out = Vec::new();
+    blob.into_bytes(&mut out);
+    out
+}
+
+#[test]
+fn blob_ciphertext_uniqueblocks() {
+    // If every inserted block gets a unique (nonce, key) combination, they should produce unique
+    // blocks in the out-coming ciphertext (by high enough probability to assert it).
+    let mut blocks = HashSet::new();
+
+    for _ in 1..10 {
+        for c in empty_blocks_blob_ciphertext(16).chunks(16) {
+            let v = c.to_owned();
+            assert!(!blocks.contains(&v));
+            blocks.insert(v);
+        }
+    }
 }
