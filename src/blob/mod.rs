@@ -33,9 +33,14 @@ mod schema;
 #[cfg(test)]
 pub mod tests;
 
+#[cfg(all(test, feature = "benchmarks"))]
+mod benchmarks;
+
+
 pub use self::chunk::{ChunkRef, Key, Kind, Packing};
 pub use self::blob::Blob;
 pub use self::index::{BlobDesc, BlobIndex};
+
 
 pub struct BlobStore<B>(Arc<Mutex<StoreInner<B>>>);
 

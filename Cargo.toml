@@ -4,6 +4,9 @@ build = "build.rs"
 name = "hat-backup"
 version = "0.0.1-pre"
 
+[profile.release]
+debug = true
+
 [lib]
 name = "hat"
 path = "src/lib.rs"
