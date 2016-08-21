@@ -82,7 +82,7 @@ impl Blob {
         let mut href_bytes = href.as_bytes();
         assert!(href_bytes.len() < 255);
 
-        if self.upperbound_len() + href_bytes.len() + ct.len() >= self.max_size {
+        if self.upperbound_len() + 1 + href_bytes.len() + ct.len() >= self.max_size {
             href.persistent_ref.offset = 0;
             let chunk = crypto::RefKey::unseal(&href.hash, &href.persistent_ref, ct.as_ref())
                 .unwrap()
