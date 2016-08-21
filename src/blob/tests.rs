@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License
 
-use blob::*;
+use blob::{Blob, BlobError, BlobIndex, BlobStore, ChunkRef, Kind};
 use backend::{MemoryBackend, StoreBackend};
 use hash;
 
@@ -219,8 +219,7 @@ fn blob_identity() {
     quickcheck::quickcheck(prop as fn(Vec<Vec<u8>>) -> bool);
 }
 
-fn empty_blocks_blob_ciphertext(blocksize: usize) -> Vec<u8> {
-    let mut blob = Blob::new(1024 * 1024);
+fn empty_blocks_blob_ciphertext(blob: &mut Blob, blocksize: usize) -> Vec<u8> {
     let block = vec![0u8; blocksize];
     loop {
         let mut cref = hash::tree::HashRef {
@@ -248,13 +247,71 @@ fn empty_blocks_blob_ciphertext(blocksize: usize) -> Vec<u8> {
 fn blob_ciphertext_uniqueblocks() {
     // If every inserted block gets a unique (nonce, key) combination, they should produce unique
     // blocks in the out-coming ciphertext (by high enough probability to assert it).
+    let mut blob = Blob::new(1024 * 1024);
     let mut blocks = HashSet::new();
 
     for _ in 1..10 {
-        for c in empty_blocks_blob_ciphertext(16).chunks(16) {
+        for c in empty_blocks_blob_ciphertext(&mut blob, 16).chunks(16) {
             let v = c.to_owned();
             assert!(!blocks.contains(&v));
             blocks.insert(v);
         }
     }
+}
+
+#[test]
+fn blob_ciphertext_authed_allbytes() {
+    let mut blob = Blob::new(1024);
+    let mut bytes = empty_blocks_blob_ciphertext(&mut blob, 1);
+
+    fn verify(blob: &Blob, bs: &[u8]) -> Result<Vec<Vec<u8>>, BlobError> {
+        let mut vs = vec![];
+        for r in try!(blob.refs_from_bytes(bs)) {
+            vs.push(try!(Blob::read_chunk(&bs, &r.hash, &r.persistent_ref)));
+        }
+        Ok(vs)
+    };
+
+    fn with_modified<F>(mut bytes: &mut [u8],
+                        i: usize,
+                        b: u8,
+                        f: F)
+                        -> Result<Vec<Vec<u8>>, BlobError>
+        where F: FnOnce(&[u8]) -> Result<Vec<Vec<u8>>, BlobError>
+    {
+        {
+            bytes[i] ^= b;
+        }
+        let res = f(&bytes);
+        {
+            bytes[i] ^= b;
+        }
+        res
+    };
+
+    let mut unauthed = vec![];
+
+    // Blob is valid.
+    let vs = verify(&blob, &bytes[..]).unwrap();
+    for i in 0..bytes.len() {
+        if let Ok(_) = with_modified(&mut bytes[..], i, 1, |bs| verify(&blob, bs)) {
+            // As we did not notice the modification, this index was not authenticated.
+            unauthed.push(i);
+        }
+    }
+    // We did not corrupt the blob.
+    assert_eq!(vs, verify(&blob, &bytes[..]).unwrap());
+
+    // Some unauthenticated random padding is expected.
+    // However, it should be a single continuous segment.
+    assert!(unauthed.len() >= 2);
+    for (a, b) in unauthed.iter().zip(unauthed[1..].iter()) {
+        assert_eq!(*a + 1, *b);
+    }
+
+    // No important byte is unauthenticated.
+    // Removing the random padding does not affect unpacking.
+    let mut authed = bytes[0..unauthed[0]].to_owned();
+    authed.extend_from_slice(&bytes[unauthed.iter().last().unwrap() + 1..]);
+    assert_eq!(vs, verify(&blob, &authed[..]).unwrap());
 }
