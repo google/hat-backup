@@ -17,8 +17,8 @@ use crypto::{CipherText, CipherTextRef, PlainText};
 use hash::Hash;
 use hash::tree::HashRef;
 
+use super::BlobError;
 use super::ChunkRef;
-use capnp;
 
 
 pub struct Blob {
@@ -56,15 +56,9 @@ impl Blob {
         }
     }
 
-    pub fn read_chunk(blob: &[u8], hash: &Hash, cref: &ChunkRef) -> Result<Vec<u8>, String> {
+    pub fn read_chunk(blob: &[u8], hash: &Hash, cref: &ChunkRef) -> Result<Vec<u8>, BlobError> {
         let ct = crypto::CipherTextRef::new(blob);
-        match crypto::RefKey::unseal(hash, cref, ct) {
-            Ok(pt) => Ok(pt.into_vec()),
-            Err(()) => {
-                Err(From::from(format!("unseal failed: wrong key or corrupt data (offset: {})",
-                                       cref.offset)))
-            }
-        }
+        Ok(try!(crypto::RefKey::unseal(hash, cref, ct)).into_vec())
     }
 
     pub fn upperbound_len(&self) -> usize {
@@ -110,8 +104,6 @@ impl Blob {
         }
 
         let mut ct = CipherText::from(&mut self.chunks);
-        ct.append(&mut self.chunks);
-
         let mut footer = self.master_key.seal(PlainText::from_vec(&mut self.footer));
 
         assert!(ct.len() + footer.len() <= self.max_size);
@@ -125,12 +117,12 @@ impl Blob {
         out.append(&mut ct.into_vec());
     }
 
-    pub fn refs_from_bytes(&self, bytes: &[u8]) -> Result<Vec<HashRef>, capnp::Error> {
+    pub fn refs_from_bytes(&self, bytes: &[u8]) -> Result<Vec<HashRef>, BlobError> {
         if bytes.len() == 0 {
             return Ok(Vec::new());
         }
 
-        let (_rest, footer_vec) = self.master_key.unseal(CipherTextRef::new(bytes)).unwrap();
+        let (_rest, footer_vec) = try!(self.master_key.unseal(CipherTextRef::new(bytes)));
         let mut footer_pos = footer_vec.as_bytes();
 
         let mut hrefs = Vec::new();

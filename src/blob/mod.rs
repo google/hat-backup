@@ -14,11 +14,13 @@
 
 //! Combines data chunks into larger blobs to be stored externally.
 
+use std::borrow::Cow;
 use std::mem;
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::thread;
 
 use backend::StoreBackend;
+use capnp;
 use errors;
 use hash::Hash;
 use hash::tree::HashRef;
@@ -41,6 +43,23 @@ pub use self::chunk::{ChunkRef, Key, Kind, Packing};
 pub use self::blob::Blob;
 pub use self::index::{BlobDesc, BlobIndex};
 
+
+error_type! {
+    #[derive(Debug)]
+    pub enum BlobError {
+        Message(Cow<'static, str>) {
+            desc (e) &**e;
+            from (s: &'static str) s.into();
+            from (s: String) s.into();
+        },
+        CryptoError(errors::CryptoError) {
+            cause;
+        },
+        DataSerialization(capnp::Error) {
+            cause;
+        }
+    }
+}
 
 pub struct BlobStore<B>(Arc<Mutex<StoreInner<B>>>);
 
@@ -142,14 +161,14 @@ impl<B: StoreBackend> StoreInner<B> {
         href
     }
 
-    fn retrieve(&mut self, hash: &Hash, cref: &ChunkRef) -> Result<Option<Vec<u8>>, String> {
+    fn retrieve(&mut self, hash: &Hash, cref: &ChunkRef) -> Result<Option<Vec<u8>>, BlobError> {
         if cref.offset == 0 && cref.length == 0 {
             return Ok(Some(Vec::new()));
         }
         match self.backend.retrieve(&cref.blob_id[..]) {
             Ok(Some(blob)) => Ok(Some(try!(Blob::read_chunk(&blob, hash, cref)))),
             Ok(None) => Ok(None),
-            Err(e) => Err(e),
+            Err(e) => Err(e.into()),
         }
     }
 
@@ -178,7 +197,7 @@ impl<B: StoreBackend> StoreInner<B> {
         Ok(())
     }
 
-    fn retrieve_named(&mut self, name: &str) -> Result<Option<Vec<u8>>, errors::HatError> {
+    fn retrieve_named(&mut self, name: &str) -> Result<Option<Vec<u8>>, BlobError> {
         match try!(self.backend.retrieve(name.as_bytes())) {
             None => Ok(None),
             Some(ct) => {
@@ -244,7 +263,7 @@ impl<B: StoreBackend> BlobStore<B> {
     }
 
     /// Retrieve the data chunk identified by `ChunkRef`.
-    pub fn retrieve(&self, hash: &Hash, cref: &ChunkRef) -> Result<Option<Vec<u8>>, String> {
+    pub fn retrieve(&self, hash: &Hash, cref: &ChunkRef) -> Result<Option<Vec<u8>>, BlobError> {
         self.lock().retrieve(hash, cref)
     }
 
@@ -254,7 +273,7 @@ impl<B: StoreBackend> BlobStore<B> {
     }
 
     /// Retrieve full named blob.
-    pub fn retrieve_named(&self, name: &str) -> Result<Option<Vec<u8>>, errors::HatError> {
+    pub fn retrieve_named(&self, name: &str) -> Result<Option<Vec<u8>>, BlobError> {
         self.lock().retrieve_named(name)
     }
 

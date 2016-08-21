@@ -12,12 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use errors::CryptoError;
 use sodiumoxide::crypto::stream;
 use hash::Hash;
 use hash::tree::HashRef;
 use blob::{ChunkRef, Key};
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
-
 
 pub struct PlainText(Vec<u8>);
 pub struct CipherText(Vec<u8>);
@@ -151,14 +151,16 @@ impl<'a> CipherTextRef<'a> {
     pub fn to_plaintext(&self,
                         nonce: &authed::desc::Nonce,
                         key: &authed::desc::Key)
-                        -> Result<PlainText, ()> {
-        Ok(PlainText(try!(authed::imp::open(&self.0, &nonce, &key))))
+                        -> Result<PlainText, CryptoError> {
+        Ok((PlainText(try!(authed::imp::open(&self.0, &nonce, &key)
+            .map_err(|()| "Crypto failed to open authenticated message")))))
     }
     pub fn to_sealed_plaintext(&self,
                                pubkey: &sealed::desc::PublicKey,
                                seckey: &sealed::desc::SecretKey)
-                               -> Result<PlainText, ()> {
-        Ok(PlainText(try!(sealed::imp::open(&self.0, &pubkey, &seckey))))
+                               -> Result<PlainText, CryptoError> {
+        Ok(PlainText(try!(sealed::imp::open(&self.0, &pubkey, &seckey)
+            .map_err(|()| "Crypto failed to open sealed message"))))
     }
 }
 
@@ -179,7 +181,10 @@ impl RefKey {
         ct
     }
 
-    pub fn unseal(hash: &Hash, cref: &ChunkRef, ct: CipherTextRef) -> Result<PlainText, ()> {
+    pub fn unseal(hash: &Hash,
+                  cref: &ChunkRef,
+                  ct: CipherTextRef)
+                  -> Result<PlainText, CryptoError> {
         assert!(ct.len() >= cref.offset + cref.length);
         let ct = ct.slice(cref.offset, cref.offset + cref.length);
         match cref.key {
@@ -227,7 +232,9 @@ impl FixedKey {
         ct
     }
 
-    pub fn unseal<'a>(&self, ct: CipherTextRef<'a>) -> Result<(CipherTextRef<'a>, PlainText), ()> {
+    pub fn unseal<'a>(&self,
+                      ct: CipherTextRef<'a>)
+                      -> Result<(CipherTextRef<'a>, PlainText), CryptoError> {
         let seckey = self.seckey.as_ref().expect("unseal requires access to read-key");
 
         // Read sealed ciphertext length and unseal it.

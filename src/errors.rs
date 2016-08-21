@@ -16,6 +16,7 @@ use std::{error, fmt};
 
 pub use self::hat_error::HatError;
 pub use self::diesel_error::DieselError;
+pub use self::crypto_error::CryptoError;
 
 #[derive(Clone, Copy, Debug)]
 pub struct RetryError;
@@ -39,6 +40,7 @@ mod hat_error {
     use capnp;
     use void;
 
+    use blob;
     use key;
 
     error_type! {
@@ -63,7 +65,13 @@ mod hat_error {
             },
             DieselError(super::DieselError) {
                 cause;
-            }
+            },
+            Crypto(super::CryptoError) {
+                cause;
+            },
+            Blob(blob::BlobError) {
+                cause;
+            },
         }
     }
 
@@ -91,6 +99,22 @@ mod diesel_error {
             },
             SqlExecute(diesel::result::Error) {
                 cause;
+            },
+        }
+    }
+}
+
+mod crypto_error {
+    use std::{io, str};
+    use std::borrow::Cow;
+
+    error_type! {
+        #[derive(Debug)]
+        pub enum CryptoError {
+            Message(Cow<'static, str>) {
+                desc (e) &**e;
+                from (s: &'static str) s.into();
+                from (s: String) s.into();
             },
         }
     }
