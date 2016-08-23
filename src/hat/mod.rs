@@ -391,7 +391,8 @@ impl<B: StoreBackend> HatRc<B> {
         let local_blob_store = self.blob_store.clone();
         thread::spawn(move || {
             for (childs_opt, entry) in registered {
-                let id = recover_entry(&local_hash_index, &local_blob_store, &childs_opt, entry).unwrap();
+                let id = recover_entry(&local_hash_index, &local_blob_store, &childs_opt, entry)
+                    .unwrap();
                 id_sender.send(id).unwrap();
             }
         });
@@ -457,7 +458,8 @@ impl<B: StoreBackend> HatRc<B> {
                 }
             };
             // We register the top hash with the GC (tree nodes are inferred).
-            let r = (childs, hash::Entry {
+            let r = (childs,
+                     hash::Entry {
                 hash: hash,
                 persistent_ref: Some(pref),
                 level: level,

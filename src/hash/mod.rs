@@ -59,10 +59,11 @@ fn encode_childs(childs: &[i64]) -> Vec<u8> {
 
 fn decode_childs(bytes: &[u8]) -> Result<Vec<i64>, capnp::Error> {
     let reader = capnp::serialize_packed::read_message(&mut &bytes[..],
-                                                       capnp::message::ReaderOptions::new()).unwrap();
+                                                       capnp::message::ReaderOptions::new())
+        .unwrap();
     let msg = reader.get_root::<root_capnp::hash_ids::Reader>().unwrap();
 
-    let ids = try!(msg.get_hash_ids()); 
+    let ids = try!(msg.get_hash_ids());
     let mut out = Vec::new();
     for i in 0..ids.len() {
         assert!(ids.get(i) as i64 > 0);

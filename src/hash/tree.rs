@@ -60,7 +60,12 @@ pub trait HashTreeBackend: Clone {
     fn fetch_chunk(&self, &Hash, Option<ChunkRef>) -> Result<Option<Vec<u8>>, Self::Err>;
     fn fetch_childs(&self, &Hash) -> Option<Vec<i64>>;
     fn fetch_persistent_ref(&self, &Hash) -> Option<ChunkRef>;
-    fn insert_chunk(&self, &Hash, i64, Option<Vec<i64>>, Vec<u8>) -> Result<(i64, ChunkRef), Self::Err>;
+    fn insert_chunk(&self,
+                    &Hash,
+                    i64,
+                    Option<Vec<i64>>,
+                    Vec<u8>)
+                    -> Result<(i64, ChunkRef), Self::Err>;
 }
 
 
@@ -176,7 +181,8 @@ impl<B: HashTreeBackend> SimpleHashTreeWriter<B> {
                  childs: Option<Vec<i64>>)
                  -> Result<(), B::Err> {
         let hash = Hash::new(&data[..]);
-        let (id, persistent_ref) = try!(self.backend.insert_chunk(&hash, level as i64, childs, data));
+        let (id, persistent_ref) = try!(self.backend
+            .insert_chunk(&hash, level as i64, childs, data));
         let hash_ref = HashRef {
             hash: hash.bytes,
             persistent_ref: persistent_ref,
@@ -189,7 +195,8 @@ impl<B: HashTreeBackend> SimpleHashTreeWriter<B> {
         self.grow_to(level);
 
         let new_level_len = {
-            let level: &mut Vec<(i64, HashRef)> = self.levels.get_mut(level).expect("len() >= level");
+            let level: &mut Vec<(i64, HashRef)> =
+                self.levels.get_mut(level).expect("len() >= level");
             level.push((id, hashref));
             level.len()
         };
@@ -208,7 +215,7 @@ impl<B: HashTreeBackend> SimpleHashTreeWriter<B> {
         let level_v = self.levels.swap_remove(level);
 
         // All data from this level (hashes and references):
-        let ids: Vec<i64> = level_v.iter().map(|&(id,_)| id).collect();
+        let ids: Vec<i64> = level_v.iter().map(|&(id, _)| id).collect();
         let data = hash_refs_to_bytes(&level_v.into_iter().map(|(_, hr)| hr).collect());
 
         self.append_at(level + 1, data, Some(ids))
@@ -322,7 +329,9 @@ impl<B: HashTreeBackend> SimpleHashTreeReader<B> {
         }
     }
 
-    pub fn list_entries(&mut self, out: &mut Vec<(Option<Vec<Hash>>, Entry)>) -> Result<(Vec<Hash>, i64), B::Err> {
+    pub fn list_entries(&mut self,
+                        out: &mut Vec<(Option<Vec<Hash>>, Entry)>)
+                        -> Result<(Vec<Hash>, i64), B::Err> {
         let mut level = 1;
         let mut hashes = vec![];
         while !self.stack.is_empty() {
@@ -333,7 +342,8 @@ impl<B: HashTreeBackend> SimpleHashTreeReader<B> {
 
             match child.persistent_ref.kind {
                 Kind::TreeLeaf => {
-                    out.push((None, Entry {
+                    out.push((None,
+                              Entry {
                         hash: hash,
                         persistent_ref: Some(child.persistent_ref),
                         level: 0,
@@ -353,7 +363,8 @@ impl<B: HashTreeBackend> SimpleHashTreeReader<B> {
                         backend: self.backend.clone(),
                     };
                     let (child_hashes, child_level) = try!(next.list_entries(out));
-                    out.push((Some(child_hashes), Entry {
+                    out.push((Some(child_hashes),
+                              Entry {
                         hash: hash,
                         persistent_ref: Some(child.persistent_ref),
                         level: child_level,

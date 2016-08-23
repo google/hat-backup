@@ -124,7 +124,8 @@ impl<B: StoreBackend> HashTreeBackend for HashStoreBackend<B> {
         match self.hash_index.reserve(&hash_entry) {
             hash::ReserveResult::HashKnown(id) => {
                 // Someone came before us: piggyback on their result.
-                Ok((id, self.fetch_persistent_ref(hash)
+                Ok((id,
+                    self.fetch_persistent_ref(hash)
                     .expect("Could not find persistent_ref for known chunk.")))
             }
             hash::ReserveResult::ReserveOk(id) => {

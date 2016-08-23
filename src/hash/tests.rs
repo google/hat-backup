@@ -96,7 +96,8 @@ impl HashTreeBackend for MemoryBackend {
 
         let len = hash.bytes.len();
 
-        Ok((0, ChunkRef {
+        Ok((0,
+            ChunkRef {
             blob_id: hash.bytes.clone(),
             offset: 0,
             length: len,
