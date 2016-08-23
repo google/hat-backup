@@ -99,8 +99,8 @@ impl<B: StoreBackend> HashTreeBackend for HashStoreBackend<B> {
         }
     }
 
-    fn fetch_payload(&self, hash: &hash::Hash) -> Option<Vec<u8>> {
-        match self.hash_index.fetch_payload(hash) {
+    fn fetch_childs(&self, hash: &hash::Hash) -> Option<Vec<i64>> {
+        match self.hash_index.fetch_childs(hash) {
             Some(p) => p, // done
             None => None, // done
         }
@@ -109,25 +109,25 @@ impl<B: StoreBackend> HashTreeBackend for HashStoreBackend<B> {
     fn insert_chunk(&self,
                     hash: &hash::Hash,
                     level: i64,
-                    payload: Option<Vec<u8>>,
+                    childs: Option<Vec<i64>>,
                     chunk: Vec<u8>)
-                    -> Result<blob::ChunkRef, MsgError> {
+                    -> Result<(i64, blob::ChunkRef), MsgError> {
         assert!(!hash.bytes.is_empty());
 
         let mut hash_entry = hash::Entry {
             hash: hash.clone(),
             level: level,
-            payload: payload,
+            childs: childs,
             persistent_ref: None,
         };
 
         match self.hash_index.reserve(&hash_entry) {
-            hash::ReserveResult::HashKnown(..) => {
+            hash::ReserveResult::HashKnown(id) => {
                 // Someone came before us: piggyback on their result.
-                Ok(self.fetch_persistent_ref(hash)
-                    .expect("Could not find persistent_ref for known chunk."))
+                Ok((id, self.fetch_persistent_ref(hash)
+                    .expect("Could not find persistent_ref for known chunk.")))
             }
-            hash::ReserveResult::ReserveOk(..) => {
+            hash::ReserveResult::ReserveOk(id) => {
                 // We came first: this data-chunk is ours to process.
                 let local_hash_index = self.hash_index.clone();
 
@@ -143,7 +143,7 @@ impl<B: StoreBackend> HashTreeBackend for HashStoreBackend<B> {
                 let chunk_ref = self.blob_store.store(chunk, kind, callback);
                 hash_entry.persistent_ref = Some(chunk_ref.clone());
                 self.hash_index.update_reserved(hash_entry);
-                Ok(chunk_ref)
+                Ok((id, chunk_ref))
             }
         }
     }

@@ -20,7 +20,7 @@ table! {
         hash -> Binary,
         tag -> BigInt,
         height -> BigInt,
-        payload -> Nullable<Binary>,
+        childs -> Nullable<Binary>,
         blob_ref -> Nullable<Binary>,
     }
 }
@@ -44,7 +44,7 @@ pub struct Hash {
     pub hash: Vec<u8>,
     pub tag: i64,
     pub height: i64,
-    pub payload: Option<Vec<u8>>,
+    pub childs: Option<Vec<u8>>,
     pub blob_ref: Option<Vec<u8>>,
 }
 
@@ -54,7 +54,7 @@ pub struct NewHash<'a> {
     pub hash: &'a [u8],
     pub tag: i64,
     pub height: i64,
-    pub payload: Option<&'a [u8]>,
+    pub childs: Option<&'a [u8]>,
     pub blob_ref: Option<&'a [u8]>,
 }
 

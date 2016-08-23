@@ -26,7 +26,7 @@ use quickcheck;
 
 #[derive(Clone)]
 pub struct MemoryBackend {
-    chunks: Arc<Mutex<BTreeMap<Vec<u8>, (i64, Option<Vec<u8>>, Vec<u8>)>>>,
+    chunks: Arc<Mutex<BTreeMap<Vec<u8>, (i64, Option<Vec<i64>>, Vec<u8>)>>>,
     seen_chunks: Arc<Mutex<BTreeSet<Vec<u8>>>>,
 }
 
@@ -58,9 +58,9 @@ impl HashTreeBackend for MemoryBackend {
         Ok(guarded_chunks.get(&hash.bytes).map(|&(_, _, ref chunk)| chunk.clone()))
     }
 
-    fn fetch_payload(&self, hash: &Hash) -> Option<Vec<u8>> {
+    fn fetch_childs(&self, hash: &Hash) -> Option<Vec<i64>> {
         let guarded_chunks = self.chunks.lock().unwrap();
-        guarded_chunks.get(&hash.bytes).and_then(|&(_, ref payload, _)| payload.clone())
+        guarded_chunks.get(&hash.bytes).and_then(|&(_, ref childs, _)| childs.clone())
     }
 
     fn fetch_persistent_ref(&self, hash: &Hash) -> Option<ChunkRef> {
@@ -85,18 +85,18 @@ impl HashTreeBackend for MemoryBackend {
     fn insert_chunk(&self,
                     hash: &Hash,
                     level: i64,
-                    payload: Option<Vec<u8>>,
+                    childs: Option<Vec<i64>>,
                     chunk: Vec<u8>)
-                    -> Result<ChunkRef, Self::Err> {
+                    -> Result<(i64, ChunkRef), Self::Err> {
         let mut guarded_seen = self.seen_chunks.lock().unwrap();
         guarded_seen.insert(chunk.clone());
 
         let mut guarded_chunks = self.chunks.lock().unwrap();
-        guarded_chunks.insert(hash.bytes.clone(), (level, payload, chunk));
+        guarded_chunks.insert(hash.bytes.clone(), (level, childs, chunk));
 
         let len = hash.bytes.len();
 
-        Ok(ChunkRef {
+        Ok((0, ChunkRef {
             blob_id: hash.bytes.clone(),
             offset: 0,
             length: len,
@@ -105,7 +105,7 @@ impl HashTreeBackend for MemoryBackend {
             } else {
                 Kind::TreeBranch
             },
-        })
+        }))
     }
 }
 

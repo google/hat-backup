@@ -22,12 +22,14 @@ use diesel::prelude::*;
 use diesel::sqlite::SqliteConnection;
 
 use libsodium_sys;
-use sodiumoxide::crypto::hash::sha512;
 
 use blob;
 use util::{Counter, InfoWriter, PeriodicTimer, UniquePriorityQueue};
 use tags;
 use errors::{DieselError, RetryError};
+
+use capnp;
+use root_capnp;
 
 mod schema;
 pub mod tree;
@@ -37,9 +39,37 @@ mod tests;
 #[cfg(all(test, feature = "benchmarks"))]
 mod benchmarks;
 
-pub static HASHBYTES: usize = sha512::DIGESTBYTES;
 
 pub struct HashIndex(Mutex<InternalHashIndex>);
+
+
+fn encode_childs(childs: &[i64]) -> Vec<u8> {
+    let mut message = capnp::message::Builder::new_default();
+    {
+        let root = message.init_root::<root_capnp::hash_ids::Builder>();
+        let mut list = root.init_hash_ids(childs.len() as u32);
+        for (i, id) in childs.iter().enumerate() {
+            list.set(i as u32, *id as u64);
+        }
+    }
+    let mut out = Vec::new();
+    capnp::serialize_packed::write_message(&mut out, &message).unwrap();
+    out
+}
+
+fn decode_childs(bytes: &[u8]) -> Result<Vec<i64>, capnp::Error> {
+    let reader = capnp::serialize_packed::read_message(&mut &bytes[..],
+                                                       capnp::message::ReaderOptions::new()).unwrap();
+    let msg = reader.get_root::<root_capnp::hash_ids::Reader>().unwrap();
+
+    let ids = try!(msg.get_hash_ids()); 
+    let mut out = Vec::new();
+    for i in 0..ids.len() {
+        assert!(ids.get(i) as i64 > 0);
+        out.push(ids.get(i) as i64);
+    }
+    Ok(out)
+}
 
 
 /// A wrapper around Hash digests.
@@ -85,8 +115,8 @@ pub struct Entry {
     /// i.e. internal meta-data.
     pub level: i64,
 
-    /// A local payload to store inside the index, along with this entry.
-    pub payload: Option<Vec<u8>>,
+    /// An optional list of child hash ids.
+    pub childs: Option<Vec<i64>>,
 
     /// A reference to a location in the external persistent storage (a chunk reference) that
     /// contains the data for this entry (e.g. an object-name and a byte range).
@@ -102,7 +132,7 @@ pub enum ReserveResult {
 struct QueueEntry {
     id: i64,
     level: i64,
-    payload: Option<Vec<u8>>,
+    childs: Option<Vec<i64>>,
     persistent_ref: Option<blob::ChunkRef>,
 }
 
@@ -149,11 +179,11 @@ impl InternalHashIndex {
             .optional()
             .expect("Error querying hashes");
         result_opt.map(|result| {
-            let payload_ = result.payload.and_then(|b| {
+            let childs_ = result.childs.and_then(|b| {
                 if b.is_empty() {
                     None
                 } else {
-                    Some(b)
+                    Some(decode_childs(&b).unwrap())
                 }
             });
             let persistent_ref = result.blob_ref.and_then(|b| {
@@ -166,7 +196,7 @@ impl InternalHashIndex {
             QueueEntry {
                 id: result.id,
                 level: result.height,
-                payload: payload_,
+                childs: childs_,
                 persistent_ref: persistent_ref,
             }
         })
@@ -189,11 +219,11 @@ impl InternalHashIndex {
             Entry {
                 hash: Hash { bytes: result.hash },
                 level: result.height,
-                payload: result.payload.and_then(|p| {
+                childs: result.childs.and_then(|p| {
                     if p.is_empty() {
                         None
                     } else {
-                        Some(p)
+                        Some(decode_childs(&p).unwrap())
                     }
                 }),
                 persistent_ref: result.blob_ref.and_then(|b| {
@@ -225,7 +255,7 @@ impl InternalHashIndex {
     fn reserve(&mut self, hash_entry: &Entry) -> i64 {
         self.maybe_flush();
 
-        let Entry { ref hash, ref level, ref payload, ref persistent_ref } = *hash_entry;
+        let Entry { ref hash, ref level, ref childs, ref persistent_ref } = *hash_entry;
         assert!(!hash.bytes.is_empty());
 
         let my_id = self.next_id();
@@ -236,7 +266,7 @@ impl InternalHashIndex {
                        QueueEntry {
                            id: my_id,
                            level: level.clone(),
-                           payload: payload.clone(),
+                           childs: childs.clone(),
                            persistent_ref: persistent_ref.clone(),
                        })
             .is_ok());
@@ -244,7 +274,7 @@ impl InternalHashIndex {
     }
 
     fn update_reserved(&mut self, hash_entry: Entry) {
-        let Entry { hash, level, payload, persistent_ref } = hash_entry;
+        let Entry { hash, level, childs, persistent_ref } = hash_entry;
         assert!(!hash.bytes.is_empty());
         let old_entry = self.locate(&hash).expect("hash was reserved");
 
@@ -254,7 +284,7 @@ impl InternalHashIndex {
             assert_eq!(id_opt, Some(old_entry.id));
             self.queue.update_value(&hash.bytes, |qe| {
                 qe.level = level;
-                qe.payload = payload;
+                qe.childs = childs;
                 qe.persistent_ref = persistent_ref;
             });
         }
@@ -270,12 +300,13 @@ impl InternalHashIndex {
                     assert_eq!(id_, queue_entry.id);
 
                     let persistent_ref_bytes = queue_entry.persistent_ref.map(|c| c.as_bytes());
+                    let childs_ = queue_entry.childs.as_ref().map(|v| encode_childs(&v[..]));
                     let new = schema::NewHash {
                         id: id_,
                         hash: &hash_bytes,
                         tag: tags::Tag::Done as i64,
                         height: queue_entry.level,
-                        payload: queue_entry.payload.as_ref().map(|v| &v[..]),
+                        childs: childs_.as_ref().map(|v| &v[..]),
                         blob_ref: persistent_ref_bytes.as_ref().map(|v| &v[..]),
                     };
 
@@ -442,11 +473,11 @@ impl InternalHashIndex {
                 Entry {
                     hash: Hash { bytes: hash_.hash },
                     level: hash_.height,
-                    payload: hash_.payload.and_then(|p| {
+                    childs: hash_.childs.as_ref().and_then(|p| {
                         if p.is_empty() {
                             None
                         } else {
-                            Some(p)
+                            Some(decode_childs(p).unwrap())
                         }
                     }),
                     persistent_ref: hash_.blob_ref.and_then(|b| {
@@ -522,10 +553,10 @@ impl HashIndex {
         self.lock().locate(hash).is_some()
     }
 
-    /// Locate the local payload of the `Hash`.
-    pub fn fetch_payload(&self, hash: &Hash) -> Option<Option<Vec<u8>>> {
+    /// Locate the local childs of the `Hash`.
+    pub fn fetch_childs(&self, hash: &Hash) -> Option<Option<Vec<i64>>> {
         assert!(!hash.bytes.is_empty());
-        self.lock().locate(hash).map(|queue_entry| queue_entry.payload)
+        self.lock().locate(hash).map(|queue_entry| queue_entry.childs)
     }
 
     /// Locate the persistent reference (external blob reference) for this `Hash`.
