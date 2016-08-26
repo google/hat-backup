@@ -87,18 +87,10 @@ impl gc::GcBackend for GcBackend {
             Some(entry) => entry,
             None => panic!("HashNotKnown in hash index."),
         };
-        if entry.payload.is_none() {
+        if entry.childs.is_none() {
             return Ok(Vec::new());
         }
-
-        let mut out = vec![];
-        for hash_bytes in hash::tree::decode_metadata_refs(&entry.payload.unwrap()) {
-            match self.hash_index.get_id(&hash::Hash { bytes: hash_bytes }) {
-                Some(id) => out.push(id),
-                None => panic!("HashNotKnown in hash index."),
-            }
-        }
-        Ok(out)
+        Ok(entry.childs.unwrap())
     }
 
     fn list_ids_by_tag(&self, tag: tags::Tag) -> Result<mpsc::Receiver<i64>, Self::Err> {
@@ -347,15 +339,27 @@ impl<B: StoreBackend> HatRc<B> {
                         -> Result<(), HatError> {
         fn recover_entry<B: StoreBackend>(hashes: &hash::HashIndex,
                                           blobs: &blob::BlobStore<B>,
-                                          entry: &hash::Entry)
+                                          childs_opt: &Option<Vec<hash::Hash>>,
+                                          mut entry: hash::Entry)
                                           -> Result<i64, HatError> {
             let pref = entry.persistent_ref.clone().unwrap();
 
             // Make sure we have the blob described.
             blobs.recover(pref.clone());
 
+            entry.childs = match childs_opt {
+                &None => None,
+                &Some(ref hs) => {
+                    let mut ids = vec![];
+                    for h in hs {
+                        ids.push(hashes.get_id(h).expect("Child hash not yet recovered"));
+                    }
+                    Some(ids)
+                }
+            };
+
             // Now insert the hash information if needed.
-            let id = match hashes.reserve(entry) {
+            let id = match hashes.reserve(&entry) {
                 hash::ReserveResult::HashKnown(id) => id,
                 hash::ReserveResult::ReserveOk(id) => {
                     // Commit hash.
@@ -371,14 +375,14 @@ impl<B: StoreBackend> HatRc<B> {
             .expect(&format!("Could not open family '{}'", family_name));
         let mut registered = Vec::new();
         let mut recovered = Vec::new();
-        let (final_payload, final_level) = try!(self.recover_dir_ref(&family,
-                                                                     hash,
-                                                                     dir_ref.clone(),
-                                                                     &mut registered,
-                                                                     &mut recovered));
+        let (final_childs, final_level) = try!(self.recover_dir_ref(&family,
+                                                                    hash,
+                                                                    dir_ref.clone(),
+                                                                    &mut registered,
+                                                                    &mut recovered));
         // Recover hashes for tree child chunks.
-        for entry in recovered {
-            try!(recover_entry(&self.hash_index, &self.blob_store, &entry));
+        for (childs_opt, entry) in recovered {
+            try!(recover_entry(&self.hash_index, &self.blob_store, &childs_opt, entry));
         }
 
         // Recover hashes for tree-tops. These are also registered with the GC.
@@ -386,8 +390,9 @@ impl<B: StoreBackend> HatRc<B> {
         let local_hash_index = self.hash_index.clone();
         let local_blob_store = self.blob_store.clone();
         thread::spawn(move || {
-            for entry in registered {
-                let id = recover_entry(&local_hash_index, &local_blob_store, &entry).unwrap();
+            for (childs_opt, entry) in registered {
+                let id = recover_entry(&local_hash_index, &local_blob_store, &childs_opt, entry)
+                    .unwrap();
                 id_sender.send(id).unwrap();
             }
         });
@@ -398,11 +403,12 @@ impl<B: StoreBackend> HatRc<B> {
         // Recover final root hash for the snapshot.
         try!(recover_entry(&self.hash_index,
                            &self.blob_store,
-                           &hash::Entry {
+                           &final_childs,
+                           hash::Entry {
                                hash: hash.clone(),
                                persistent_ref: Some(dir_ref),
                                level: final_level,
-                               payload: final_payload,
+                               childs: None,
                            }));
 
         let final_id = self.hash_index.get_id(hash).unwrap();
@@ -417,28 +423,28 @@ impl<B: StoreBackend> HatRc<B> {
                        family: &Family<B>,
                        dir_hash: &hash::Hash,
                        dir_ref: blob::ChunkRef,
-                       register_out: &mut Vec<hash::Entry>,
-                       recover_out: &mut Vec<hash::Entry>)
-                       -> Result<(Option<Vec<u8>>, i64), HatError> {
+                       register_out: &mut Vec<(Option<Vec<hash::Hash>>, hash::Entry)>,
+                       recover_out: &mut Vec<(Option<Vec<hash::Hash>>, hash::Entry)>)
+                       -> Result<(Option<Vec<hash::Hash>>, i64), HatError> {
         fn recover_tree<B: hash::tree::HashTreeBackend<Err = key::MsgError>>
             (backend: B,
              hash: &hash::Hash,
              pref: blob::ChunkRef,
-             out: &mut Vec<hash::Entry>)
-             -> Result<(Option<Vec<u8>>, i64), HatError> {
+             out: &mut Vec<(Option<Vec<hash::Hash>>, hash::Entry)>)
+             -> Result<(Option<Vec<hash::Hash>>, i64), HatError> {
             match try!(hash::tree::SimpleHashTreeReader::open(backend, &hash, Some(pref)))
                 .unwrap() {
                 hash::tree::ReaderResult::Empty |
                 hash::tree::ReaderResult::SingleBlock(..) => Ok((None, 0)),
                 hash::tree::ReaderResult::Tree(mut reader) => {
-                    let (payload, level) = try!(reader.list_entries(out));
-                    Ok((Some(payload), level))
+                    let (childs, level) = try!(reader.list_entries(out));
+                    Ok((Some(childs), level))
                 }
             }
         }
         for (file, hash, pref) in
             try!(family.fetch_dir_data(dir_hash, dir_ref.clone(), self.hash_backend())) {
-            let (payload, level) = match file.data_hash {
+            let (childs, level) = match file.data_hash {
                 Some(..) => {
                     // Entry is a data leaf. Read the hash tree.
                     try!(recover_tree(self.hash_backend(), &hash, pref.clone(), recover_out))
@@ -452,12 +458,13 @@ impl<B: StoreBackend> HatRc<B> {
                 }
             };
             // We register the top hash with the GC (tree nodes are inferred).
-            let r = hash::Entry {
+            let r = (childs,
+                     hash::Entry {
                 hash: hash,
                 persistent_ref: Some(pref),
                 level: level,
-                payload: payload,
-            };
+                childs: None,
+            });
             register_out.push(r);
         }
 
