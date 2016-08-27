@@ -3,7 +3,7 @@ CREATE TABLE IF NOT EXISTS hashes (
 	hash		BLOB,
         tag		INTEGER,
 	height		INTEGER,
-	payload		BLOB,
+	childs		BLOB,
 	blob_ref	BLOB
 );
 

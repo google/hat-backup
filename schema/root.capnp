@@ -50,6 +50,10 @@ struct HashRefList {
 	hashRefs @0 :List(HashRef);
 }
 
+struct HashIds {
+	hashIds @0 :List(UInt64);
+}
+
 struct File {
 	id @0 :UInt64;
 	name @1 :Data;
