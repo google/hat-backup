@@ -111,7 +111,7 @@ impl<B: StoreBackend> HashTreeBackend for HashStoreBackend<B> {
                     hash: &hash::Hash,
                     level: i64,
                     childs: Option<Vec<i64>>,
-                    chunk: Vec<u8>)
+                    chunk: &[u8])
                     -> Result<(i64, hash::tree::HashRef), MsgError> {
         assert!(!hash.bytes.is_empty());
 
@@ -125,7 +125,8 @@ impl<B: StoreBackend> HashTreeBackend for HashStoreBackend<B> {
         match self.hash_index.reserve(&hash_entry) {
             hash::ReserveResult::HashKnown(id) => {
                 // Someone came before us: piggyback on their result.
-                Ok((id, hash::tree::HashRef {
+                Ok((id,
+                    hash::tree::HashRef {
                     hash: hash.clone(),
                     persistent_ref: self.fetch_persistent_ref(hash)
                         .expect("Could not find persistent_ref for known chunk."),
@@ -143,7 +144,7 @@ impl<B: StoreBackend> HashTreeBackend for HashStoreBackend<B> {
                 } else {
                     blob::Kind::TreeBranch
                 };
-                let href = self.blob_store.store(chunk, hash.clone(), kind, callback);
+                let href = self.blob_store.store(&chunk, hash.clone(), kind, callback);
                 hash_entry.persistent_ref = Some(href.persistent_ref.clone());
                 self.hash_index.update_reserved(hash_entry);
                 Ok((id, href))

@@ -25,7 +25,7 @@ fn append_unknown_16x128_kb(bench: &mut Bencher) {
         let mut ht = SimpleHashTreeWriter::new(8, MemoryBackend::new());
         for i in 0u8..16 {
             bytes[0] = i;
-            ht.append(bytes.clone()).unwrap();
+            ht.append(&bytes[..]).unwrap();
         }
         ht.hash().unwrap();
     });
@@ -40,7 +40,7 @@ fn append_known_16x128_kb(bench: &mut Bencher) {
     bench.iter(|| {
         let mut ht = SimpleHashTreeWriter::new(8, MemoryBackend::new());
         for _ in 0i32..16 {
-            ht.append(bytes.clone()).unwrap();
+            ht.append(&bytes[..]).unwrap();
         }
         ht.hash().unwrap();
     });

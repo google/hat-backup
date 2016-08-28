@@ -20,6 +20,7 @@ use blob::{ChunkRef, Key};
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 
 pub struct PlainText(Vec<u8>);
+pub struct PlainTextRef<'a>(&'a [u8]);
 pub struct CipherText(Vec<u8>);
 pub struct CipherTextRef<'a>(&'a [u8]);
 
@@ -69,6 +70,23 @@ fn wrap_key(key: authed::desc::Key) -> Key {
     Key::XSalsa20Poly1305(key)
 }
 
+impl<'a> PlainTextRef<'a> {
+    pub fn new(bytes: &[u8]) -> PlainTextRef {
+        PlainTextRef(bytes)
+    }
+    pub fn len(&self) -> usize {
+        self.0.len()
+    }
+    pub fn to_ciphertext(&self,
+                         nonce: &authed::desc::Nonce,
+                         key: &authed::desc::Key)
+                         -> CipherText {
+        CipherText(authed::imp::seal(&self.0, &nonce, &key))
+    }
+    pub fn to_sealed_ciphertext(&self, pubkey: &sealed::desc::PublicKey) -> CipherText {
+        CipherText(sealed::imp::seal(&self.0, &pubkey))
+    }
+}
 
 impl PlainText {
     pub fn new(bytes: Vec<u8>) -> PlainText {
@@ -82,14 +100,8 @@ impl PlainText {
     pub fn len(&self) -> usize {
         self.0.len()
     }
-    pub fn to_ciphertext(&self,
-                         nonce: &authed::desc::Nonce,
-                         key: &authed::desc::Key)
-                         -> CipherText {
-        CipherText(authed::imp::seal(&self.0, &nonce, &key))
-    }
-    pub fn to_sealed_ciphertext(&self, pubkey: &sealed::desc::PublicKey) -> CipherText {
-        CipherText(sealed::imp::seal(&self.0, &pubkey))
+    pub fn as_ref(&self) -> PlainTextRef {
+        PlainTextRef::new(&self.0[..])
     }
     pub fn as_bytes(&self) -> &[u8] {
         &self.0
@@ -138,6 +150,9 @@ impl<'a> CipherTextRef<'a> {
     pub fn new(bytes: &'a [u8]) -> CipherTextRef<'a> {
         CipherTextRef(bytes)
     }
+    pub fn bytes(&self) -> &[u8] {
+        &self.0[..]
+    }
     pub fn slice(&self, from: usize, to: usize) -> CipherTextRef<'a> {
         CipherTextRef(&self.0[from..to])
     }
@@ -169,7 +184,7 @@ pub struct RefKey {}
 
 
 impl RefKey {
-    pub fn seal(href: &mut HashRef, pt: PlainText) -> CipherText {
+    pub fn seal(href: &mut HashRef, pt: PlainTextRef) -> CipherText {
         let key = authed::imp::gen_key();
         href.persistent_ref.key = Some(wrap_key(key.clone()));
 
@@ -214,7 +229,7 @@ impl FixedKey {
         }
     }
 
-    pub fn seal(&self, pt: PlainText) -> CipherText {
+    pub fn seal(&self, pt: PlainTextRef) -> CipherText {
         let mut ct = pt.to_sealed_ciphertext(&self.pubkey);
 
         // Add ciphertext length as LittleEndian.
@@ -223,10 +238,8 @@ impl FixedKey {
         assert_eq!(foot_pt.len(), sealed::desc::footer_plain_bytes());
 
         // Append sealed ciphertext length to full ciphertext.
-        ct.append(&mut foot_pt.to_sealed_ciphertext(&self.pubkey));
+        ct.append(&mut foot_pt.as_ref().to_sealed_ciphertext(&self.pubkey));
         assert_eq!(ct.len(), pt.len() + sealed::desc::overhead());
-
-        assert!(self.unseal(ct.as_ref()).is_ok());
 
         // Return complete ciphertext.
         ct

@@ -14,6 +14,7 @@
 
 use blob::{Blob, BlobError, BlobIndex, BlobStore, ChunkRef, Kind};
 use backend::{MemoryBackend, StoreBackend};
+use crypto::CipherText;
 use hash;
 
 use std::collections::HashSet;
@@ -30,7 +31,7 @@ fn identity() {
 
         let mut ids = Vec::new();
         for chunk in chunks.iter() {
-            ids.push((bs_p.store(chunk.to_owned(),
+            ids.push((bs_p.store(&chunk[..],
                                  hash::Hash::new(chunk),
                                  Kind::TreeLeaf,
                                  Box::new(move |_| {})),
@@ -72,7 +73,7 @@ fn identity_with_excessive_flushing() {
 
         let mut ids = Vec::new();
         for chunk in chunks.iter() {
-            ids.push((bs_p.store(chunk.to_owned(),
+            ids.push((bs_p.store(&chunk[..],
                                  hash::Hash::new(chunk),
                                  Kind::TreeLeaf,
                                  Box::new(move |_| {})),
@@ -141,11 +142,12 @@ fn blob_reuse() {
     let mut c2 = c1.clone();
 
     let mut b = Blob::new(1000);
-    b.try_append(vec![1, 2, 3], &mut c1).unwrap();
-    b.try_append(vec![4, 5, 6], &mut c2).unwrap();
+    b.try_append(&[1, 2, 3], &mut c1).unwrap();
+    b.try_append(&[4, 5, 6], &mut c2).unwrap();
 
-    let mut out = Vec::new();
-    b.into_bytes(&mut out);
+    let mut ct = CipherText::new(vec![]);
+    b.into_bytes(&mut ct);
+    let out = ct.into_vec();
 
     assert_eq!(vec![1, 2, 3],
                Blob::read_chunk(&out, &c1.hash, &c1.persistent_ref).unwrap());
@@ -154,12 +156,13 @@ fn blob_reuse() {
 
     let mut c3 = c2.clone();
 
-    b.try_append(vec![1, 2], &mut c1).unwrap();
-    b.try_append(vec![1, 2], &mut c2).unwrap();
-    b.try_append(vec![1, 2], &mut c3).unwrap();
+    b.try_append(&[1, 2], &mut c1).unwrap();
+    b.try_append(&[1, 2], &mut c2).unwrap();
+    b.try_append(&[1, 2], &mut c3).unwrap();
 
-    out.clear();
-    b.into_bytes(&mut out);
+    ct = CipherText::new(vec![]);
+    b.into_bytes(&mut ct);
+    let out = ct.into_vec();
     assert_eq!(vec![1, 2],
                Blob::read_chunk(&out, &c1.hash, &c1.persistent_ref).unwrap());
     assert_eq!(vec![1, 2],
@@ -186,15 +189,16 @@ fn blob_identity() {
                     key: None,
                 },
             };
-            if let Err(_) = b.try_append(chunk.clone(), &mut cref) {
+            if let Err(_) = b.try_append(&chunk[..], &mut cref) {
                 assert!(b.upperbound_len() + chunk.len() + cref.as_bytes().len() + 50 >= max_size);
                 break;
             }
             n = n + 1;
         }
 
-        let mut out = Vec::new();
-        b.into_bytes(&mut out);
+        let mut ct = CipherText::new(vec![]);
+        b.into_bytes(&mut ct);
+        let out = ct.into_vec();
 
         if n == 0 {
             assert_eq!(0, out.len());
@@ -233,14 +237,14 @@ fn empty_blocks_blob_ciphertext(blob: &mut Blob, blocksize: usize) -> Vec<u8> {
                 key: None,
             },
         };
-        match blob.try_append(block.clone(), &mut cref) {
+        match blob.try_append(&block[..], &mut cref) {
             Ok(()) => continue,
             Err(_) => break,
         }
     }
-    let mut out = Vec::new();
-    blob.into_bytes(&mut out);
-    out
+    let mut ct = CipherText::new(vec![]);
+    blob.into_bytes(&mut ct);
+    ct.into_vec()
 }
 
 #[test]

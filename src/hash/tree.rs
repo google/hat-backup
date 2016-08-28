@@ -84,7 +84,7 @@ pub trait HashTreeBackend: Clone {
                     &Hash,
                     i64,
                     Option<Vec<i64>>,
-                    Vec<u8>)
+                    &[u8])
                     -> Result<(i64, HashRef), Self::Err>;
 }
 
@@ -193,17 +193,17 @@ impl<B: HashTreeBackend> SimpleHashTreeWriter<B> {
     /// the same order, and split at the same boundaries (i.e. pushing 1-bytes blocks will give
     /// 1-byte blocks when reading; if needed, accummulation of data must be handled by the
     /// `backend`).
-    pub fn append(&mut self, chunk: Vec<u8>) -> Result<(), B::Err> {
-        self.append_at(0, chunk, None)
+    pub fn append(&mut self, chunk: &[u8]) -> Result<(), B::Err> {
+        self.append_at(0, &chunk, None)
     }
 
     fn append_at(&mut self,
                  level: usize,
-                 data: Vec<u8>,
+                 data: &[u8],
                  childs: Option<Vec<i64>>)
                  -> Result<(), B::Err> {
         let hash = Hash::new(&data[..]);
-        let (id, hash_ref) = try!(self.backend.insert_chunk(&hash, level as i64, childs, data));
+        let (id, hash_ref) = try!(self.backend.insert_chunk(&hash, level as i64, childs, &data));
         self.append_hashref_at(level, id, hash_ref)
     }
 
@@ -235,7 +235,7 @@ impl<B: HashTreeBackend> SimpleHashTreeWriter<B> {
         let ids: Vec<i64> = level_v.iter().map(|&(id, _)| id).collect();
         let data = hash_refs_to_bytes(&level_v.into_iter().map(|(_, hr)| hr).collect());
 
-        self.append_at(level + 1, data, Some(ids))
+        self.append_at(level + 1, &data[..], Some(ids))
     }
 
     /// Retrieve the hash and backend persistent reference that identified this tree.
@@ -246,7 +246,7 @@ impl<B: HashTreeBackend> SimpleHashTreeWriter<B> {
     pub fn hash(&mut self) -> Result<(Hash, ChunkRef), B::Err> {
         // Empty hash tree is equivalent to hash tree of one empty block:
         if self.levels.is_empty() {
-            try!(self.append(vec![]));
+            try!(self.append(&[]));
         }
 
         // Locate first level that isn't empty (has data to collapse)
@@ -355,7 +355,7 @@ impl<B: HashTreeBackend> SimpleHashTreeReader<B> {
             let child = self.stack.pop().expect("!is_empty()");
             let hash = child.hash.clone();
             hashes.push(hash.clone());
-            
+
             match child.persistent_ref.kind {
                 Kind::TreeLeaf => {
                     out.push((None,
