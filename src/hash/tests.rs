@@ -88,17 +88,18 @@ impl HashTreeBackend for MemoryBackend {
                     hash: &Hash,
                     level: i64,
                     childs: Option<Vec<i64>>,
-                    chunk: Vec<u8>)
+                    chunk: &[u8])
                     -> Result<(i64, HashRef), Self::Err> {
         let mut guarded_seen = self.seen_chunks.lock().unwrap();
-        guarded_seen.insert(chunk.clone());
+        guarded_seen.insert(chunk.to_vec());
 
         let mut guarded_chunks = self.chunks.lock().unwrap();
-        guarded_chunks.insert(hash.bytes.clone(), (level, childs, chunk));
+        guarded_chunks.insert(hash.bytes.clone(), (level, childs, chunk.to_vec()));
 
         let len = hash.bytes.len();
 
-        Ok((0, (HashRef {
+        Ok((0,
+            (HashRef {
             hash: hash.clone(),
             persistent_ref: ChunkRef {
                 blob_id: hash.bytes.clone(),
@@ -123,7 +124,7 @@ fn identity_many_small_blocks() {
         let mut ht = SimpleHashTreeWriter::new(4, backend.clone());
 
         for _ in 0..chunks_count {
-            ht.append(b"a".to_vec()).unwrap();
+            ht.append(b"a").unwrap();
         }
 
         let (hash, hash_ref) = ht.hash().unwrap();
@@ -159,7 +160,7 @@ fn identity_empty() {
     let backend = MemoryBackend::new();
     let mut ht = SimpleHashTreeWriter::new(4, backend.clone());
 
-    ht.append(block.clone()).unwrap();
+    ht.append(&block[..]).unwrap();
 
     let (hash, hash_ref) = ht.hash().unwrap();
 
@@ -178,7 +179,7 @@ fn identity_append1() {
     let backend = MemoryBackend::new();
     let mut ht = SimpleHashTreeWriter::new(4, backend.clone());
 
-    ht.append(block.clone()).unwrap();
+    ht.append(&block[..]).unwrap();
 
     let (hash, hash_ref) = ht.hash().unwrap();
 
@@ -198,7 +199,7 @@ fn identity_append5() {
     let mut ht = SimpleHashTreeWriter::new(4, backend.clone());
 
     for block in blocks.iter() {
-        ht.append(block.clone()).unwrap();
+        ht.append(&block[..]).unwrap();
     }
 
     let (hash, hash_ref) = ht.hash().unwrap();
@@ -224,7 +225,7 @@ fn identity_implicit_flush() {
     {
         for i in 1u8..(order * 4 + 1) as u8 {
             bytes[0] = i;
-            ht.append(bytes.clone()).unwrap();
+            ht.append(&bytes[..]).unwrap();
         }
     }
 
@@ -253,7 +254,7 @@ fn identity_1_short_of_flush() {
 
     for i in 1u8..order as u8 {
         bytes[0] = i;
-        ht.append(bytes.clone()).unwrap();
+        ht.append(&bytes[..]).unwrap();
     }
 
     let (hash, hash_ref) = ht.hash().unwrap();

@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use crypto::CipherText;
 use hash::tree::HashRef;
 use hash::Hash;
 
@@ -43,10 +44,11 @@ fn dummy_hashref() -> HashRef {
 fn insert_128_kb_chunks(bench: &mut Bencher) {
     let mut b = Blob::new(BLOBSIZE);
     let mut href = dummy_hashref();
+    let chunk = [0u8; CHUNKSIZE];
     bench.iter(|| {
-        if let Err(c) = b.try_append(vec![0u8; CHUNKSIZE], &mut href) {
+        if let Err(()) = b.try_append(&chunk[..], &mut href) {
             b = Blob::new(BLOBSIZE);
-            b.try_append(c, &mut href).unwrap();
+            b.try_append(&chunk[..], &mut href).unwrap();
         }
     });
     bench.bytes = CHUNKSIZE as u64;
@@ -58,9 +60,9 @@ fn insert_256_kb_chunks(bench: &mut Bencher) {
     let mut b = Blob::new(BLOBSIZE);
     let mut href = dummy_hashref();
     bench.iter(|| {
-        if let Err(c) = b.try_append(chunk.clone(), &mut href) {
-            b.into_bytes(&mut vec![]);
-            b.try_append(c, &mut href).unwrap();
+        if let Err(()) = b.try_append(&chunk[..], &mut href) {
+            b.into_bytes(&mut CipherText::new(vec![]));
+            b.try_append(&chunk[..], &mut href).unwrap();
         }
     });
     bench.bytes = 2 * CHUNKSIZE as u64;

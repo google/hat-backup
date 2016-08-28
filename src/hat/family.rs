@@ -312,7 +312,7 @@ impl<B: StoreBackend> Family<B> {
             } else {
                 let mut buf = vec![];
                 try!(capnp::serialize_packed::write_message(&mut buf, &file_block_msg));
-                try!(tree.append(buf));
+                try!(tree.append(&buf[..]));
             }
         }
 

@@ -60,10 +60,12 @@ impl Iterator for FileIterator {
                         Ok(size) => size,
                     }
                 }
+                assert!(read <= chunk_size);
                 if read == 0 {
                     None
                 } else {
-                    Some(buf[..read].to_vec())
+                    buf.truncate(read);
+                    Some(buf)
                 }
             }
             #[cfg(test)]

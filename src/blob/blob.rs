@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use crypto;
-use crypto::{CipherText, CipherTextRef, PlainText};
+use crypto::{CipherText, CipherTextRef, PlainTextRef};
 use hash::Hash;
 use hash::tree::HashRef;
 
@@ -69,24 +69,20 @@ impl Blob {
         }
     }
 
-    pub fn try_append(&mut self, chunk: Vec<u8>, mut href: &mut HashRef) -> Result<(), Vec<u8>> {
-        let mut ct = crypto::RefKey::seal(&mut href, PlainText::new(chunk));
+    pub fn try_append(&mut self, chunk: &[u8], mut href: &mut HashRef) -> Result<(), ()> {
+        let mut ct = crypto::RefKey::seal(&mut href, PlainTextRef::new(&chunk));
 
         href.persistent_ref.offset = self.chunks.len();
         let mut href_bytes = href.as_bytes();
         assert!(href_bytes.len() < 255);
 
         if self.upperbound_len() + 1 + href_bytes.len() + ct.len() >= self.max_size {
-            href.persistent_ref.offset = 0;
-            let chunk = crypto::RefKey::unseal(&href.hash, &href.persistent_ref, ct.as_ref())
-                .unwrap()
-                .into_vec();
             if self.chunks.len() == 0 {
                 panic!("Can never fit chunk of size {} in blob of size {}",
                        chunk.len(),
                        self.max_size);
             }
-            return Err(chunk);
+            return Err(());
         }
 
         ct.empty_into(&mut self.chunks);
@@ -98,23 +94,22 @@ impl Blob {
         Ok(())
     }
 
-    pub fn into_bytes(&mut self, mut out: &mut Vec<u8>) {
+    pub fn into_bytes(&mut self, mut out: &mut CipherText) {
         if self.chunks.len() == 0 {
             return;
         }
 
-        let mut ct = CipherText::from(&mut self.chunks);
-        let mut footer = self.master_key.seal(PlainText::from_vec(&mut self.footer));
+        let mut footer = self.master_key.seal(PlainTextRef::new(&self.footer[..]));
+        self.footer.truncate(0);
 
-        assert!(ct.len() + footer.len() <= self.max_size);
-        ct.random_pad_upto(self.max_size - footer.len());
-        ct.append(&mut footer);
+        assert!(self.chunks.len() + footer.len() <= self.max_size);
+        out.append(&mut self.chunks);
+        out.random_pad_upto(self.max_size - footer.len());
+        out.append(&mut footer);
 
         // Everything has been reset. We are ready to go again.
         assert_eq!(0, self.chunks.len());
         assert_eq!(0, self.footer.len());
-
-        out.append(&mut ct.into_vec());
     }
 
     pub fn refs_from_bytes(&self, bytes: &[u8]) -> Result<Vec<HashRef>, BlobError> {

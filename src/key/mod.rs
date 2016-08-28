@@ -266,7 +266,7 @@ impl<IT: Iterator<Item = Vec<u8>>, B: StoreBackend> MsgHandler<Msg<IT>, Reply<B>
                 let mut bytes_read = 0u64;
                 for chunk in it_opt.unwrap() {
                     bytes_read += chunk.len() as u64;
-                    try!(tree.append(chunk));
+                    try!(tree.append(&chunk[..]));
                 }
 
                 // Warn the user if we did not read the expected size:

@@ -21,6 +21,7 @@ use std::thread;
 
 use backend::StoreBackend;
 use capnp;
+use crypto::CipherText;
 use errors;
 use hash::Hash;
 use hash::tree::HashRef;
@@ -100,11 +101,13 @@ impl<B: StoreBackend> StoreInner<B> {
         // Replace blob id
         let old_blob_desc = self.reserve_new_blob();
 
-        let mut data = Vec::with_capacity(length);
-        self.blob.into_bytes(&mut data);
+        let mut ct = CipherText::new(Vec::with_capacity(length));
+        self.blob.into_bytes(&mut ct);
 
         self.blob_index.in_air(&old_blob_desc);
-        self.backend.store(&old_blob_desc.name[..], &data[..]).expect("Store operation failed");
+        self.backend
+            .store(&old_blob_desc.name[..], &ct.as_ref().bytes()[..])
+            .expect("Store operation failed");
         self.blob_index.commit_done(&old_blob_desc);
 
         // Go through callbacks
@@ -114,7 +117,7 @@ impl<B: StoreBackend> StoreInner<B> {
     }
 
     fn store(&mut self,
-             chunk: Vec<u8>,
+             chunk: &[u8],
              hash: Hash,
              kind: Kind,
              callback: Box<FnBox<HashRef, ()>>)
@@ -149,11 +152,11 @@ impl<B: StoreBackend> StoreInner<B> {
             },
         };
 
-        if let Err(chunk) = self.blob.try_append(chunk, &mut href) {
+        if let Err(()) = self.blob.try_append(&chunk, &mut href) {
             self.flush();
 
             href.persistent_ref.blob_id = self.blob_desc.name.clone();
-            self.blob.try_append(chunk, &mut href).unwrap();
+            self.blob.try_append(&chunk, &mut href).unwrap();
         }
         self.blob_refs.push((href.clone(), callback));
 
@@ -172,11 +175,11 @@ impl<B: StoreBackend> StoreInner<B> {
         }
     }
 
-    fn store_named(&mut self, name: &str, data: Vec<u8>) -> Result<(), String> {
+    fn store_named(&mut self, name: &str, data: &[u8]) -> Result<(), String> {
         assert!(data.len() < self.max_blob_size);
         let hash = Hash::new(&data[..]);
         let mut blob = Blob::new(self.max_blob_size);
-        blob.try_append(data,
+        blob.try_append(&data,
                         &mut HashRef {
                             hash: hash,
                             persistent_ref: ChunkRef {
@@ -190,10 +193,10 @@ impl<B: StoreBackend> StoreInner<B> {
                         })
             .unwrap();
 
-        let mut ct = vec![];
+        let mut ct = CipherText::new(vec![]);
         blob.into_bytes(&mut ct);
 
-        try!(self.backend.store(name.as_bytes(), &ct[..]));
+        try!(self.backend.store(name.as_bytes(), &ct.as_ref().bytes()[..]));
         Ok(())
     }
 
@@ -253,13 +256,13 @@ impl<B: StoreBackend> BlobStore<B> {
     /// containing the chunk has been committed to persistent storage (it is then safe to use the
     /// `ChunkRef` as persistent reference).
     pub fn store(&self,
-                 chunk: Vec<u8>,
+                 chunk: &[u8],
                  hash: Hash,
                  kind: Kind,
                  callback: Box<FnBox<HashRef, ()>>)
                  -> HashRef {
         let mut guard = self.lock();
-        guard.store(chunk, hash, kind, callback)
+        guard.store(&chunk, hash, kind, callback)
     }
 
     /// Retrieve the data chunk identified by `ChunkRef`.
@@ -268,8 +271,8 @@ impl<B: StoreBackend> BlobStore<B> {
     }
 
     /// Store a full named blob (used for writing root).
-    pub fn store_named(&self, name: &str, data: Vec<u8>) -> Result<(), String> {
-        self.lock().store_named(name, data)
+    pub fn store_named(&self, name: &str, data: &[u8]) -> Result<(), String> {
+        self.lock().store_named(name, &data)
     }
 
     /// Retrieve full named blob.
