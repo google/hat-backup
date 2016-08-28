@@ -110,8 +110,11 @@ impl gc::GcBackend for GcBackend {
 pub struct Hat<B: StoreBackend, G: gc::Gc<GcBackend>> {
     repository_root: Option<PathBuf>,
     snapshot_index: snapshot::SnapshotIndex,
-    blob_store: Arc<blob::BlobStore<B>>,
     hash_index: Arc<hash::HashIndex>,
+    backend: Arc<B>,
+    blob_index: Arc<blob::BlobIndex>,
+    blob_store: Arc<blob::BlobStore<B>>,
+    blob_max_size: usize,
     gc: G,
 }
 
@@ -200,7 +203,7 @@ impl<B: StoreBackend> HatRc<B> {
         let bi_p = Arc::new(try!(blob::BlobIndex::new(&blob_index_path)));
         let hi_p = Arc::new(try!(hash::HashIndex::new(&hash_index_path)));
 
-        let bs_p = Arc::new(blob::BlobStore::new(bi_p, backend, max_blob_size));
+        let bs_p = Arc::new(blob::BlobStore::new(bi_p.clone(), backend.clone(), max_blob_size));
 
         let gc_backend = GcBackend { hash_index: hi_p.clone() };
         let gc = gc::Gc::new(gc_backend);
@@ -209,7 +212,10 @@ impl<B: StoreBackend> HatRc<B> {
             repository_root: Some(repository_root),
             snapshot_index: si_p,
             hash_index: hi_p.clone(),
-            blob_store: bs_p.clone(),
+            backend: backend,
+            blob_index: bi_p,
+            blob_store: bs_p,
+            blob_max_size: max_blob_size,
             gc: gc,
         };
 
@@ -225,7 +231,7 @@ impl<B: StoreBackend> HatRc<B> {
         let bi_p = Arc::new(blob::BlobIndex::new_for_testing().unwrap());
         let hi_p = Arc::new(hash::HashIndex::new_for_testing().unwrap());
 
-        let bs_p = Arc::new(blob::BlobStore::new(bi_p, backend, max_blob_size));
+        let bs_p = Arc::new(blob::BlobStore::new(bi_p.clone(), backend.clone(), max_blob_size));
 
         let gc_backend = GcBackend { hash_index: hi_p.clone() };
         let gc = gc::Gc::new(gc_backend);
@@ -233,8 +239,11 @@ impl<B: StoreBackend> HatRc<B> {
         let mut hat = Hat {
             repository_root: None,
             snapshot_index: si_p,
-            hash_index: hi_p.clone(),
-            blob_store: bs_p.clone(),
+            hash_index: hi_p,
+            blob_index: bi_p,
+            blob_store: bs_p,
+            blob_max_size: max_blob_size,
+            backend: backend,
             gc: gc,
         };
 
@@ -261,17 +270,22 @@ impl<B: StoreBackend> HatRc<B> {
 
         let ki_p = Arc::new(try!(key::KeyIndex::new(&key_index_path)));
 
-        let local_ks = key::Store::new(ki_p.clone(),
-                                       self.hash_index.clone(),
-                                       self.blob_store.clone());
-        let ks_p = Process::new(local_ks);
+        let ks = key::Store::new(ki_p.clone(),
+                                 self.hash_index.clone(),
+                                 self.blob_store.clone());
 
-        let ks = key::Store::new(ki_p, self.hash_index.clone(), self.blob_store.clone());
-
+        let mut kss = vec![];
+        for _ in 0..5 {
+            // To allow parallel processing, each key store gets its own dedicated blob store.
+            let bs = Arc::new(blob::BlobStore::new(self.blob_index.clone(),
+                                                   self.backend.clone(),
+                                                   self.blob_max_size));
+            kss.push(Process::new(key::Store::new(ki_p.clone(), self.hash_index.clone(), bs)));
+        }
         Ok(Family {
             name: name,
             key_store: ks,
-            key_store_process: ks_p,
+            key_store_process: kss,
         })
     }
 
