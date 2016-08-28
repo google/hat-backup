@@ -29,7 +29,7 @@ rustc-serialize = "*"
 sodiumoxide = "*"
 time = "*"
 void = "1"
-scoped_threadpool = "0.1.*"
+scoped-pool = "1.*"
 
 
 [dependencies.diesel]

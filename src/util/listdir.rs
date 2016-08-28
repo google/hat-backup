@@ -18,9 +18,8 @@ use std::fs;
 use std::io;
 use std::iter;
 use std::path::PathBuf;
-use std::sync::mpsc;
 
-use scoped_threadpool;
+use scoped_pool;
 
 
 pub trait HasPath {
@@ -33,77 +32,48 @@ impl HasPath for fs::DirEntry {
     }
 }
 
-pub trait PathHandler<P: Send>: Sync {
+
+pub trait PathHandler<P: Send + 'static>: Sync {
     type DirItem: HasPath;
     type DirIter: iter::Iterator<Item = io::Result<Self::DirItem>>;
 
     fn read_dir(&self, &PathBuf) -> io::Result<Self::DirIter>;
     fn handle_path(&self, &P, &PathBuf) -> Option<P>;
 
-    fn recurse(&self, root: PathBuf, payload: P) {
-        let threads = 10;
-        let (push_ch, work_ch) = mpsc::sync_channel(threads);
-        let mut pool = scoped_threadpool::Pool::new(threads as u32);
-
-        enum Work<P> {
-            Done,
-            More(PathBuf, P),
-        }
-
-        // Insert the first task into the queue:
-        push_ch.send(Work::More(root, payload)).unwrap();
-        let mut active_workers = 0;
-
-        // Master thread:
-        pool.scoped(|scoped| {
-            loop {
-                match work_ch.recv() {
-                    Err(_) => unreachable!(),
-                    Ok(Work::Done) => {
-                        // A worker has completed a task.
-                        // We are done when no more workers are active (i.e. all tasks are done):
-                        active_workers -= 1;
-                        if active_workers == 0 {
-                            break;
-                        }
-                    }
-                    Ok(Work::More(root, payload)) => {
-                        // Execute the task in a pool thread:
-                        active_workers += 1;
-
-                        let push_ch_ = push_ch.clone();
-                        scoped.execute(move || {
-                            match self.read_dir(&root) {
-                                Ok(dir) => {
-                                    for entry_res in dir {
-                                        match entry_res {
-                                            Ok(entry) => {
-                                                let path = entry.path();
-                                                let dir_opt = self.handle_path(&payload, &path);
-                                                if let Some(dir) = dir_opt {
-                                                    push_ch_.send(Work::More(path, dir)).unwrap();
-                                                }
-                                            }
-                                            Err(err) => {
-                                                // For some reason, we failed to read this entry.
-                                                // Just skip it and continue with the next.
-                                                warn!("Could not read directory entry: {}", err);
-                                            }
-                                        }
-                                    }
-                                }
-                                Err(err) => {
-                                    // Cannot read this directory.
-                                    warn!("Skipping unreadable directory {:?}: {}", root, err);
+    fn recurse_worker<'a>(&'a self, scope: &scoped_pool::Scope<'a>, root: PathBuf, payload: P) {
+        scope.recurse(move |scope| {
+            match self.read_dir(&root) {
+                Ok(dir) => {
+                    for entry_res in dir {
+                        match entry_res {
+                            Ok(entry) => {
+                                let path = entry.path();
+                                if let Some(dir) = self.handle_path(&payload, &path) {
+                                    self.recurse_worker(scope, path, dir);
                                 }
                             }
-                            // Count this pool thread as idle:
-                            push_ch_.send(Work::Done).unwrap();
-                        });
+                            Err(err) => {
+                                // For some reason, we failed to read this entry.
+                                // Just skip it and continue with the next.
+                                warn!("Could not read directory entry: {}", err);
+                            }
+                        }
                     }
+                }
+                Err(err) => {
+                    // Cannot read this directory.
+                    warn!("Skipping unreadable directory {:?}: {}", root, err);
                 }
             }
         });
+    }
+
+    fn recurse(&self, root: PathBuf, payload: P) {
+        let pool = scoped_pool::Pool::new(10);
+        pool.scoped(move |scope| {
+            self.recurse_worker(&scope, root, payload);
+        });
+        pool.shutdown();
     }
 }
 

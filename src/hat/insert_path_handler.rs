@@ -122,9 +122,8 @@ impl<B: StoreBackend> PathHandler<Option<u64>> for InsertPathHandler<B> {
                 let local_root = path.clone();
                 let full_path = file_entry.full_path.clone();
 
-                match self.key_store
-                    .lock()
-                    .unwrap()
+                let ks = self.key_store.lock().unwrap();
+                match ks
                     .send_reply(key::Msg::Insert(file_entry.key_entry,
                                                  if is_directory {
                                                      None
