@@ -42,7 +42,7 @@ fn try_a_few_times_then_panic<F>(mut f: F, msg: &str)
 pub struct Family<B> {
     pub name: String,
     pub key_store: key::Store<B>,
-    pub key_store_process: key::StoreProcess<FileIterator, B>,
+    pub key_store_process: Vec<key::StoreProcess<FileIterator, B>>,
 }
 impl<B: StoreBackend> Clone for Family<B> {
     fn clone(&self) -> Family<B> {
@@ -70,17 +70,20 @@ impl<B: StoreBackend> Family<B> {
         } else {
             Some(Box::new(move |()| contents) as Box<FnBox<(), _>>)
         };
-        match try!(self.key_store_process.send_reply(key::Msg::Insert(file, f))) {
+        match try!(self.key_store_process[0].send_reply(key::Msg::Insert(file, f))) {
             key::Reply::Id(..) => return Ok(()),
             _ => Err(From::from("Unexpected reply from key store")),
         }
     }
 
     pub fn flush(&self) -> Result<(), HatError> {
-        if let key::Reply::FlushOk = try!(self.key_store_process.send_reply(key::Msg::Flush)) {
-            return Ok(());
+        for ks in &self.key_store_process {
+            if let key::Reply::FlushOk = try!(ks.send_reply(key::Msg::Flush)) {
+                continue;
+            }
+            return Err(From::from("Unexpected reply from key store"));
         }
-        Err(From::from("Unexpected reply from key store"))
+        Ok(())
     }
 
   pub fn write_file_chunks<HTB: hash::tree::HashTreeBackend<Err=key::MsgError>>(
@@ -127,7 +130,7 @@ impl<B: StoreBackend> Family<B> {
     pub fn list_from_key_store(&self,
                                dir_id: Option<u64>)
                                -> Result<Vec<key::DirElem<B>>, HatError> {
-        match try!(self.key_store_process.send_reply(key::Msg::ListDir(dir_id))) {
+        match try!(self.key_store_process[0].send_reply(key::Msg::ListDir(dir_id))) {
             key::Reply::ListResult(ls) => Ok(ls),
             _ => Err(From::from("Unexpected result from key store")),
         }

@@ -23,7 +23,7 @@ use time;
 
 use backend::StoreBackend;
 use key;
-use util::{FileIterator, PathHandler};
+use util::{FileIterator, MutexSet, PathHandler};
 
 struct FileEntry {
     key_entry: key::Entry,
@@ -76,15 +76,15 @@ impl FileEntry {
 pub struct InsertPathHandler<B: StoreBackend> {
     count: atomic::AtomicIsize,
     last_print: Mutex<time::Timespec>,
-    key_store: Mutex<key::StoreProcess<FileIterator, B>>,
+    key_store: MutexSet<key::StoreProcess<FileIterator, B>>,
 }
 
 impl<B: StoreBackend> InsertPathHandler<B> {
-    pub fn new(key_store: key::StoreProcess<FileIterator, B>) -> InsertPathHandler<B> {
+    pub fn new(key_stores: Vec<key::StoreProcess<FileIterator, B>>) -> InsertPathHandler<B> {
         InsertPathHandler {
             count: atomic::AtomicIsize::new(0),
             last_print: Mutex::new(time::now().to_timespec()),
-            key_store: Mutex::new(key_store),
+            key_store: MutexSet::new(key_stores),
         }
     }
 }
@@ -123,23 +123,20 @@ impl<B: StoreBackend> PathHandler<Option<u64>> for InsertPathHandler<B> {
                 let full_path = file_entry.full_path.clone();
 
                 let ks = self.key_store.lock().unwrap();
-                match ks
-                    .send_reply(key::Msg::Insert(file_entry.key_entry,
-                                                 if is_directory {
-                                                     None
-                                                 } else {
-                                                     Some(Box::new(move |()| {
-                            match FileIterator::new(&full_path) {
-                                Err(e) => {
-                                    println!("Skipping '{}': {}",
-                                             local_root.display(),
-                                             e.to_string());
-                                    None
-                                }
-                                Ok(it) => Some(it),
+                match ks.send_reply(key::Msg::Insert(file_entry.key_entry,
+                                                     if is_directory {
+                                                         None
+                                                     } else {
+                                                         Some(Box::new(move |()| {
+                        match FileIterator::new(&full_path) {
+                            Err(e) => {
+                                println!("Skipping '{}': {}", local_root.display(), e.to_string());
+                                None
                             }
-                        }))
-                                                 })) {
+                            Ok(it) => Some(it),
+                        }
+                    }))
+                                                     })) {
                     Ok(key::Reply::Id(id)) => {
                         if is_directory {
                             return Some(Some(id));
