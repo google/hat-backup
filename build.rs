@@ -1,6 +1,6 @@
 extern crate capnpc;
 extern crate syntex;
-extern crate diesel_codegen;
+extern crate diesel_codegen_syntex;
 
 use std::env;
 use std::path::Path;
@@ -13,7 +13,7 @@ fn build_diesel(paths: &[(&str, &str)]) {
         let dst = Path::new(&out_dir).join(dst);
 
         let mut registry = syntex::Registry::new();
-        diesel_codegen::register(&mut registry);
+        diesel_codegen_syntex::register(&mut registry);
         registry.expand("", &src, &dst).unwrap();
     }
 }
