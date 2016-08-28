@@ -14,33 +14,62 @@
 
 //! Combines data chunks into larger blobs to be stored externally.
 
+use std::borrow::Cow;
 use std::mem;
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::thread;
 
 use backend::StoreBackend;
+use capnp;
+use errors;
+use hash::Hash;
+use hash::tree::HashRef;
 use tags;
 use util::FnBox;
 
 
+mod chunk;
 mod blob;
 mod index;
 mod schema;
 #[cfg(test)]
 pub mod tests;
 
-pub use self::blob::{Blob, ChunkRef, Kind};
+#[cfg(all(test, feature = "benchmarks"))]
+mod benchmarks;
+
+
+pub use self::chunk::{ChunkRef, Key, Kind, Packing};
+pub use self::blob::Blob;
 pub use self::index::{BlobDesc, BlobIndex};
 
+
+error_type! {
+    #[derive(Debug)]
+    pub enum BlobError {
+        Message(Cow<'static, str>) {
+            desc (e) &**e;
+            from (s: &'static str) s.into();
+            from (s: String) s.into();
+        },
+        CryptoError(errors::CryptoError) {
+            cause;
+        },
+        DataSerialization(capnp::Error) {
+            cause;
+        }
+    }
+}
 
 pub struct BlobStore<B>(Arc<Mutex<StoreInner<B>>>);
 
 pub struct StoreInner<B> {
     backend: Arc<B>,
+    max_blob_size: usize,
 
     blob_index: Arc<BlobIndex>,
     blob_desc: BlobDesc,
-    blob_refs: Vec<(ChunkRef, Box<FnBox<ChunkRef, ()>>)>,
+    blob_refs: Vec<(HashRef, Box<FnBox<HashRef, ()>>)>,
     blob: Blob,
 }
 
@@ -51,6 +80,7 @@ impl<B: StoreBackend> StoreInner<B> {
             blob_index: index,
             blob_desc: Default::default(),
             blob_refs: Vec::new(),
+            max_blob_size: max_blob_size,
             blob: Blob::new(max_blob_size),
         };
         bs.reserve_new_blob();
@@ -78,74 +108,114 @@ impl<B: StoreBackend> StoreInner<B> {
         self.blob_index.commit_done(&old_blob_desc);
 
         // Go through callbacks
-        while let Some((blobid, callback)) = self.blob_refs.pop() {
-            callback.call(blobid);
+        while let Some((href, callback)) = self.blob_refs.pop() {
+            callback.call(href);
         }
     }
 
     fn store(&mut self,
              chunk: Vec<u8>,
+             hash: Hash,
              kind: Kind,
-             callback: Box<FnBox<ChunkRef, ()>>)
-             -> ChunkRef {
+             callback: Box<FnBox<HashRef, ()>>)
+             -> HashRef {
         if chunk.is_empty() {
-            let id = ChunkRef {
-                blob_id: vec![0],
+            let href = HashRef {
+                hash: hash,
+                persistent_ref: ChunkRef {
+                    blob_id: vec![0],
+                    offset: 0,
+                    length: 0,
+                    kind: kind,
+                    packing: None,
+                    key: None,
+                },
+            };
+            let local_href = href.clone();
+            thread::spawn(move || callback.call(local_href));
+            return href;
+        }
+
+        let mut href = HashRef {
+            hash: hash,
+            persistent_ref: ChunkRef {
+                blob_id: self.blob_desc.name.clone(),
+                kind: kind,
+                packing: None,
+                // updated by try_append:
                 offset: 0,
                 length: 0,
-                kind: kind,
-            };
-            let cb_id = id.clone();
-            thread::spawn(move || callback.call(cb_id));
-            return id;
-        }
-
-        let mut id = ChunkRef {
-            blob_id: self.blob_desc.name.clone(),
-            offset: self.blob.chunk_len(),
-            length: chunk.len(),
-            kind: kind,
+                key: None,
+            },
         };
 
-        if let Err(chunk) = self.blob.try_append(chunk, &id) {
+        if let Err(chunk) = self.blob.try_append(chunk, &mut href) {
             self.flush();
 
-            id.blob_id = self.blob_desc.name.clone();
-            id.offset = 0;
-            self.blob.try_append(chunk, &id).unwrap();
+            href.persistent_ref.blob_id = self.blob_desc.name.clone();
+            self.blob.try_append(chunk, &mut href).unwrap();
         }
-        self.blob_refs.push((id.clone(), callback));
+        self.blob_refs.push((href.clone(), callback));
 
         // To avoid unnecessary blocking, we reply with the ID *before* possibly flushing.
-        id
+        href
     }
 
-    fn retrieve(&mut self, id: &ChunkRef) -> Result<Option<Vec<u8>>, String> {
-        if id.offset == 0 && id.length == 0 {
+    fn retrieve(&mut self, hash: &Hash, cref: &ChunkRef) -> Result<Option<Vec<u8>>, BlobError> {
+        if cref.offset == 0 && cref.length == 0 {
             return Ok(Some(Vec::new()));
         }
-        match self.backend.retrieve(&id.blob_id[..]) {
-            Ok(Some(blob)) => Ok(Some(blob[id.offset..id.offset + id.length].to_vec())),
+        match self.backend.retrieve(&cref.blob_id[..]) {
+            Ok(Some(blob)) => Ok(Some(try!(Blob::read_chunk(&blob, hash, cref)))),
             Ok(None) => Ok(None),
-            Err(e) => Err(e),
+            Err(e) => Err(e.into()),
         }
     }
 
-    fn store_named(&mut self, name: &str, data: &[u8]) -> Result<(), String> {
-        try!(self.backend.store(name.as_bytes(), data));
+    fn store_named(&mut self, name: &str, data: Vec<u8>) -> Result<(), String> {
+        assert!(data.len() < self.max_blob_size);
+        let hash = Hash::new(&data[..]);
+        let mut blob = Blob::new(self.max_blob_size);
+        blob.try_append(data,
+                        &mut HashRef {
+                            hash: hash,
+                            persistent_ref: ChunkRef {
+                                blob_id: name.as_bytes().to_owned(),
+                                offset: 0,
+                                length: 0,
+                                kind: Kind::TreeLeaf,
+                                packing: None,
+                                key: None,
+                            },
+                        })
+            .unwrap();
+
+        let mut ct = vec![];
+        blob.into_bytes(&mut ct);
+
+        try!(self.backend.store(name.as_bytes(), &ct[..]));
         Ok(())
     }
 
-    fn retrieve_named(&mut self, name: &str) -> Result<Option<Vec<u8>>, String> {
-        self.backend.retrieve(name.as_bytes())
+    fn retrieve_named(&mut self, name: &str) -> Result<Option<Vec<u8>>, BlobError> {
+        match try!(self.backend.retrieve(name.as_bytes())) {
+            None => Ok(None),
+            Some(ct) => {
+                let hrefs = try!(self.blob.refs_from_bytes(&ct));
+                assert_eq!(hrefs.len(), 1);
+                let href = &hrefs[0];
+                assert_eq!(name.as_bytes(), &href.persistent_ref.blob_id[..]);
+                Ok(Some(try!(Blob::read_chunk(&ct, &href.hash, &href.persistent_ref))))
+            }
+        }
     }
 
-    fn recover(&mut self, chunk: ChunkRef) {
-        if chunk.offset == 0 && chunk.length == 0 {
+    fn recover(&mut self, chunk: HashRef) {
+        if chunk.persistent_ref.offset == 0 && chunk.persistent_ref.length == 0 {
             // This chunk is empty, so there is no blob to recover.
             return;
         }
-        self.blob_index.recover(chunk.blob_id);
+        self.blob_index.recover(chunk.persistent_ref.blob_id);
     }
 
     fn tag(&mut self, chunk: ChunkRef, tag: tags::Tag) {
@@ -184,30 +254,31 @@ impl<B: StoreBackend> BlobStore<B> {
     /// `ChunkRef` as persistent reference).
     pub fn store(&self,
                  chunk: Vec<u8>,
+                 hash: Hash,
                  kind: Kind,
-                 callback: Box<FnBox<ChunkRef, ()>>)
-                 -> ChunkRef {
+                 callback: Box<FnBox<HashRef, ()>>)
+                 -> HashRef {
         let mut guard = self.lock();
-        guard.store(chunk, kind, callback)
+        guard.store(chunk, hash, kind, callback)
     }
 
     /// Retrieve the data chunk identified by `ChunkRef`.
-    pub fn retrieve(&self, id: &ChunkRef) -> Result<Option<Vec<u8>>, String> {
-        self.lock().retrieve(id)
+    pub fn retrieve(&self, hash: &Hash, cref: &ChunkRef) -> Result<Option<Vec<u8>>, BlobError> {
+        self.lock().retrieve(hash, cref)
     }
 
     /// Store a full named blob (used for writing root).
-    pub fn store_named(&self, name: &str, data: &[u8]) -> Result<(), String> {
+    pub fn store_named(&self, name: &str, data: Vec<u8>) -> Result<(), String> {
         self.lock().store_named(name, data)
     }
 
     /// Retrieve full named blob.
-    pub fn retrieve_named(&self, name: &str) -> Result<Option<Vec<u8>>, String> {
+    pub fn retrieve_named(&self, name: &str) -> Result<Option<Vec<u8>>, BlobError> {
         self.lock().retrieve_named(name)
     }
 
     /// Reinstall a blob recovered from external storage.
-    pub fn recover(&self, chunk: ChunkRef) {
+    pub fn recover(&self, chunk: HashRef) {
         self.lock().recover(chunk)
     }
 

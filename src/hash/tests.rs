@@ -76,6 +76,8 @@ impl HashTreeBackend for MemoryBackend {
                     } else {
                         Kind::TreeBranch
                     },
+                    packing: None,
+                    key: None,
                 })
             }
             None => None,
@@ -87,7 +89,7 @@ impl HashTreeBackend for MemoryBackend {
                     level: i64,
                     childs: Option<Vec<i64>>,
                     chunk: Vec<u8>)
-                    -> Result<(i64, ChunkRef), Self::Err> {
+                    -> Result<(i64, HashRef), Self::Err> {
         let mut guarded_seen = self.seen_chunks.lock().unwrap();
         guarded_seen.insert(chunk.clone());
 
@@ -96,17 +98,21 @@ impl HashTreeBackend for MemoryBackend {
 
         let len = hash.bytes.len();
 
-        Ok((0,
-            ChunkRef {
-            blob_id: hash.bytes.clone(),
-            offset: 0,
-            length: len,
-            kind: if level == 0 {
-                Kind::TreeLeaf
-            } else {
-                Kind::TreeBranch
+        Ok((0, (HashRef {
+            hash: hash.clone(),
+            persistent_ref: ChunkRef {
+                blob_id: hash.bytes.clone(),
+                offset: 0,
+                length: len,
+                kind: if level == 0 {
+                    Kind::TreeLeaf
+                } else {
+                    Kind::TreeBranch
+                },
+                packing: None,
+                key: None,
             },
-        }))
+        })))
     }
 }
 

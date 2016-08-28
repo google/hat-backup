@@ -1,69 +1,29 @@
-use capnp;
-use root_capnp;
+// Copyright 2014 Google Inc. All rights reserved.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
 
+use crypto;
+use crypto::{CipherText, CipherTextRef, PlainText};
+use hash::Hash;
+use hash::tree::HashRef;
 
-#[derive(Debug, Clone, Eq, PartialEq)]
-pub enum Kind {
-    TreeBranch = 1,
-    TreeLeaf = 2,
-}
+use super::BlobError;
+use super::ChunkRef;
 
-#[derive(Debug, Clone, Eq, PartialEq)]
-pub struct ChunkRef {
-    pub blob_id: Vec<u8>,
-    pub offset: usize,
-    pub length: usize,
-    pub kind: Kind,
-}
-
-impl ChunkRef {
-    pub fn from_bytes(bytes: &mut &[u8]) -> Result<ChunkRef, capnp::Error> {
-        let reader = try!(capnp::serialize_packed::read_message(bytes,
-                                                       capnp::message::ReaderOptions::new()));
-        let root = try!(reader.get_root::<root_capnp::chunk_ref::Reader>());
-
-        Ok(try!(ChunkRef::read_msg(&root)))
-    }
-
-    pub fn as_bytes(&self) -> Vec<u8> {
-        let mut message = ::capnp::message::Builder::new_default();
-        {
-            let mut root = message.init_root::<root_capnp::chunk_ref::Builder>();
-            self.populate_msg(root.borrow());
-        }
-
-        let mut out = Vec::new();
-        capnp::serialize_packed::write_message(&mut out, &message).unwrap();
-
-        out
-    }
-
-    pub fn populate_msg(&self, msg: root_capnp::chunk_ref::Builder) {
-        let mut msg = msg;
-        msg.set_blob_id(&self.blob_id[..]);
-        msg.set_offset(self.offset as i64);
-        msg.set_length(self.length as i64);
-        match self.kind {
-            Kind::TreeLeaf => msg.init_kind().set_tree_leaf(()),
-            Kind::TreeBranch => msg.init_kind().set_tree_branch(()),
-        }
-    }
-
-    pub fn read_msg(msg: &root_capnp::chunk_ref::Reader) -> Result<ChunkRef, capnp::Error> {
-        Ok(ChunkRef {
-            blob_id: try!(msg.get_blob_id()).to_owned(),
-            offset: msg.get_offset() as usize,
-            length: msg.get_length() as usize,
-            kind: match try!(msg.get_kind().which()) {
-                root_capnp::chunk_ref::kind::TreeBranch(()) => Kind::TreeBranch,
-                root_capnp::chunk_ref::kind::TreeLeaf(()) => Kind::TreeLeaf,
-            },
-        })
-    }
-}
 
 pub struct Blob {
-    chunks: Vec<u8>,
+    master_key: crypto::FixedKey,
+    chunks: CipherText,
     footer: Vec<u8>,
     overhead: usize,
     max_size: usize,
@@ -71,12 +31,34 @@ pub struct Blob {
 
 impl Blob {
     pub fn new(max_size: usize) -> Blob {
+        // TODO(jos): Plug an actual crypto key through somehow.
+        let pubkey = crypto::sealed::desc::PublicKey::from_slice(&[215, 136, 80, 128, 158, 109,
+                                                                   227, 141, 219, 63, 118, 91,
+                                                                   123, 97, 1, 97, 65, 237, 62,
+                                                                   171, 83, 159, 200, 11, 68,
+                                                                   138, 40, 82, 24, 47, 187, 29])
+            .unwrap();
+        let seckey = crypto::sealed::desc::SecretKey::from_slice(&[94, 13, 181, 81, 97, 87, 76,
+                                                                   37, 53, 92, 120, 232, 17, 126,
+                                                                   234, 78, 12, 23, 141, 61, 40,
+                                                                   10, 136, 127, 103, 192, 255,
+                                                                   193, 142, 154, 101, 35])
+            .unwrap();
+
+        let master_key = crypto::FixedKey::new(pubkey, Some(seckey));
+
         Blob {
-            chunks: Vec::with_capacity(max_size),
+            master_key: master_key,
+            chunks: CipherText::new(Vec::with_capacity(max_size)),
             footer: Vec::with_capacity(max_size / 2),
-            overhead: 3 * Blob::len_into(max_size - 1, &mut Vec::new()),
+            overhead: crypto::sealed::desc::overhead(),
             max_size: max_size,
         }
+    }
+
+    pub fn read_chunk(blob: &[u8], hash: &Hash, cref: &ChunkRef) -> Result<Vec<u8>, BlobError> {
+        let ct = crypto::CipherTextRef::new(blob);
+        Ok(try!(crypto::RefKey::unseal(hash, cref, ct)).into_vec())
     }
 
     pub fn upperbound_len(&self) -> usize {
@@ -87,26 +69,31 @@ impl Blob {
         }
     }
 
-    pub fn chunk_len(&self) -> usize {
-        self.chunks.len()
-    }
+    pub fn try_append(&mut self, chunk: Vec<u8>, mut href: &mut HashRef) -> Result<(), Vec<u8>> {
+        let mut ct = crypto::RefKey::seal(&mut href, PlainText::new(chunk));
 
-    pub fn try_append(&mut self, mut chunk: Vec<u8>, cref: &ChunkRef) -> Result<(), Vec<u8>> {
-        assert!(self.max_size > chunk.len());
+        href.persistent_ref.offset = self.chunks.len();
+        let mut href_bytes = href.as_bytes();
+        assert!(href_bytes.len() < 255);
 
-        let mut entry = cref.as_bytes();
-
-        if self.upperbound_len() + entry.len() + chunk.len() >= self.max_size {
+        if self.upperbound_len() + 1 + href_bytes.len() + ct.len() >= self.max_size {
+            href.persistent_ref.offset = 0;
+            let chunk = crypto::RefKey::unseal(&href.hash, &href.persistent_ref, ct.as_ref())
+                .unwrap()
+                .into_vec();
+            if self.chunks.len() == 0 {
+                panic!("Can never fit chunk of size {} in blob of size {}",
+                       chunk.len(),
+                       self.max_size);
+            }
             return Err(chunk);
         }
 
-        self.chunks.append(&mut chunk);
+        ct.empty_into(&mut self.chunks);
 
         // Generate footer entry.
-        let size = entry.len();
-        assert!(size < 255);
-        self.footer.push(size as u8);
-        self.footer.append(&mut entry);
+        self.footer.push(href_bytes.len() as u8);
+        self.footer.append(&mut href_bytes);
 
         Ok(())
     }
@@ -116,77 +103,37 @@ impl Blob {
             return;
         }
 
-        out.append(&mut self.chunks);
+        let mut ct = CipherText::from(&mut self.chunks);
+        let mut footer = self.master_key.seal(PlainText::from_vec(&mut self.footer));
 
-        let mut footer = Vec::new();
-        footer.append(&mut self.footer);
-
-        let meta_len = Self::len_into(footer.len(), &mut footer);
-        let meta_meta_len = Self::len_into(meta_len, &mut footer);
-
-        assert!(meta_meta_len < 255);
-        footer.push(meta_meta_len as u8);
-
-        assert!(out.len() + footer.len() <= self.max_size);
-        let left = self.max_size - out.len() - footer.len();
-        if left > 0 {
-            out.append(&mut vec![0; left]);
-        }
-        out.append(&mut footer);
+        assert!(ct.len() + footer.len() <= self.max_size);
+        ct.random_pad_upto(self.max_size - footer.len());
+        ct.append(&mut footer);
 
         // Everything has been reset. We are ready to go again.
         assert_eq!(0, self.chunks.len());
         assert_eq!(0, self.footer.len());
+
+        out.append(&mut ct.into_vec());
     }
 
-    fn len_into(len: usize, mut out: &mut Vec<u8>) -> usize {
-        let mut message = ::capnp::message::Builder::new_default();
-        {
-            let mut root = message.init_root::<::root_capnp::meta_footer_entry::Builder>();
-            root.set_length(len as i64);
-        }
-
-        let before_len = out.len();
-        capnp::serialize_packed::write_message(&mut out, &message).unwrap();
-
-        out.len() - before_len
-    }
-
-    fn len_from(bytes: &mut &[u8]) -> Result<i64, capnp::Error> {
-        let reader = try!(
-            capnp::serialize_packed::read_message(bytes, capnp::message::ReaderOptions::new()));
-        let root = try!(reader.get_root::<root_capnp::meta_footer_entry::Reader>());
-        Ok(root.get_length())
-    }
-
-    pub fn chunk_refs_from_bytes(bytes: &[u8]) -> Result<Vec<ChunkRef>, capnp::Error> {
+    pub fn refs_from_bytes(&self, bytes: &[u8]) -> Result<Vec<HashRef>, BlobError> {
         if bytes.len() == 0 {
             return Ok(Vec::new());
         }
 
-        let meta_meta_len = *bytes.last().unwrap() as usize;
-        let mut pos = bytes.len() - 1;
-        assert!(pos >= meta_meta_len);
-        pos -= meta_meta_len;
+        let (_rest, footer_vec) = try!(self.master_key.unseal(CipherTextRef::new(bytes)));
+        let mut footer_pos = footer_vec.as_bytes();
 
-        let meta_len = try!(Blob::len_from(&mut &bytes[pos..pos + meta_meta_len])) as usize;
-        assert!(pos >= meta_len);
-        pos -= meta_len;
+        let mut hrefs = Vec::new();
+        while footer_pos.len() > 0 {
+            let len = footer_pos[0] as usize;
+            assert!(footer_pos.len() > len);
 
-        let footer_len = try!(Blob::len_from(&mut &bytes[pos..pos + meta_len])) as usize;
-        assert!(pos >= footer_len);
-        pos -= footer_len;
-
-        let mut footer = &bytes[pos..pos + footer_len];
-        let mut crefs = Vec::new();
-        while footer.len() > 0 {
-            let len = footer[0] as usize;
-            assert!(footer.len() > len);
-
-            crefs.push(try!(ChunkRef::from_bytes(&mut &footer[1..1 + len])));
-            footer = &footer[len + 1..];
+            hrefs.push(try!(HashRef::from_bytes(&mut &footer_pos[1..1 + len])));
+            footer_pos = &footer_pos[len + 1..];
         }
 
-        Ok(crefs)
+        Ok(hrefs)
     }
 }

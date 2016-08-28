@@ -51,6 +51,9 @@ error_type! {
         },
         DieselError(DieselError) {
             cause;
+        },
+        Blob(blob::BlobError) {
+            cause;
         }
      }
 }

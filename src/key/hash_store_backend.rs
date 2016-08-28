@@ -48,14 +48,15 @@ impl<B: StoreBackend> HashStoreBackend<B> {
         assert!(!hash.bytes.is_empty());
         match try!(self.hash_index.fetch_persistent_ref(hash)) {
             None => Ok(None),
-            Some(chunk_ref) => self.fetch_chunk_from_persistent_ref(&chunk_ref),
+            Some(chunk_ref) => self.fetch_chunk_from_persistent_ref(&hash, &chunk_ref),
         }
     }
 
     fn fetch_chunk_from_persistent_ref(&self,
-                                       chunk_ref: &blob::ChunkRef)
+                                       hash: &hash::Hash,
+                                       cref: &blob::ChunkRef)
                                        -> Result<Option<Vec<u8>>, MsgError> {
-        let res = try!(self.blob_store.retrieve(chunk_ref));
+        let res = try!(self.blob_store.retrieve(&hash, &cref));
         Ok(res)
     }
 }
@@ -70,7 +71,7 @@ impl<B: StoreBackend> HashTreeBackend for HashStoreBackend<B> {
         assert!(!hash.bytes.is_empty());
 
         let data_opt = if let Some(r) = persistent_ref {
-            try!(self.fetch_chunk_from_persistent_ref(&r))
+            try!(self.fetch_chunk_from_persistent_ref(&hash, &r))
         } else {
             try!(self.fetch_chunk_from_hash(&hash))
         };
@@ -111,7 +112,7 @@ impl<B: StoreBackend> HashTreeBackend for HashStoreBackend<B> {
                     level: i64,
                     childs: Option<Vec<i64>>,
                     chunk: Vec<u8>)
-                    -> Result<(i64, blob::ChunkRef), MsgError> {
+                    -> Result<(i64, hash::tree::HashRef), MsgError> {
         assert!(!hash.bytes.is_empty());
 
         let mut hash_entry = hash::Entry {
@@ -124,27 +125,28 @@ impl<B: StoreBackend> HashTreeBackend for HashStoreBackend<B> {
         match self.hash_index.reserve(&hash_entry) {
             hash::ReserveResult::HashKnown(id) => {
                 // Someone came before us: piggyback on their result.
-                Ok((id,
-                    self.fetch_persistent_ref(hash)
-                    .expect("Could not find persistent_ref for known chunk.")))
+                Ok((id, hash::tree::HashRef {
+                    hash: hash.clone(),
+                    persistent_ref: self.fetch_persistent_ref(hash)
+                        .expect("Could not find persistent_ref for known chunk."),
+                }))
             }
             hash::ReserveResult::ReserveOk(id) => {
                 // We came first: this data-chunk is ours to process.
                 let local_hash_index = self.hash_index.clone();
 
-                let local_hash = hash.clone();
-                let callback = Box::new(move |chunk_ref: blob::ChunkRef| {
-                    local_hash_index.commit(&local_hash, chunk_ref);
+                let callback = Box::new(move |href: hash::tree::HashRef| {
+                    local_hash_index.commit(&href.hash, href.persistent_ref);
                 });
                 let kind = if level == 0 {
                     blob::Kind::TreeLeaf
                 } else {
                     blob::Kind::TreeBranch
                 };
-                let chunk_ref = self.blob_store.store(chunk, kind, callback);
-                hash_entry.persistent_ref = Some(chunk_ref.clone());
+                let href = self.blob_store.store(chunk, hash.clone(), kind, callback);
+                hash_entry.persistent_ref = Some(href.persistent_ref.clone());
                 self.hash_index.update_reserved(hash_entry);
-                Ok((id, chunk_ref))
+                Ok((id, href))
             }
         }
     }

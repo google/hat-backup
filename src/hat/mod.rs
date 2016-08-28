@@ -312,7 +312,7 @@ impl<B: StoreBackend> HatRc<B> {
         capnp::serialize_packed::write_message(&mut listing, &message).unwrap();
 
         // TODO(jos): make sure this operation is atomic or resumable.
-        try!(self.blob_store.store_named("root", listing.as_slice()));
+        try!(self.blob_store.store_named("root", listing));
         Ok(())
     }
 
@@ -359,7 +359,10 @@ impl<B: StoreBackend> HatRc<B> {
             let pref = entry.persistent_ref.clone().unwrap();
 
             // Make sure we have the blob described.
-            blobs.recover(pref.clone());
+            blobs.recover(hash::tree::HashRef {
+                hash: entry.hash.clone(),
+                persistent_ref: pref.clone(),
+            });
 
             entry.childs = match childs_opt {
                 &None => None,

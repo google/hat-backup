@@ -26,6 +26,7 @@ extern crate test;
 extern crate time;
 
 // Rust crates.
+extern crate byteorder;
 extern crate capnp;
 extern crate sodiumoxide;
 extern crate libsodium_sys;
@@ -48,6 +49,7 @@ extern crate quickcheck;
 // Submodules
 pub mod backend;
 mod blob;
+mod crypto;
 mod errors;
 mod gc;
 mod hash;

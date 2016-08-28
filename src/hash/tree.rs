@@ -30,15 +30,15 @@ use quickcheck;
 
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-struct HashRef {
-    hash: Vec<u8>,
-    persistent_ref: ChunkRef,
+pub struct HashRef {
+    pub hash: Hash,
+    pub persistent_ref: ChunkRef,
 }
 
 impl HashRef {
     fn populate_msg(&self, msg: root_capnp::hash_ref::Builder) {
         let mut msg = msg;
-        msg.set_hash(&self.hash[..]);
+        msg.set_hash(&self.hash.bytes[..]);
         {
             let mut chunk_ref = msg.init_chunk_ref();
             self.persistent_ref.populate_msg(chunk_ref.borrow());
@@ -47,9 +47,29 @@ impl HashRef {
 
     fn read_msg(msg: &root_capnp::hash_ref::Reader) -> Result<HashRef, capnp::Error> {
         Ok(HashRef {
-            hash: try!(msg.get_hash()).to_owned(),
+            hash: Hash { bytes: try!(msg.get_hash()).to_owned() },
             persistent_ref: try!(ChunkRef::read_msg(&try!(msg.get_chunk_ref()))),
         })
+    }
+
+    pub fn from_bytes(bytes: &mut &[u8]) -> Result<HashRef, capnp::Error> {
+        let reader = try!(
+            capnp::serialize_packed::read_message(bytes, capnp::message::ReaderOptions::new()));
+        let root = try!(reader.get_root::<root_capnp::hash_ref::Reader>());
+        Ok(try!(HashRef::read_msg(&root)))
+    }
+
+    pub fn as_bytes(&self) -> Vec<u8> {
+        let mut message = ::capnp::message::Builder::new_default();
+        {
+            let mut root = message.init_root::<root_capnp::hash_ref::Builder>();
+            self.populate_msg(root.borrow());
+        }
+
+        let mut out = Vec::new();
+        capnp::serialize_packed::write_message(&mut out, &message).unwrap();
+
+        out
     }
 }
 
@@ -65,7 +85,7 @@ pub trait HashTreeBackend: Clone {
                     i64,
                     Option<Vec<i64>>,
                     Vec<u8>)
-                    -> Result<(i64, ChunkRef), Self::Err>;
+                    -> Result<(i64, HashRef), Self::Err>;
 }
 
 
@@ -109,11 +129,13 @@ fn test_hash_refs_identity() {
             offset: n,
             length: n,
             kind: Kind::TreeBranch,
+            packing: None,
+            key: None,
         };
         let mut v = vec![];
         for _ in 0..count {
             v.push(HashRef {
-                hash: hash.clone(),
+                hash: Hash { bytes: hash.clone() },
                 persistent_ref: chunk_ref.clone(),
             });
         }
@@ -181,12 +203,7 @@ impl<B: HashTreeBackend> SimpleHashTreeWriter<B> {
                  childs: Option<Vec<i64>>)
                  -> Result<(), B::Err> {
         let hash = Hash::new(&data[..]);
-        let (id, persistent_ref) = try!(self.backend
-            .insert_chunk(&hash, level as i64, childs, data));
-        let hash_ref = HashRef {
-            hash: hash.bytes,
-            persistent_ref: persistent_ref,
-        };
+        let (id, hash_ref) = try!(self.backend.insert_chunk(&hash, level as i64, childs, data));
         self.append_hashref_at(level, id, hash_ref)
     }
 
@@ -252,7 +269,7 @@ impl<B: HashTreeBackend> SimpleHashTreeWriter<B> {
         assert_eq!(self.levels.last().map(|x| x.len()), Some(1));
         let &(_, ref hashref) = self.levels.last().and_then(|x| x.last()).expect("asserted");
 
-        Ok((Hash { bytes: hashref.hash.clone() }, hashref.persistent_ref.clone()))
+        Ok((hashref.hash.clone(), hashref.persistent_ref.clone()))
     }
 }
 
@@ -336,10 +353,9 @@ impl<B: HashTreeBackend> SimpleHashTreeReader<B> {
         let mut hashes = vec![];
         while !self.stack.is_empty() {
             let child = self.stack.pop().expect("!is_empty()");
-
-            let hash = Hash { bytes: child.hash.clone() };
+            let hash = child.hash.clone();
             hashes.push(hash.clone());
-
+            
             match child.persistent_ref.kind {
                 Kind::TreeLeaf => {
                     out.push((None,
@@ -395,10 +411,9 @@ impl<B: HashTreeBackend> SimpleHashTreeReader<B> {
                 Some(ref hash) => assert!(hash != &child.hash),
             }
 
-            let hash = Hash { bytes: child.hash };
             let kind = child.persistent_ref.kind.clone();
             let data = try!(self.backend
-                    .fetch_chunk(&hash, Some(child.persistent_ref)))
+                    .fetch_chunk(&child.hash, Some(child.persistent_ref)))
                 .expect("Invalid hash ref");
 
             match kind {
