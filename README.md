@@ -44,6 +44,7 @@ I am currently focusing on reaching a feature complete and useful state and as a
 - ~~Replace all uses of JSON with either Protocol Buffers or Cap'n Proto.~~
 - Go through uses of 'unwrap', 'expect' etc and remove them where possible; preferably, the caller/initiater should handle errors.
 - Think about parallelism and change the pipeline of threads to make better use of it.
+  - ~~Parallel snapshotting~~
 - Figure out how to battle test the code on supported platforms.
 
 **Functionality:**
@@ -53,13 +54,14 @@ There are a bunch of lacking functionality needed before a feature complete rele
 - ~~Commit hash-tree tops of known snapshots to external storage.~~
 - Add recovery function to restore local metadata from external hash-tree tops (for when all local state is gone).
   - ~~Basic read-only recovery.~~
-  - Full read-write recovery with GC metadata rebuilding.
+  - ~~Full read-write recovery with GC metadata rebuilding.~~
+  - Need to allow users to opt for read-only.
 - ~~Add book-keeping for metadata needed to identify live hashes (e.g. reference sets in each family's keyindex).~~
 - ~~Add deletion and garbage-collection.~~
   - ~~Make 'commit' crash-safe by retrying failed 'register' and 'deregister' runs~~. Add tests as this is fragile logic.
   - ~~GC should not be able to break the index. This can be avoided by having 'snapshot' check if hashes it wants to reuse still exist (i.e. have not been GC'ed yet).~~
   - ~~GC should delete hashes top-down to avoid removing a child hash before its parent hash.~~
-- Have the blobstore thread(s) talk to external thread(s) to isolate communication with external storage.
+- Have the blobstore talk to external thread(s) to isolate communication with external storage.
 - Make the API used for talking to the external storage easy to change (put it in separate put/get/del programs).
 - Add encryption through NaCL/sodiumdioxide; preferably as late as possible.
 
