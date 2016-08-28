@@ -43,18 +43,6 @@ impl<V> MutexSet<V> {
         }
     }
 
-    pub fn len(&self) -> usize {
-        self.vals.lock().unwrap().len()
-    }
-
-    pub fn with<F, R>(&self, f: F) -> R
-        where F: FnOnce(&mut V) -> R
-    {
-        let mut v = self.lock().unwrap();
-        let r = f(&mut *v);
-        r
-    }
-
     pub fn lock(&self) -> Result<MutexSetGuard<V>, PoisonError<MutexGuard<Vec<V>>>> {
         let v = {
             let mut vs = try!(self.vals.lock());
