@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use key::*;
+use std::io;
 use std::sync::Arc;
 
 use backend::{MemoryBackend, StoreBackend};
@@ -34,19 +35,19 @@ pub struct EntryStub {
     pub data: Option<Vec<Vec<u8>>>,
 }
 
-impl Iterator for EntryStub {
-    type Item = Vec<u8>;
-
-    fn next(&mut self) -> Option<Vec<u8>> {
+impl io::Read for EntryStub {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
         match self.data.as_mut() {
             Some(x) => {
                 if !x.is_empty() {
-                    Some(x.remove(0))
+                    let c = x.remove(0);
+                    buf[..c.len()].copy_from_slice(&c[..]);
+                    Ok(c.len())
                 } else {
-                    None
+                    Ok(0)
                 }
             }
-            None => None,
+            None => Ok(0),
         }
     }
 }
@@ -178,12 +179,16 @@ fn verify_filesystem<B: StoreBackend>(fs: &FileSystem, ks_p: &StoreProcess<Entry
                             None => panic!("No data."),
                             Some(it) => it,
                         };
-                        let mut chunk_count = 0;
-                        for (i, chunk) in it.enumerate() {
-                            assert_eq!(original.get(i), Some(&chunk));
-                            chunk_count += 1;
+                        let mut original_all = vec![];
+                        for chunk in original {
+                            original_all.extend_from_slice(&chunk[..]);
                         }
-                        assert_eq!(original.len(), chunk_count);
+                        let mut recovered_all = vec![];
+                        for chunk in it {
+                            recovered_all.extend_from_slice(&chunk[..]);
+                        }
+                        assert_eq!(original_all.len(), recovered_all.len());
+                        assert_eq!(original_all, recovered_all);
                     }
                     None => {
                         assert_eq!(entry.data_hash, None);

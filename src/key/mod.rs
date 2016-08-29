@@ -14,6 +14,7 @@
 
 //! External API for creating and manipulating snapshots.
 
+use std::io;
 use std::sync::Arc;
 use std::borrow::Cow;
 
@@ -168,7 +169,7 @@ fn file_size_warning(name: &[u8], wanted: u64, got: u64) {
     }
 }
 
-impl<IT: Iterator<Item = Vec<u8>>, B: StoreBackend> MsgHandler<Msg<IT>, Reply<B>> for Store<B> {
+impl<IT: io::Read, B: StoreBackend> MsgHandler<Msg<IT>, Reply<B>> for Store<B> {
     type Err = MsgError;
 
     fn handle<F: FnOnce(Result<Reply<B>, MsgError>)>(&mut self,
@@ -263,15 +264,29 @@ impl<IT: Iterator<Item = Vec<u8>>, B: StoreBackend> MsgHandler<Msg<IT>, Reply<B>
 
                 // Read and insert all file chunks:
                 // (see HashStoreBackend::insert_chunk above)
-                let mut bytes_read = 0u64;
-                for chunk in it_opt.unwrap() {
-                    bytes_read += chunk.len() as u64;
-                    try!(tree.append(&chunk[..]));
+                let max_chunk_len = 128 * 1024;
+                let mut chunk = vec![0; max_chunk_len];
+                let mut reader = it_opt.unwrap();
+                let mut file_len = 0u64;
+                loop {
+                    let mut chunk_len = 0;
+                    while chunk_len < max_chunk_len {
+                        chunk_len += match reader.read(&mut chunk[chunk_len..]) {
+                            Err(ref e) if e.kind() == io::ErrorKind::Interrupted => continue,
+                            Ok(0) | Err(_) => break,
+                            Ok(size) => size,
+                        }
+                    }
+                    if chunk_len == 0 {
+                        break;
+                    }
+                    file_len += chunk_len as u64;
+                    try!(tree.append(&chunk[..chunk_len]))
                 }
 
                 // Warn the user if we did not read the expected size:
                 entry.data_length.map(|s| {
-                    file_size_warning(&entry.name, s, bytes_read);
+                    file_size_warning(&entry.name, s, file_len);
                 });
 
                 // Get top tree hash:

@@ -22,7 +22,7 @@ pub enum FileIterator {
     #[cfg(test)]
     Buf(Vec<u8>, usize),
     #[cfg(all(test, feature = "benchmarks"))]
-    Iter(Box<Iterator<Item = Vec<u8>> + Send>),
+    Reader(Box<Read + Send>),
 }
 
 impl FileIterator {
@@ -38,49 +38,31 @@ impl FileIterator {
     }
 
     #[cfg(all(test, feature = "benchmarks"))]
-    pub fn from_iter<I>(i: Box<I>) -> FileIterator
-        where I: Iterator<Item = Vec<u8>> + Send + 'static
+    pub fn from_reader<R>(r: Box<R>) -> FileIterator
+        where R: Read + Send + 'static
     {
-        FileIterator::Iter(i)
+        FileIterator::Reader(r)
     }
 }
 
-impl Iterator for FileIterator {
-    type Item = Vec<u8>;
-
-    fn next(&mut self) -> Option<Vec<u8>> {
-        let chunk_size = 128 * 1024;
+impl Read for FileIterator {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
         match self {
-            &mut FileIterator::File(ref mut f) => {
-                let mut read = 0;
-                let mut buf = vec![0u8; chunk_size];
-                while read < chunk_size {
-                    read += match f.read(&mut buf[read..]) {
-                        Err(_) | Ok(0) => break,
-                        Ok(size) => size,
-                    }
-                }
-                assert!(read <= chunk_size);
-                if read == 0 {
-                    None
-                } else {
-                    buf.truncate(read);
-                    Some(buf)
-                }
-            }
+            &mut FileIterator::File(ref mut f) => f.read(buf),
             #[cfg(test)]
             &mut FileIterator::Buf(ref vec, ref mut pos) => {
                 use std::cmp;
                 if *pos >= vec.len() {
-                    None
+                    Ok(0)
                 } else {
-                    let next = &vec[*pos..cmp::min(*pos + chunk_size, vec.len())];
-                    *pos += chunk_size;
-                    Some(next.to_owned())
+                    let next = &vec[*pos..cmp::min(*pos + buf.len(), vec.len())];
+                    *pos += next.len();
+                    buf[..next.len()].clone_from_slice(&next);
+                    Ok(next.len())
                 }
             }
             #[cfg(all(test, feature = "benchmarks"))]
-            &mut FileIterator::Iter(ref mut inner) => inner.next(),
+            &mut FileIterator::Reader(ref mut r) => r.read(buf),
         }
     }
 }
