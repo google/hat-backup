@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::io;
 use std::sync::{Arc, Mutex};
 use test::Bencher;
 
@@ -36,7 +37,7 @@ fn setup_family() -> (HatRc<DevNullBackend>, Family<DevNullBackend>) {
 struct UniqueBlockFiller(Arc<Mutex<u32>>);
 
 #[derive(Clone)]
-struct UniqueBlockIter {
+struct UniqueBlockReader {
     filler: UniqueBlockFiller,
     blocksize: usize,
     filesize: i32,
@@ -66,9 +67,9 @@ impl UniqueBlockFiller {
     }
 }
 
-impl UniqueBlockIter {
-    fn new(filler: UniqueBlockFiller, blocksize: usize, filesize: i32) -> UniqueBlockIter {
-        UniqueBlockIter {
+impl UniqueBlockReader {
+    fn new(filler: UniqueBlockFiller, blocksize: usize, filesize: i32) -> UniqueBlockReader {
+        UniqueBlockReader {
             filler: filler,
             blocksize: blocksize,
             filesize: filesize,
@@ -82,17 +83,14 @@ impl UniqueBlockIter {
     }
 }
 
-impl Iterator for UniqueBlockIter {
-    type Item = Vec<u8>;
-
-    fn next(&mut self) -> Option<Vec<u8>> {
+impl io::Read for UniqueBlockReader {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
         if self.filesize <= 0 {
-            None
+            Ok(0)
         } else {
             self.filesize -= self.blocksize as i32;
-            let mut res = vec![0; self.blocksize];
-            self.filler.fill_bytes(&mut res);
-            Some(res)
+            self.filler.fill_bytes(&mut buf[..self.blocksize]);
+            Ok(self.blocksize)
         }
     }
 }
@@ -103,18 +101,18 @@ fn insert_files(bench: &mut Bencher, filesize: i32, unique: bool) {
     let mut filler = UniqueBlockFiller::new(0);
     let mut name = vec![0; 8];
 
-    let mut file_iter = UniqueBlockIter::new(filler.clone(), 128 * 1024, filesize);
+    let mut file_reader = UniqueBlockReader::new(filler.clone(), 128 * 1024, filesize);
 
     bench.iter(|| {
         filler.fill_bytes(&mut name);
 
-        file_iter.reset_filesize(filesize);
+        file_reader.reset_filesize(filesize);
         if !unique {
             // Reset data filler.
-            file_iter.reset_filler(0);
+            file_reader.reset_filler(0);
         }
 
-        let file = FileIterator::from_iter(Box::new(file_iter.clone()));
+        let file = FileIterator::from_reader(Box::new(file_reader.clone()));
         family.snapshot_direct(entry(name.clone()), false, Some(file)).unwrap();
     });
 
