@@ -19,8 +19,8 @@ use std::io::{Read, Write};
 use std::path::PathBuf;
 use std::sync::Mutex;
 
-
 use backend::StoreBackend;
+use crypto::CipherText;
 
 pub struct FileBackend {
     root: PathBuf,
@@ -78,7 +78,7 @@ impl FileBackend {
 }
 
 impl StoreBackend for FileBackend {
-    fn store(&self, name: &[u8], data: &[u8]) -> Result<(), String> {
+    fn store(&self, name: &[u8], data: &CipherText) -> Result<(), String> {
         let mut path = self.root.clone();
         path.push(&name.to_hex());
 
@@ -87,10 +87,12 @@ impl StoreBackend for FileBackend {
             Ok(f) => f,
         };
 
-        match file.write_all(data) {
-            Err(e) => Err(e.to_string()),
-            Ok(()) => Ok(()),
+        for r in data.slices() {
+            if let Err(e) = file.write_all(r) {
+                return Err(e.to_string());
+            }
         }
+        Ok(())
     }
 
     fn retrieve(&self, name: &[u8]) -> Result<Option<Vec<u8>>, String> {

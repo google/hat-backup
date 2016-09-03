@@ -21,7 +21,10 @@ use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 
 pub struct PlainText(Vec<u8>);
 pub struct PlainTextRef<'a>(&'a [u8]);
-pub struct CipherText(Vec<u8>);
+pub struct CipherText{
+    chunks: Vec<Vec<u8>>,
+    len: usize,
+}
 pub struct CipherTextRef<'a>(&'a [u8]);
 
 pub mod authed {
@@ -81,21 +84,16 @@ impl<'a> PlainTextRef<'a> {
                          nonce: &authed::desc::Nonce,
                          key: &authed::desc::Key)
                          -> CipherText {
-        CipherText(authed::imp::seal(&self.0, &nonce, &key))
+        CipherText::new(authed::imp::seal(&self.0, &nonce, &key))
     }
     pub fn to_sealed_ciphertext(&self, pubkey: &sealed::desc::PublicKey) -> CipherText {
-        CipherText(sealed::imp::seal(&self.0, &pubkey))
+        CipherText::new(sealed::imp::seal(&self.0, &pubkey))
     }
 }
 
 impl PlainText {
     pub fn new(bytes: Vec<u8>) -> PlainText {
         PlainText(bytes)
-    }
-    pub fn from_vec(mut bytes: &mut Vec<u8>) -> PlainText {
-        let mut pt = PlainText(Vec::with_capacity(bytes.len()));
-        pt.0.append(&mut bytes);
-        pt
     }
     pub fn len(&self) -> usize {
         self.0.len()
@@ -112,46 +110,47 @@ impl PlainText {
 }
 
 impl CipherText {
+    pub fn empty() -> CipherText {
+        CipherText{chunks: vec![], len: 0}
+    }
     pub fn new(ct: Vec<u8>) -> CipherText {
-        CipherText(ct)
+        let len = ct.len();
+        CipherText{chunks: vec![ct], len: len}
     }
-    pub fn from(mut other_ct: &mut CipherText) -> CipherText {
-        let mut ct = CipherText::new(Vec::with_capacity(other_ct.len()));
-        ct.append(&mut other_ct);
-        ct
-    }
-    pub fn append(&mut self, other: &mut CipherText) {
-        self.0.append(&mut other.0);
+    pub fn append(&mut self, mut other: CipherText) {
+        self.len += other.len();
+        self.chunks.append(&mut other.chunks);
     }
     pub fn len(&self) -> usize {
-        self.0.len()
+        self.len
     }
-    pub fn empty_into(&mut self, out: &mut CipherText) {
-        out.0.append(&mut self.0)
-    }
-    pub fn random_pad_upto(&mut self, final_size: usize) {
-        let size = self.len();
-        if final_size > size {
-            self.0.resize(final_size, 0);
-            let key = stream::salsa20::gen_key();
-            let nonce = stream::salsa20::gen_nonce();
-            stream::salsa20::stream_xor_inplace(&mut self.0[size..], &nonce, &key);
+    pub fn random_pad_upto(&mut self, final_len: usize) {
+        let len = self.len;
+        if final_len > len {
+            self.append(CipherText::random_pad(final_len - len));
         }
     }
-    pub fn into_vec(self) -> Vec<u8> {
-        self.0
+    pub fn random_pad(size: usize) -> CipherText {
+        let key = stream::salsa20::gen_key();
+        let nonce = stream::salsa20::gen_nonce();
+        CipherText::new(stream::salsa20::stream(size, &nonce, &key))
     }
-    pub fn as_ref(&self) -> CipherTextRef {
-        CipherTextRef(&self.0[..])
+    pub fn to_vec(&self) -> Vec<u8> {
+        let mut out = vec![];
+        for c in &self.chunks {
+            out.extend_from_slice(&c[..]);
+        }
+        out
+    }
+    
+    pub fn slices(&self) -> Vec<&[u8]> {
+        self.chunks.iter().map(|x| &x[..]).collect()
     }
 }
 
 impl<'a> CipherTextRef<'a> {
     pub fn new(bytes: &'a [u8]) -> CipherTextRef<'a> {
         CipherTextRef(bytes)
-    }
-    pub fn bytes(&self) -> &[u8] {
-        &self.0[..]
     }
     pub fn slice(&self, from: usize, to: usize) -> CipherTextRef<'a> {
         CipherTextRef(&self.0[from..to])
@@ -167,14 +166,14 @@ impl<'a> CipherTextRef<'a> {
                         nonce: &authed::desc::Nonce,
                         key: &authed::desc::Key)
                         -> Result<PlainText, CryptoError> {
-        Ok((PlainText(try!(authed::imp::open(&self.0, &nonce, &key)
+        Ok((PlainText::new(try!(authed::imp::open(&self.0, &nonce, &key)
             .map_err(|()| "Crypto failed to open authenticated message")))))
     }
     pub fn to_sealed_plaintext(&self,
                                pubkey: &sealed::desc::PublicKey,
                                seckey: &sealed::desc::SecretKey)
                                -> Result<PlainText, CryptoError> {
-        Ok(PlainText(try!(sealed::imp::open(&self.0, &pubkey, &seckey)
+        Ok(PlainText::new(try!(sealed::imp::open(&self.0, &pubkey, &seckey)
             .map_err(|()| "Crypto failed to open sealed message"))))
     }
 }
@@ -233,12 +232,12 @@ impl FixedKey {
         let mut ct = pt.to_sealed_ciphertext(&self.pubkey);
 
         // Add ciphertext length as LittleEndian.
-        let mut foot_pt = PlainText(Vec::with_capacity(8));
+        let mut foot_pt = PlainText::new(Vec::with_capacity(8));
         foot_pt.0.write_u64::<LittleEndian>(ct.len() as u64).unwrap();
         assert_eq!(foot_pt.len(), sealed::desc::footer_plain_bytes());
 
         // Append sealed ciphertext length to full ciphertext.
-        ct.append(&mut foot_pt.as_ref().to_sealed_ciphertext(&self.pubkey));
+        ct.append(foot_pt.as_ref().to_sealed_ciphertext(&self.pubkey));
         assert_eq!(ct.len(), pt.len() + sealed::desc::overhead());
 
         // Return complete ciphertext.

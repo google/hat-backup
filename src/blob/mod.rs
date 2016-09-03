@@ -21,7 +21,6 @@ use std::thread;
 
 use backend::StoreBackend;
 use capnp;
-use crypto::CipherText;
 use errors;
 use hash::Hash;
 use hash::tree::HashRef;
@@ -93,21 +92,17 @@ impl<B: StoreBackend> StoreInner<B> {
     }
 
     fn flush(&mut self) {
-        let length = self.blob.upperbound_len();
-        if length == 0 {
-            return;
-        }
+        let ct = match self.blob.to_ciphertext() {
+            None => return,
+            Some(ct) => ct,
+        };
 
         // Replace blob id
         let old_blob_desc = self.reserve_new_blob();
 
-        let mut ct = CipherText::new(Vec::with_capacity(length));
-        self.blob.into_bytes(&mut ct);
-
         self.blob_index.in_air(&old_blob_desc);
-        self.backend
-            .store(&old_blob_desc.name[..], &ct.as_ref().bytes()[..])
-            .expect("Store operation failed");
+        self.backend.store(&old_blob_desc.name[..], &ct)
+                    .expect("Store operation failed");
         self.blob_index.commit_done(&old_blob_desc);
 
         // Go through callbacks
@@ -193,10 +188,9 @@ impl<B: StoreBackend> StoreInner<B> {
                         })
             .unwrap();
 
-        let mut ct = CipherText::new(vec![]);
-        blob.into_bytes(&mut ct);
+        let ct = blob.to_ciphertext().unwrap();
 
-        try!(self.backend.store(name.as_bytes(), &ct.as_ref().bytes()[..]));
+        try!(self.backend.store(name.as_bytes(), &ct));
         Ok(())
     }
 

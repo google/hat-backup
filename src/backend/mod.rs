@@ -16,12 +16,14 @@ mod devnull;
 mod file;
 mod memory;
 
+use crypto::CipherText;
+
 pub use self::devnull::DevNullBackend;
 pub use self::file::FileBackend;
 pub use self::memory::MemoryBackend;
 
 pub trait StoreBackend: Sync + Send + 'static {
-    fn store(&self, name: &[u8], data: &[u8]) -> Result<(), String>;
+    fn store(&self, name: &[u8], data: &CipherText) -> Result<(), String>;
     fn retrieve(&self, name: &[u8]) -> Result<Option<Vec<u8>>, String>;
     fn delete(&self, name: &[u8]) -> Result<(), String>;
     fn flush(&self) -> Result<(), String>;

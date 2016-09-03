@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crypto::CipherText;
 use hash::tree::HashRef;
 use hash::Hash;
 
@@ -61,7 +60,7 @@ fn insert_256_kb_chunks(bench: &mut Bencher) {
     let mut href = dummy_hashref();
     bench.iter(|| {
         if let Err(()) = b.try_append(&chunk[..], &mut href) {
-            b.into_bytes(&mut CipherText::new(vec![]));
+            b.to_ciphertext();
             b.try_append(&chunk[..], &mut href).unwrap();
         }
     });
