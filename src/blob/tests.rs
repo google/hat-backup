@@ -191,12 +191,13 @@ fn blob_identity() {
             n = n + 1;
         }
 
-        let out = b.to_ciphertext().unwrap().to_vec();
-
-        if n == 0 {
-            assert_eq!(0, out.len());
-            return true;
-        }
+        let out = match b.to_ciphertext() {
+            None => {
+                assert_eq!(n, 0);
+                return true;
+            }
+            Some(ct) => ct.to_vec(),
+        };
 
         assert_eq!(max_size, out.len());
 
