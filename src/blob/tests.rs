@@ -14,7 +14,6 @@
 
 use blob::{Blob, BlobError, BlobIndex, BlobStore, ChunkRef, Kind};
 use backend::{MemoryBackend, StoreBackend};
-use crypto::CipherText;
 use hash;
 
 use std::collections::HashSet;
@@ -145,9 +144,7 @@ fn blob_reuse() {
     b.try_append(&[1, 2, 3], &mut c1).unwrap();
     b.try_append(&[4, 5, 6], &mut c2).unwrap();
 
-    let mut ct = CipherText::new(vec![]);
-    b.into_bytes(&mut ct);
-    let out = ct.into_vec();
+    let out = b.to_ciphertext().unwrap().to_vec();
 
     assert_eq!(vec![1, 2, 3],
                Blob::read_chunk(&out, &c1.hash, &c1.persistent_ref).unwrap());
@@ -160,9 +157,7 @@ fn blob_reuse() {
     b.try_append(&[1, 2], &mut c2).unwrap();
     b.try_append(&[1, 2], &mut c3).unwrap();
 
-    ct = CipherText::new(vec![]);
-    b.into_bytes(&mut ct);
-    let out = ct.into_vec();
+    let out = b.to_ciphertext().unwrap().to_vec();
     assert_eq!(vec![1, 2],
                Blob::read_chunk(&out, &c1.hash, &c1.persistent_ref).unwrap());
     assert_eq!(vec![1, 2],
@@ -196,14 +191,13 @@ fn blob_identity() {
             n = n + 1;
         }
 
-        let mut ct = CipherText::new(vec![]);
-        b.into_bytes(&mut ct);
-        let out = ct.into_vec();
-
-        if n == 0 {
-            assert_eq!(0, out.len());
-            return true;
-        }
+        let out = match b.to_ciphertext() {
+            None => {
+                assert_eq!(n, 0);
+                return true;
+            }
+            Some(ct) => ct.to_vec(),
+        };
 
         assert_eq!(max_size, out.len());
 
@@ -242,9 +236,7 @@ fn empty_blocks_blob_ciphertext(blob: &mut Blob, blocksize: usize) -> Vec<u8> {
             Err(_) => break,
         }
     }
-    let mut ct = CipherText::new(vec![]);
-    blob.into_bytes(&mut ct);
-    ct.into_vec()
+    blob.to_ciphertext().unwrap().to_vec()
 }
 
 #[test]

@@ -13,11 +13,12 @@
 // limitations under the License.
 
 use backend::StoreBackend;
+use crypto::CipherText;
 
 pub struct DevNullBackend;
 
 impl StoreBackend for DevNullBackend {
-    fn store(&self, _name: &[u8], _data: &[u8]) -> Result<(), String> {
+    fn store(&self, _name: &[u8], _data: &CipherText) -> Result<(), String> {
         Ok(())
     }
 

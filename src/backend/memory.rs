@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use crypto::CipherText;
 use std::collections::BTreeMap;
 use std::sync::Mutex;
 
@@ -50,7 +51,7 @@ impl MemoryBackend {
 }
 
 impl StoreBackend for MemoryBackend {
-    fn store(&self, name: &[u8], data: &[u8]) -> Result<(), String> {
+    fn store(&self, name: &[u8], data: &CipherText) -> Result<(), String> {
         self.guarded_insert(name.to_vec(), data.to_vec())
     }
 

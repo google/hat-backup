@@ -20,17 +20,19 @@ use hash::tree::HashRef;
 use super::BlobError;
 use super::ChunkRef;
 
+use std::mem;
+
 
 pub struct Blob {
     master_key: crypto::FixedKey,
     chunks: CipherText,
     footer: Vec<u8>,
     overhead: usize,
-    max_size: usize,
+    max_len: usize,
 }
 
 impl Blob {
-    pub fn new(max_size: usize) -> Blob {
+    pub fn new(max_len: usize) -> Blob {
         // TODO(jos): Plug an actual crypto key through somehow.
         let pubkey = crypto::sealed::desc::PublicKey::from_slice(&[215, 136, 80, 128, 158, 109,
                                                                    227, 141, 219, 63, 118, 91,
@@ -49,10 +51,10 @@ impl Blob {
 
         Blob {
             master_key: master_key,
-            chunks: CipherText::new(Vec::with_capacity(max_size)),
-            footer: Vec::with_capacity(max_size / 2),
+            chunks: CipherText::empty(),
+            footer: Vec::with_capacity(max_len / 2),
             overhead: crypto::sealed::desc::overhead(),
-            max_size: max_size,
+            max_len: max_len,
         }
     }
 
@@ -70,22 +72,22 @@ impl Blob {
     }
 
     pub fn try_append(&mut self, chunk: &[u8], mut href: &mut HashRef) -> Result<(), ()> {
-        let mut ct = crypto::RefKey::seal(&mut href, PlainTextRef::new(&chunk));
+        let ct = crypto::RefKey::seal(&mut href, PlainTextRef::new(&chunk));
 
         href.persistent_ref.offset = self.chunks.len();
         let mut href_bytes = href.as_bytes();
         assert!(href_bytes.len() < 255);
 
-        if self.upperbound_len() + 1 + href_bytes.len() + ct.len() >= self.max_size {
+        if self.upperbound_len() + 1 + href_bytes.len() + ct.len() >= self.max_len {
             if self.chunks.len() == 0 {
                 panic!("Can never fit chunk of size {} in blob of size {}",
                        chunk.len(),
-                       self.max_size);
+                       self.max_len);
             }
             return Err(());
         }
 
-        ct.empty_into(&mut self.chunks);
+        self.chunks.append(ct);
 
         // Generate footer entry.
         self.footer.push(href_bytes.len() as u8);
@@ -94,22 +96,24 @@ impl Blob {
         Ok(())
     }
 
-    pub fn into_bytes(&mut self, mut out: &mut CipherText) {
+    pub fn to_ciphertext(&mut self) -> Option<CipherText> {
         if self.chunks.len() == 0 {
-            return;
+            return None;
         }
 
-        let mut footer = self.master_key.seal(PlainTextRef::new(&self.footer[..]));
+        let footer = self.master_key.seal(PlainTextRef::new(&self.footer[..]));
         self.footer.truncate(0);
 
-        assert!(self.chunks.len() + footer.len() <= self.max_size);
-        out.append(&mut self.chunks);
-        out.random_pad_upto(self.max_size - footer.len());
-        out.append(&mut footer);
+        assert!(self.chunks.len() + footer.len() <= self.max_len);
+        let mut out = mem::replace(&mut self.chunks, CipherText::empty());
+        out.random_pad_upto(self.max_len - footer.len());
+        out.append(footer);
 
         // Everything has been reset. We are ready to go again.
         assert_eq!(0, self.chunks.len());
         assert_eq!(0, self.footer.len());
+
+        Some(out)
     }
 
     pub fn refs_from_bytes(&self, bytes: &[u8]) -> Result<Vec<HashRef>, BlobError> {
