@@ -21,7 +21,7 @@ use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 
 pub struct PlainText(Vec<u8>);
 pub struct PlainTextRef<'a>(&'a [u8]);
-pub struct CipherText{
+pub struct CipherText {
     chunks: Vec<Vec<u8>>,
     len: usize,
 }
@@ -111,11 +111,17 @@ impl PlainText {
 
 impl CipherText {
     pub fn empty() -> CipherText {
-        CipherText{chunks: vec![], len: 0}
+        CipherText {
+            chunks: vec![],
+            len: 0,
+        }
     }
     pub fn new(ct: Vec<u8>) -> CipherText {
         let len = ct.len();
-        CipherText{chunks: vec![ct], len: len}
+        CipherText {
+            chunks: vec![ct],
+            len: len,
+        }
     }
     pub fn append(&mut self, mut other: CipherText) {
         self.len += other.len();
@@ -142,7 +148,7 @@ impl CipherText {
         }
         out
     }
-    
+
     pub fn slices(&self) -> Vec<&[u8]> {
         self.chunks.iter().map(|x| &x[..]).collect()
     }
