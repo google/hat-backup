@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License
 
-use blob::{Blob, BlobError, BlobIndex, BlobStore, ChunkRef, Kind};
+use blob::{Blob, BlobError, BlobIndex, BlobStore, ChunkRef, Key, Kind};
 use backend::{MemoryBackend, StoreBackend};
 use hash;
 
@@ -215,6 +215,39 @@ fn blob_identity() {
         true
     }
     quickcheck::quickcheck(prop as fn(Vec<Vec<u8>>) -> bool);
+}
+
+
+#[test]
+fn random_input_fails() {
+    use sodiumoxide::crypto::secretbox::xsalsa20poly1305;
+
+    fn prop(data: Vec<u8>, hash: Vec<u8>) -> bool {
+        let blob = Blob::new(128000);
+        if let Ok(_) = blob.refs_from_bytes(&data[..]) {
+            return false;
+        }
+        let key = vec![0; 32];
+        let hash = hash::Hash { bytes: hash };
+        let mut cref = ChunkRef {
+            blob_id: Vec::new(),
+            offset: 0,
+            length: 0,
+            kind: Kind::TreeLeaf,
+            packing: None,
+            key: Some(Key::XSalsa20Poly1305(xsalsa20poly1305::Key::from_slice(&key[..]).unwrap())),
+        };
+
+        for l in 0..data.len() {
+            cref.length = l;
+            if let Ok(_) = Blob::read_chunk(&data[..], &hash, &cref) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+    quickcheck::quickcheck(prop as fn(Vec<u8>, Vec<u8>) -> bool);
 }
 
 fn empty_blocks_blob_ciphertext(blob: &mut Blob, blocksize: usize) -> Vec<u8> {
