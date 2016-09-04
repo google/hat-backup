@@ -276,10 +276,21 @@ impl<B: HashTreeBackend> SimpleHashTreeWriter<B> {
 
 
 pub trait Visitor<E> {
-    fn leaf(&mut self, &HashRef, &mut E) -> bool {
+    fn branch_enter(&mut self, _href: &HashRef, _childs: &Vec<HashRef>, _out: &mut E) -> bool {
         true
     }
-    fn leaf_chunk(&mut self, Vec<u8>, &HashRef, &mut E) {}
+    fn branch_leave(&mut self, _href: &HashRef, _height: usize, _out: &mut E) -> bool {
+        // Do nothing by default.
+        false
+    }
+
+    fn leaf_enter(&mut self, _href: &HashRef, _out: &mut E) -> bool {
+        true
+    }
+    fn leaf_leave(&mut self, _chunk: Vec<u8>, _href: &HashRef, _out: &mut E) -> bool {
+        // Do nothing by default.
+        false
+    }
 }
 
 /// A structure for reading hash-trees written with `SimpleHashTreeWriter`.
@@ -316,9 +327,15 @@ pub enum ReaderResult<B> {
     Tree(SimpleHashTreeReader<B>),
 }
 
+pub enum StackItem {
+    Enter(HashRef),
+    LeaveBranch(HashRef),
+}
+
 pub struct Walker<B> {
     backend: B,
-    stack: Vec<HashRef>,
+    height: usize,
+    stack: Vec<StackItem>,
 }
 
 impl<B> Walker<B>
@@ -340,10 +357,11 @@ impl<B> Walker<B>
             .expect("Could not find tree root hash");
         Ok(Some(Walker {
             backend: backend,
-            stack: vec![HashRef {
+            height: 0,
+            stack: vec![StackItem::Enter(HashRef {
                             hash: root_hash,
                             persistent_ref: pref,
-                        }],
+                        })],
         }))
     }
     pub fn resume<V, E>(&mut self, visitor: &mut V, mut out: &mut E) -> Result<(), B::Err>
@@ -353,30 +371,45 @@ impl<B> Walker<B>
         let mut cycle_start = None;
 
         while !self.stack.is_empty() {
-            let child = self.stack.pop().expect("!is_empty()");
+            let node = match self.stack.pop().expect("!is_empty()") {
+                StackItem::Enter(href) => href,
+                StackItem::LeaveBranch(href) => {
+                    self.height += 1;
+                    if visitor.branch_leave(&href, self.height, &mut out) {
+                        return Ok(());
+                    }
+                    continue;
+                }
+            };
 
             match cycle_start {
-                None => cycle_start = Some(child.hash.clone()),
-                Some(ref hash) => assert!(hash != &child.hash),
+                None => cycle_start = Some(node.hash.clone()),
+                Some(ref hash) => assert!(hash != &node.hash),
             }
             let fetch_chunk = |backend: &B, child: &HashRef| {
                 backend.fetch_chunk(&child.hash, Some(&child.persistent_ref))
                     .map(|opt| opt.expect("Invalid hash ref"))
             };
 
-            match &child.persistent_ref.kind {
+            match &node.persistent_ref.kind {
                 &Kind::TreeLeaf => {
-                    if visitor.leaf(&child, &mut out) {
-                        let data = try!(fetch_chunk(&self.backend, &child));
-                        visitor.leaf_chunk(data, &child, &mut out);
-                        return Ok(());
+                    // Reset height.
+                    self.height = 0;
+                    if visitor.leaf_enter(&node, &mut out) {
+                        let data = try!(fetch_chunk(&self.backend, &node));
+                        if visitor.leaf_leave(data, &node, &mut out) {
+                            return Ok(());
+                        }
                     }
                 }
                 &Kind::TreeBranch => {
-                    let data = try!(fetch_chunk(&self.backend, &child));
+                    let data = try!(fetch_chunk(&self.backend, &node));
                     let mut new_childs = hash_refs_from_bytes(&data[..]).unwrap();
-                    new_childs.reverse();
-                    self.stack.append(&mut new_childs);
+                    if visitor.branch_enter(&node, &new_childs, &mut out) {
+                        self.stack.push(StackItem::LeaveBranch(node));
+                        new_childs.reverse();
+                        self.stack.extend(new_childs.into_iter().map(|x| StackItem::Enter(x)));
+                    }
                 }
             }
         }
@@ -409,8 +442,9 @@ impl<B> LeafIterator<B>
 pub struct LeafVisitor;
 
 impl Visitor<VecDeque<Vec<u8>>> for LeafVisitor {
-    fn leaf_chunk(&mut self, leaf: Vec<u8>, _href: &HashRef, out: &mut VecDeque<Vec<u8>>) {
+    fn leaf_leave(&mut self, leaf: Vec<u8>, _href: &HashRef, out: &mut VecDeque<Vec<u8>>) -> bool {
         out.push_back(leaf);
+        true
     }
 }
 
@@ -520,35 +554,5 @@ impl<B: HashTreeBackend> SimpleHashTreeReader<B> {
         assert!(!hashes.is_empty());
 
         Ok((hashes, level))
-    }
-
-    fn extract(&mut self) -> Result<Option<Vec<u8>>, B::Err> {
-        // Basic cycle detection to spot some programming mistakes.
-        let mut cycle_start = None;
-
-        while !self.stack.is_empty() {
-            let child = self.stack.pop().expect("!is_empty()");
-
-            match cycle_start {
-                None => cycle_start = Some(child.hash.clone()),
-                Some(ref hash) => assert!(hash != &child.hash),
-            }
-
-            let kind = child.persistent_ref.kind.clone();
-            let data = try!(self.backend
-                    .fetch_chunk(&child.hash, Some(&child.persistent_ref)))
-                .expect("Invalid hash ref");
-
-            match kind {
-                Kind::TreeLeaf => return Ok(Some(data)),
-                Kind::TreeBranch => {
-                    let mut new_childs = hash_refs_from_bytes(&data[..]).unwrap();
-                    new_childs.reverse();
-                    self.stack.extend(new_childs.into_iter());
-                }
-            }
-        }
-
-        Ok(None)
     }
 }
