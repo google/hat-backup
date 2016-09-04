@@ -87,7 +87,7 @@ impl<B: StoreBackend> Family<B> {
     }
 
   pub fn write_file_chunks<HTB: hash::tree::HashTreeBackend<Err=key::MsgError>>(
-    &self, fd: &mut fs::File, tree: hash::tree::ReaderResult<HTB>)
+    &self, fd: &mut fs::File, tree: hash::tree::LeafIterator<HTB>)
   {
         for chunk in tree {
             try_a_few_times_then_panic(|| fd.write_all(&chunk[..]).is_ok(),
@@ -143,7 +143,7 @@ impl<B: StoreBackend> Family<B> {
          backend: HTB)
          -> Result<Vec<(key::Entry, hash::Hash, blob::ChunkRef)>, HatError> {
         let mut out = Vec::new();
-        let it = try!(hash::tree::SimpleHashTreeReader::open(backend, dir_hash, Some(dir_ref)))
+        let it = try!(hash::tree::LeafIterator::new(backend, &dir_hash, Some(dir_ref)))
             .expect("unable to open dir");
 
         for chunk in it {

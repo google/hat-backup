@@ -146,7 +146,7 @@ struct SnapshotLister<'a, B: StoreBackend> {
 
 impl<'a, B: StoreBackend> SnapshotLister<'a, B> {
     fn fetch(&mut self, hash: &hash::Hash, chunk: blob::ChunkRef) -> Result<(), HatError> {
-        let res = try!(self.family.fetch_dir_data(hash, chunk, self.backend.clone()));
+        let res = try!(self.family.fetch_dir_data(&hash, chunk, self.backend.clone()));
         for (entry, hash, pref) in res.into_iter().rev() {
             if entry.data_hash.is_some() {
                 self.queue.push((hash, None));
@@ -451,7 +451,6 @@ impl<B: StoreBackend> HatRc<B> {
              -> Result<(Option<Vec<hash::Hash>>, i64), HatError> {
             match try!(hash::tree::SimpleHashTreeReader::open(backend, &hash, Some(pref)))
                 .unwrap() {
-                hash::tree::ReaderResult::Empty |
                 hash::tree::ReaderResult::SingleBlock(..) => Ok((None, 0)),
                 hash::tree::ReaderResult::Tree(mut reader) => {
                     let (childs, level) = try!(reader.list_entries(out));
@@ -460,7 +459,7 @@ impl<B: StoreBackend> HatRc<B> {
             }
         }
         for (file, hash, pref) in
-            try!(family.fetch_dir_data(dir_hash, dir_ref.clone(), self.hash_backend())) {
+            try!(family.fetch_dir_data(&dir_hash, dir_ref.clone(), self.hash_backend())) {
             let (childs, level) = match file.data_hash {
                 Some(..) => {
                     // Entry is a data leaf. Read the hash tree.
@@ -738,7 +737,7 @@ impl<B: StoreBackend> HatRc<B> {
                         -> Result<(), HatError> {
         fs::create_dir_all(&output).unwrap();
         for (entry, hash, pref) in
-            try!(family.fetch_dir_data(dir_hash, dir_ref, self.hash_backend())) {
+            try!(family.fetch_dir_data(&dir_hash, dir_ref, self.hash_backend())) {
             assert!(entry.name.len() > 0);
 
             output.push(str::from_utf8(&entry.name[..]).unwrap());
@@ -746,9 +745,8 @@ impl<B: StoreBackend> HatRc<B> {
 
             if entry.data_hash.is_some() {
                 let mut fd = fs::File::create(&output).unwrap();
-                let tree_opt = try!(hash::tree::SimpleHashTreeReader::open(self.hash_backend(),
-                                                                           &hash,
-                                                                           Some(pref)));
+                let tree_opt =
+                    try!(hash::tree::LeafIterator::new(self.hash_backend(), &hash, Some(pref)));
                 if let Some(tree) = tree_opt {
                     family.write_file_chunks(&mut fd, tree);
                 }

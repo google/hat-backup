@@ -21,7 +21,7 @@ use std::borrow::Cow;
 use backend::StoreBackend;
 use blob;
 use hash;
-use hash::tree::{ReaderResult, SimpleHashTreeReader, SimpleHashTreeWriter};
+use hash::tree::{LeafIterator, SimpleHashTreeWriter};
 
 use util::{FnBox, MsgHandler, Process};
 use errors::{DieselError, RetryError};
@@ -72,9 +72,9 @@ pub struct HashTreeReaderInitializer<B> {
 }
 
 impl<B: StoreBackend> HashTreeReaderInitializer<B> {
-    pub fn init(self) -> Result<Option<ReaderResult<HashStoreBackend<B>>>, MsgError> {
+    pub fn init(self) -> Result<Option<LeafIterator<HashStoreBackend<B>>>, MsgError> {
         let backend = HashStoreBackend::new(self.hash_index, self.blob_store);
-        SimpleHashTreeReader::open(backend, &self.hash, self.persistent_ref)
+        LeafIterator::new(backend, &self.hash, self.persistent_ref)
     }
 }
 

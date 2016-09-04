@@ -17,6 +17,7 @@
 //! This module implements two structures for handling hash trees: A streaming hash-tree writer, and
 //! a streaming hash-tree reader.
 
+use std::collections::VecDeque;
 use std::fmt;
 
 use capnp;
@@ -77,7 +78,7 @@ impl HashRef {
 pub trait HashTreeBackend: Clone {
     type Err: fmt::Debug;
 
-    fn fetch_chunk(&self, &Hash, Option<ChunkRef>) -> Result<Option<Vec<u8>>, Self::Err>;
+    fn fetch_chunk(&self, &Hash, Option<&ChunkRef>) -> Result<Option<Vec<u8>>, Self::Err>;
     fn fetch_childs(&self, &Hash) -> Option<Vec<i64>>;
     fn fetch_persistent_ref(&self, &Hash) -> Option<ChunkRef>;
     fn insert_chunk(&self,
@@ -274,6 +275,13 @@ impl<B: HashTreeBackend> SimpleHashTreeWriter<B> {
 }
 
 
+pub trait Visitor<E> {
+    fn leaf(&mut self, &HashRef, &mut E) -> bool {
+        true
+    }
+    fn leaf_chunk(&mut self, Vec<u8>, &HashRef, &mut E) {}
+}
+
 /// A structure for reading hash-trees written with `SimpleHashTreeWriter`.
 ///
 /// The hash-tree is "opened" as read-only and is streamed from first to last data-block. The data
@@ -301,14 +309,129 @@ pub struct SimpleHashTreeReader<B> {
 /// We wrap the output of `SimpleHashTreeReader::new(...)` in a `ReaderResult` to fast-path the
 /// single-block case (alternatively we could build a one-block iterator).
 pub enum ReaderResult<B> {
-    Empty,
-
     /// The tree consists of just a single node and its data-chunk is given here.
     SingleBlock(Vec<u8>),
 
     /// The tree has more than one node, so a data-chunk iterator is returned.
     Tree(SimpleHashTreeReader<B>),
 }
+
+pub struct Walker<B> {
+    backend: B,
+    stack: Vec<HashRef>,
+}
+
+impl<B> Walker<B>
+    where B: HashTreeBackend
+{
+    pub fn new(backend: B,
+               root_hash: Hash,
+               root_ref: Option<ChunkRef>)
+               -> Result<Option<Walker<B>>, B::Err> {
+        if root_hash.bytes.is_empty() {
+            return Ok(None);
+        }
+
+        let pref = if let None = root_ref {
+                backend.fetch_persistent_ref(&root_hash)
+            } else {
+                root_ref
+            }
+            .expect("Could not find tree root hash");
+        Ok(Some(Walker {
+            backend: backend,
+            stack: vec![HashRef {
+                            hash: root_hash,
+                            persistent_ref: pref,
+                        }],
+        }))
+    }
+    pub fn resume<V, E>(&mut self, visitor: &mut V, mut out: &mut E) -> Result<(), B::Err>
+        where V: Visitor<E>
+    {
+        // Basic cycle detection to spot some programming mistakes.
+        let mut cycle_start = None;
+
+        while !self.stack.is_empty() {
+            let child = self.stack.pop().expect("!is_empty()");
+
+            match cycle_start {
+                None => cycle_start = Some(child.hash.clone()),
+                Some(ref hash) => assert!(hash != &child.hash),
+            }
+            let fetch_chunk = |backend: &B, child: &HashRef| {
+                backend.fetch_chunk(&child.hash, Some(&child.persistent_ref))
+                    .map(|opt| opt.expect("Invalid hash ref"))
+            };
+
+            match &child.persistent_ref.kind {
+                &Kind::TreeLeaf => {
+                    if visitor.leaf(&child, &mut out) {
+                        let data = try!(fetch_chunk(&self.backend, &child));
+                        visitor.leaf_chunk(data, &child, &mut out);
+                        return Ok(());
+                    }
+                }
+                &Kind::TreeBranch => {
+                    let data = try!(fetch_chunk(&self.backend, &child));
+                    let mut new_childs = hash_refs_from_bytes(&data[..]).unwrap();
+                    new_childs.reverse();
+                    self.stack.append(&mut new_childs);
+                }
+            }
+        }
+
+        Ok(())
+    }
+}
+
+pub struct LeafIterator<B> {
+    walker: Walker<B>,
+    leafs: VecDeque<Vec<u8>>,
+}
+
+impl<B> LeafIterator<B>
+    where B: HashTreeBackend
+{
+    pub fn new(backend: B,
+               root_hash: &Hash,
+               root_ref: Option<ChunkRef>)
+               -> Result<Option<LeafIterator<B>>, B::Err> {
+        Ok(try!(Walker::new(backend, root_hash.clone(), root_ref)).map(|w| {
+            LeafIterator {
+                walker: w,
+                leafs: VecDeque::new(),
+            }
+        }))
+    }
+}
+
+pub struct LeafVisitor;
+
+impl Visitor<VecDeque<Vec<u8>>> for LeafVisitor {
+    fn leaf_chunk(&mut self, leaf: Vec<u8>, _href: &HashRef, out: &mut VecDeque<Vec<u8>>) {
+        out.push_back(leaf);
+    }
+}
+
+impl<B: HashTreeBackend> Iterator for LeafIterator<B> {
+    type Item = Vec<u8>;
+
+    fn next(&mut self) -> Option<Vec<u8>> {
+        if let Some(l) = self.leafs.pop_front() {
+            return Some(l);
+        }
+
+        let mut visitor = LeafVisitor;
+        self.walker.resume(&mut visitor, &mut self.leafs).unwrap();
+        if self.leafs.len() == 0 {
+            None
+        } else {
+            self.next()
+        }
+    }
+}
+
 
 impl<B: HashTreeBackend> SimpleHashTreeReader<B> {
     /// Creates a new `HashTreeReader` that reads through the `backend` the blocks of the hash tree
@@ -329,7 +452,7 @@ impl<B: HashTreeBackend> SimpleHashTreeReader<B> {
             .expect("Could not find tree root hash");
         let kind = pref.kind.clone();
 
-        let data = try!(backend.fetch_chunk(root_hash, Some(pref)))
+        let data = try!(backend.fetch_chunk(&root_hash, Some(&pref)))
             .expect("Could not find tree root hash.");
         match kind {
             // This is a raw data block.
@@ -368,7 +491,7 @@ impl<B: HashTreeBackend> SimpleHashTreeReader<B> {
                 }
                 Kind::TreeBranch => {
                     let data = try!(self.backend
-                            .fetch_chunk(&hash, Some(child.persistent_ref.clone())))
+                            .fetch_chunk(&hash, Some(&child.persistent_ref)))
                         .expect("Invalid hash ref");
 
                     let mut new_childs = hash_refs_from_bytes(&data[..]).unwrap();
@@ -413,7 +536,7 @@ impl<B: HashTreeBackend> SimpleHashTreeReader<B> {
 
             let kind = child.persistent_ref.kind.clone();
             let data = try!(self.backend
-                    .fetch_chunk(&child.hash, Some(child.persistent_ref)))
+                    .fetch_chunk(&child.hash, Some(&child.persistent_ref)))
                 .expect("Invalid hash ref");
 
             match kind {
@@ -427,25 +550,5 @@ impl<B: HashTreeBackend> SimpleHashTreeReader<B> {
         }
 
         Ok(None)
-    }
-}
-
-
-impl<B: HashTreeBackend> Iterator for ReaderResult<B> {
-    type Item = Vec<u8>;
-
-    /// Read the next block of the hash-tree.
-    /// This operation can be expensive, as it may require fetching a file through the backend.
-    fn next(&mut self) -> Option<Vec<u8>> {
-        let (force_empty, res) = match *self {
-            ReaderResult::Tree(ref mut it) => (false, it.extract().unwrap()),
-            ReaderResult::SingleBlock(ref b) => (true, Some(b.clone())),
-            ReaderResult::Empty => (true, None),
-        };
-        if force_empty || res.is_none() {
-            *self = ReaderResult::Empty;
-        }
-
-        res
     }
 }

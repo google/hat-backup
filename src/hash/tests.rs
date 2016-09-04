@@ -48,10 +48,10 @@ impl HashTreeBackend for MemoryBackend {
 
     fn fetch_chunk(&self,
                    hash: &Hash,
-                   ref_opt: Option<ChunkRef>)
+                   ref_opt: Option<&ChunkRef>)
                    -> Result<Option<Vec<u8>>, Self::Err> {
         let hash = match ref_opt {
-            Some(b) => Cow::Owned(Hash { bytes: b.blob_id }),  // blob names are chunk hashes.
+            Some(ref b) => Cow::Owned(Hash { bytes: b.blob_id.clone() }), // blob name is chunk hash
             None => Cow::Borrowed(hash),
         };
         let guarded_chunks = self.chunks.lock().unwrap();
@@ -129,7 +129,7 @@ fn identity_many_small_blocks() {
 
         let (hash, hash_ref) = ht.hash().unwrap();
 
-        let mut tree_it = SimpleHashTreeReader::open(backend, &hash, Some(hash_ref))
+        let mut tree_it = LeafIterator::new(backend, &hash, Some(hash_ref))
             .unwrap()
             .expect("tree not found");
 
@@ -164,7 +164,7 @@ fn identity_empty() {
 
     let (hash, hash_ref) = ht.hash().unwrap();
 
-    let mut it = SimpleHashTreeReader::open(backend, &hash, Some(hash_ref))
+    let mut it = LeafIterator::new(backend, &hash, Some(hash_ref))
         .unwrap()
         .expect("tree not found");
 
@@ -183,7 +183,7 @@ fn identity_append1() {
 
     let (hash, hash_ref) = ht.hash().unwrap();
 
-    let mut it = SimpleHashTreeReader::open(backend, &hash, Some(hash_ref))
+    let mut it = LeafIterator::new(backend, &hash, Some(hash_ref))
         .unwrap()
         .expect("tree not found");
     assert_eq!(Some(block), it.next());
@@ -204,7 +204,7 @@ fn identity_append5() {
 
     let (hash, hash_ref) = ht.hash().unwrap();
 
-    let mut it = SimpleHashTreeReader::open(backend.clone(), &hash, Some(hash_ref))
+    let mut it = LeafIterator::new(backend.clone(), &hash, Some(hash_ref))
         .unwrap()
         .expect("tree not found");
 
@@ -235,7 +235,7 @@ fn identity_implicit_flush() {
 
     let (hash, hash_ref) = ht.hash().unwrap();
 
-    let it = SimpleHashTreeReader::open(backend, &hash, Some(hash_ref))
+    let it = LeafIterator::new(backend, &hash, Some(hash_ref))
         .unwrap()
         .expect("tree not found");
 
@@ -263,7 +263,7 @@ fn identity_1_short_of_flush() {
         assert!(backend.saw_chunk(&vec![i]));
     }
 
-    let it = SimpleHashTreeReader::open(backend, &hash, Some(hash_ref))
+    let it = LeafIterator::new(backend, &hash, Some(hash_ref))
         .unwrap()
         .expect("tree not found");
 

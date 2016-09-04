@@ -66,11 +66,11 @@ impl<B: StoreBackend> HashTreeBackend for HashStoreBackend<B> {
 
     fn fetch_chunk(&self,
                    hash: &hash::Hash,
-                   persistent_ref: Option<blob::ChunkRef>)
+                   persistent_ref: Option<&blob::ChunkRef>)
                    -> Result<Option<Vec<u8>>, MsgError> {
         assert!(!hash.bytes.is_empty());
 
-        let data_opt = if let Some(r) = persistent_ref {
+        let data_opt = if let Some(ref r) = persistent_ref {
             try!(self.fetch_chunk_from_persistent_ref(&hash, &r))
         } else {
             try!(self.fetch_chunk_from_hash(&hash))
