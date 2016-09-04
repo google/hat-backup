@@ -275,19 +275,25 @@ impl<B: HashTreeBackend> SimpleHashTreeWriter<B> {
 }
 
 
-pub trait Visitor<E> {
-    fn branch_enter(&mut self, _href: &HashRef, _childs: &Vec<HashRef>, _out: &mut E) -> bool {
+pub trait Visitor {
+    type State;
+
+    fn branch_enter(&mut self,
+                    _href: &HashRef,
+                    _childs: &Vec<HashRef>,
+                    _s: &mut Self::State)
+                    -> bool {
         true
     }
-    fn branch_leave(&mut self, _href: &HashRef, _height: usize, _out: &mut E) -> bool {
+    fn branch_leave(&mut self, _href: &HashRef, _height: usize, _s: &mut Self::State) -> bool {
         // Do nothing by default.
         false
     }
 
-    fn leaf_enter(&mut self, _href: &HashRef, _out: &mut E) -> bool {
+    fn leaf_enter(&mut self, _href: &HashRef, _s: &mut Self::State) -> bool {
         true
     }
-    fn leaf_leave(&mut self, _chunk: Vec<u8>, _href: &HashRef, _out: &mut E) -> bool {
+    fn leaf_leave(&mut self, _chunk: Vec<u8>, _href: &HashRef, _s: &mut Self::State) -> bool {
         // Do nothing by default.
         false
     }
@@ -364,8 +370,8 @@ impl<B> Walker<B>
                         })],
         }))
     }
-    pub fn resume<V, E>(&mut self, visitor: &mut V, mut out: &mut E) -> Result<(), B::Err>
-        where V: Visitor<E>
+    pub fn resume<V>(&mut self, visitor: &mut V, mut state: &mut V::State) -> Result<(), B::Err>
+        where V: Visitor
     {
         // Basic cycle detection to spot some programming mistakes.
         let mut cycle_start = None;
@@ -375,7 +381,7 @@ impl<B> Walker<B>
                 StackItem::Enter(href) => href,
                 StackItem::LeaveBranch(href) => {
                     self.height += 1;
-                    if visitor.branch_leave(&href, self.height, &mut out) {
+                    if visitor.branch_leave(&href, self.height, &mut state) {
                         return Ok(());
                     }
                     continue;
@@ -395,9 +401,9 @@ impl<B> Walker<B>
                 &Kind::TreeLeaf => {
                     // Reset height.
                     self.height = 0;
-                    if visitor.leaf_enter(&node, &mut out) {
+                    if visitor.leaf_enter(&node, &mut state) {
                         let data = try!(fetch_chunk(&self.backend, &node));
-                        if visitor.leaf_leave(data, &node, &mut out) {
+                        if visitor.leaf_leave(data, &node, &mut state) {
                             return Ok(());
                         }
                     }
@@ -405,7 +411,7 @@ impl<B> Walker<B>
                 &Kind::TreeBranch => {
                     let data = try!(fetch_chunk(&self.backend, &node));
                     let mut new_childs = hash_refs_from_bytes(&data[..]).unwrap();
-                    if visitor.branch_enter(&node, &new_childs, &mut out) {
+                    if visitor.branch_enter(&node, &new_childs, &mut state) {
                         self.stack.push(StackItem::LeaveBranch(node));
                         new_childs.reverse();
                         self.stack.extend(new_childs.into_iter().map(|x| StackItem::Enter(x)));
@@ -441,8 +447,10 @@ impl<B> LeafIterator<B>
 
 pub struct LeafVisitor;
 
-impl Visitor<VecDeque<Vec<u8>>> for LeafVisitor {
-    fn leaf_leave(&mut self, leaf: Vec<u8>, _href: &HashRef, out: &mut VecDeque<Vec<u8>>) -> bool {
+impl Visitor for LeafVisitor {
+    type State = VecDeque<Vec<u8>>;
+
+    fn leaf_leave(&mut self, leaf: Vec<u8>, _href: &HashRef, out: &mut Self::State) -> bool {
         out.push_back(leaf);
         true
     }
@@ -492,27 +500,22 @@ pub struct NodeVisitor {
     stack: Vec<Vec<HashRef>>,
 }
 
-impl Visitor<VecDeque<(HashRef, usize, Option<Vec<HashRef>>)>> for NodeVisitor {
-    fn branch_leave(&mut self,
-                    href: &HashRef,
-                    height: usize,
-                    out: &mut VecDeque<(HashRef, usize, Option<Vec<HashRef>>)>)
-                    -> bool {
+impl Visitor for NodeVisitor {
+    type State = VecDeque<(HashRef, usize, Option<Vec<HashRef>>)>;
+
+    fn branch_leave(&mut self, href: &HashRef, height: usize, out: &mut Self::State) -> bool {
         out.push_back((href.clone(), height, self.stack.pop()));
         true
     }
     fn branch_enter(&mut self,
                     _href: &HashRef,
                     childs: &Vec<HashRef>,
-                    _out: &mut VecDeque<(HashRef, usize, Option<Vec<HashRef>>)>)
+                    _out: &mut Self::State)
                     -> bool {
         self.stack.push(childs.clone());
         true
     }
-    fn leaf_enter(&mut self,
-                  href: &HashRef,
-                  out: &mut VecDeque<(HashRef, usize, Option<Vec<HashRef>>)>)
-                  -> bool {
+    fn leaf_enter(&mut self, href: &HashRef, out: &mut Self::State) -> bool {
         // Do not proceed to fetch leaf data. We just need the metadata.
         out.push_back((href.clone(), 0, None));
         false
