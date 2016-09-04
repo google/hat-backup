@@ -456,13 +456,66 @@ impl<B: HashTreeBackend> Iterator for LeafIterator<B> {
             return Some(l);
         }
 
-        let mut visitor = LeafVisitor;
-        self.walker.resume(&mut visitor, &mut self.leafs).unwrap();
+        self.walker.resume(&mut LeafVisitor, &mut self.leafs).unwrap();
         if self.leafs.len() == 0 {
             None
         } else {
             self.next()
         }
+    }
+}
+
+pub struct NodeIterator<B> {
+    walker: Walker<B>,
+    nodes: VecDeque<(HashRef, usize, Option<Vec<HashRef>>)>,
+    visitor: NodeVisitor,
+}
+
+impl<B: HashTreeBackend> Iterator for NodeIterator<B> {
+    type Item = (HashRef, usize, Option<Vec<HashRef>>);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if let Some(n) = self.nodes.pop_front() {
+            return Some(n);
+        }
+
+        self.walker.resume(&mut self.visitor, &mut self.nodes).unwrap();
+        if self.nodes.len() == 0 {
+            None
+        } else {
+            self.next()
+        }
+    }
+}
+
+pub struct NodeVisitor {
+    stack: Vec<Vec<HashRef>>,
+}
+
+impl Visitor<VecDeque<(HashRef, usize, Option<Vec<HashRef>>)>> for NodeVisitor {
+    fn branch_leave(&mut self,
+                    href: &HashRef,
+                    height: usize,
+                    out: &mut VecDeque<(HashRef, usize, Option<Vec<HashRef>>)>)
+                    -> bool {
+        out.push_back((href.clone(), height, self.stack.pop()));
+        true
+    }
+    fn branch_enter(&mut self,
+                    _href: &HashRef,
+                    childs: &Vec<HashRef>,
+                    _out: &mut VecDeque<(HashRef, usize, Option<Vec<HashRef>>)>)
+                    -> bool {
+        self.stack.push(childs.clone());
+        true
+    }
+    fn leaf_enter(&mut self,
+                  href: &HashRef,
+                  out: &mut VecDeque<(HashRef, usize, Option<Vec<HashRef>>)>)
+                  -> bool {
+        // Do not proceed to fetch leaf data. We just need the metadata.
+        out.push_back((href.clone(), 0, None));
+        false
     }
 }
 
