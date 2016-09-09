@@ -12,14 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::sync::Arc;
 
 use backend::StoreBackend;
 use blob;
 use errors::RetryError;
 use hash;
-use key::MsgError;
 use hash::tree::HashTreeBackend;
+use key::MsgError;
+use std::sync::Arc;
 
 pub struct HashStoreBackend<B> {
     hash_index: Arc<hash::HashIndex>,

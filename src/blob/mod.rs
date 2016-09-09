@@ -14,16 +14,16 @@
 
 //! Combines data chunks into larger blobs to be stored externally.
 
-use std::borrow::Cow;
-use std::mem;
-use std::sync::{Arc, Mutex, MutexGuard};
-use std::thread;
 
 use backend::StoreBackend;
 use capnp;
 use errors;
 use hash::Hash;
 use hash::tree::HashRef;
+use std::borrow::Cow;
+use std::mem;
+use std::sync::{Arc, Mutex, MutexGuard};
+use std::thread;
 use tags;
 use util::FnBox;
 
@@ -39,8 +39,8 @@ pub mod tests;
 mod benchmarks;
 
 
-pub use self::chunk::{ChunkRef, Key, Kind, Packing};
 pub use self::blob::Blob;
+pub use self::chunk::{ChunkRef, Key, Kind, Packing};
 pub use self::index::{BlobDesc, BlobIndex};
 
 

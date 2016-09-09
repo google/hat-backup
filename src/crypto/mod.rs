@@ -12,12 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use errors::CryptoError;
-use sodiumoxide::crypto::stream;
-use hash::Hash;
-use hash::tree::HashRef;
 use blob::{ChunkRef, Key};
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
+use errors::CryptoError;
+use hash::Hash;
+use hash::tree::HashRef;
+use sodiumoxide::crypto::stream;
 
 pub struct PlainText(Vec<u8>);
 pub struct PlainTextRef<'a>(&'a [u8]);

@@ -12,17 +12,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use hash::tree::*;
-
-use std::sync::{Arc, Mutex};
 
 use blob::{ChunkRef, Kind};
 use hash::Hash;
+use hash::tree::*;
 use key;
+use quickcheck;
 
 use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet};
-use quickcheck;
+
+use std::sync::{Arc, Mutex};
 
 #[derive(Clone)]
 pub struct MemoryBackend {

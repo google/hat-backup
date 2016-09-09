@@ -12,10 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use hash::tree::HashRef;
-use hash::Hash;
 
 use blob::{Blob, ChunkRef, Kind};
+use hash::Hash;
+use hash::tree::HashRef;
 
 use test::Bencher;
 

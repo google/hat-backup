@@ -12,8 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use time::SteadyTime;
 use time::Duration;
+use time::SteadyTime;
 
 
 pub struct PeriodicTimer {

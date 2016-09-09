@@ -14,19 +14,19 @@
 
 //! Local state for external blobs and their states.
 
-use std::sync::{Mutex, MutexGuard};
 
 use diesel;
 use diesel::prelude::*;
 use diesel::sqlite::SqliteConnection;
 
-use sodiumoxide::randombytes::randombytes;
-
 use errors::DieselError;
-use tags;
-use util;
+
+use sodiumoxide::randombytes::randombytes;
+use std::sync::{Mutex, MutexGuard};
 
 use super::schema;
+use tags;
+use util;
 
 
 #[derive(Clone, Debug, Default)]

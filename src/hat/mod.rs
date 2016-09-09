@@ -12,24 +12,24 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::fs;
-use std::path::PathBuf;
-use std::str;
-use std::sync::{Arc, mpsc};
-use std::thread;
-use capnp;
-use void::Void;
 
 use backend::StoreBackend;
 use blob;
+use capnp;
 use errors::HatError;
 use gc::{self, Gc, GcRc};
 use hash;
 use key;
 use root_capnp;
 use snapshot;
+use std::fs;
+use std::path::PathBuf;
+use std::str;
+use std::sync::{Arc, mpsc};
+use std::thread;
 use tags;
 use util::Process;
+use void::Void;
 
 mod family;
 mod insert_path_handler;

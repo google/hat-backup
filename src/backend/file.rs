@@ -12,15 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+
+use backend::StoreBackend;
+use crypto::CipherText;
 use rustc_serialize::hex::ToHex;
 use std::collections::BTreeMap;
 use std::fs;
 use std::io::{Read, Write};
 use std::path::PathBuf;
 use std::sync::Mutex;
-
-use backend::StoreBackend;
-use crypto::CipherText;
 
 pub struct FileBackend {
     root: PathBuf,

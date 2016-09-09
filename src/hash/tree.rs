@@ -17,17 +17,17 @@
 //! This module implements two structures for handling hash trees: A streaming hash-tree writer, and
 //! a streaming hash-tree reader.
 
-use std::collections::VecDeque;
-use std::fmt;
-
-use capnp;
-use root_capnp;
 
 use blob::{ChunkRef, Kind};
-use hash::{Entry, Hash};
+
+use capnp;
+use hash::Hash;
 
 #[cfg(test)]
 use quickcheck;
+use root_capnp;
+use std::collections::VecDeque;
+use std::fmt;
 
 
 #[derive(Clone, Debug, Eq, PartialEq)]

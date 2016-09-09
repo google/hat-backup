@@ -12,13 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+
+use backend::DevNullBackend;
 use key::*;
 use key::tests::*;
 use std::sync::Arc;
-
-use backend::DevNullBackend;
-use util::Process;
 use test::Bencher;
+use util::Process;
 
 #[bench]
 fn insert_1_key_x_128000_zeros(bench: &mut Bencher) {

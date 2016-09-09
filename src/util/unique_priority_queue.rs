@@ -82,10 +82,10 @@ impl<P: Clone + Ord, K: Clone + Ord, V> UniquePriorityQueue<P, K, V> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use quickcheck;
 
     use std::collections::BTreeMap;
-    use quickcheck;
+    use super::*;
 
     #[test]
     fn insert1() {

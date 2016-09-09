@@ -12,13 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::sync::Arc;
 
 use backend::{MemoryBackend, StoreBackend};
 use errors::HatError;
 use hat::HatRc;
 use hat::family::Family;
 use key;
+use std::sync::Arc;
 use util::FileIterator;
 
 

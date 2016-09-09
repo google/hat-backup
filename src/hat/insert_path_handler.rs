@@ -12,6 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+
+use backend::StoreBackend;
+use key;
 use std::error::Error;
 use std::fs;
 use std::io;
@@ -20,9 +23,6 @@ use std::path::PathBuf;
 use std::str;
 use std::sync::{Mutex, atomic};
 use time;
-
-use backend::StoreBackend;
-use key;
 use util::{FileIterator, PathHandler, SyncPool};
 
 struct FileEntry {

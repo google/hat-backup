@@ -14,11 +14,11 @@
 
 //! Local state for known snapshots.
 
+
+use blob;
 use diesel;
 use diesel::prelude::*;
 use diesel::sqlite::SqliteConnection;
-
-use blob;
 use errors::DieselError;
 use hash;
 use tags;

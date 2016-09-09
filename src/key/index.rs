@@ -14,19 +14,19 @@
 
 //! Local state for keys in the snapshot in progress (the "index").
 
+
+use blob;
 use diesel;
 use diesel::prelude::*;
 use diesel::sqlite::SqliteConnection;
-
-use std::sync::{Mutex, MutexGuard};
-use time::Duration;
-
-use blob;
 use errors::DieselError;
 use hash;
-use util::{InfoWriter, PeriodicTimer};
+
+use std::sync::{Mutex, MutexGuard};
 
 use super::schema;
+use time::Duration;
+use util::{InfoWriter, PeriodicTimer};
 
 #[derive(Clone, Debug)]
 pub struct Entry {

@@ -14,22 +14,22 @@
 
 //! Local state for known hashes and their external location (blob reference).
 
-use std::sync::{Mutex, MutexGuard};
-use time::Duration;
+
+use blob;
+
+use capnp;
 
 use diesel;
 use diesel::prelude::*;
 use diesel::sqlite::SqliteConnection;
-
-use libsodium_sys;
-
-use blob;
-use util::{Counter, InfoWriter, PeriodicTimer, UniquePriorityQueue};
-use tags;
 use errors::{DieselError, RetryError};
 
-use capnp;
+use libsodium_sys;
 use root_capnp;
+use std::sync::{Mutex, MutexGuard};
+use tags;
+use time::Duration;
+use util::{Counter, InfoWriter, PeriodicTimer, UniquePriorityQueue};
 
 mod schema;
 pub mod tree;

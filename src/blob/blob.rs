@@ -17,10 +17,10 @@ use crypto::{CipherText, CipherTextRef, PlainTextRef};
 use hash::Hash;
 use hash::tree::HashRef;
 
+use std::mem;
+
 use super::BlobError;
 use super::ChunkRef;
-
-use std::mem;
 
 
 pub struct Blob {

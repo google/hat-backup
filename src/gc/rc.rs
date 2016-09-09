@@ -12,11 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::sync::mpsc;
+use gc;
 
 use hash::GcData;
 use snapshot;
-use gc;
+use std::sync::mpsc;
 use tags;
 
 

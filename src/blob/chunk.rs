@@ -12,9 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use sodiumoxide::crypto::secretbox::xsalsa20poly1305;
 use capnp;
 use root_capnp;
+use sodiumoxide::crypto::secretbox::xsalsa20poly1305;
 
 
 #[derive(Debug, Clone, Eq, PartialEq)]

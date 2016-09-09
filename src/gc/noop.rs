@@ -12,11 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::sync::mpsc;
-use void::Void;
 
 use gc;
 use snapshot;
+use std::sync::mpsc;
+use void::Void;
 
 
 pub struct GcNoop;
