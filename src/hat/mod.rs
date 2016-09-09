@@ -449,26 +449,28 @@ impl<B: StoreBackend> HatRc<B> {
              pref: blob::ChunkRef,
              out: &mut Vec<(Option<Vec<hash::Hash>>, hash::Entry)>)
              -> Result<(Option<Vec<hash::Hash>>, i64), HatError> {
-            let mut node_iter =
-                try!(hash::tree::NodeIterator::new(backend, &hash, Some(pref)))
-                .unwrap().peekable();
             fn hashrefs_to_hashs(hashrefs: Option<Vec<hash::tree::HashRef>>) -> Option<Vec<hash::Hash>> {
                 hashrefs.map(|cs| cs.into_iter().map(|c| c.hash).collect())
             }
-            loop {
+            let mut node_iter =
+                try!(hash::tree::NodeIterator::new(backend, &hash, Some(pref)))
+                .unwrap()
+                .map(|(href, height, childs_opt)| (hashrefs_to_hashs(childs_opt),
+                                                   hash::Entry{
+                                                       hash: href.hash,
+                                                       persistent_ref: Some(href.persistent_ref),
+                                                       level: height as i64,
+                                                       childs: None,
+                                                   }))
+                .peekable();
+           loop {
                 match (node_iter.next(), node_iter.peek()) {
                     (None, _) => unreachable!(),
-                    (Some((_, height, childs_opt)), None) => {
-                        return Ok((hashrefs_to_hashs(childs_opt), height as i64));
+                    (Some((childs_opt, href)), None) => {
+                        return Ok((childs_opt, href.level));
                     },
-                    (Some((href, height, childs_opt)), Some(_)) => {
-                        out.push((hashrefs_to_hashs(childs_opt),
-                                  hash::Entry {
-                                      hash: href.hash,
-                                      persistent_ref: Some(href.persistent_ref),
-                                      level: height as i64,
-                                      childs: None,
-                                  }));
+                    (Some(x), Some(_)) => {
+                        out.push(x);
                     },
                 }
             }
