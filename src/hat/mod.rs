@@ -449,12 +449,27 @@ impl<B: StoreBackend> HatRc<B> {
              pref: blob::ChunkRef,
              out: &mut Vec<(Option<Vec<hash::Hash>>, hash::Entry)>)
              -> Result<(Option<Vec<hash::Hash>>, i64), HatError> {
-            match try!(hash::tree::SimpleHashTreeReader::open(backend, &hash, Some(pref)))
-                .unwrap() {
-                hash::tree::ReaderResult::SingleBlock(..) => Ok((None, 0)),
-                hash::tree::ReaderResult::Tree(mut reader) => {
-                    let (childs, level) = try!(reader.list_entries(out));
-                    Ok((Some(childs), level))
+            let mut node_iter =
+                try!(hash::tree::NodeIterator::new(backend, &hash, Some(pref)))
+                .unwrap().peekable();
+            fn hashrefs_to_hashs(hashrefs: Option<Vec<hash::tree::HashRef>>) -> Option<Vec<hash::Hash>> {
+                hashrefs.map(|cs| cs.into_iter().map(|c| c.hash).collect())
+            }
+            loop {
+                match (node_iter.next(), node_iter.peek()) {
+                    (None, _) => unreachable!(),
+                    (Some((_, height, childs_opt)), None) => {
+                        return Ok((hashrefs_to_hashs(childs_opt), height as i64));
+                    },
+                    (Some((href, height, childs_opt)), Some(_)) => {
+                        out.push((hashrefs_to_hashs(childs_opt),
+                                  hash::Entry {
+                                      hash: href.hash,
+                                      persistent_ref: Some(href.persistent_ref),
+                                      level: height as i64,
+                                      childs: None,
+                                  }));
+                    },
                 }
             }
         }

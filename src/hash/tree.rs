@@ -299,40 +299,6 @@ pub trait Visitor {
     }
 }
 
-/// A structure for reading hash-trees written with `SimpleHashTreeWriter`.
-///
-/// The hash-tree is "opened" as read-only and is streamed from first to last data-block. The data
-/// blocks are read in the same order as they were written. The reader implement a `Vec<u8>`
-/// iterator used for extracting the tree blocks.
-///
-/// ```rust,ignore
-/// let tree_it = match SimpleHashTreeReader::new(backend, top_hash, top_persisitent_ref) {
-///     SingleBlock(block) => return println!("{}", block),
-///     Tree(it) => it,
-/// };
-///
-/// for data_chunk in tree_it {
-///     println!("{}", data_chunk);
-/// }
-/// ```
-pub struct SimpleHashTreeReader<B> {
-    backend: B,
-    stack: Vec<HashRef>,
-}
-
-
-/// Wrapper for the result of `SimpleHashTreeReader::new()`.
-///
-/// We wrap the output of `SimpleHashTreeReader::new(...)` in a `ReaderResult` to fast-path the
-/// single-block case (alternatively we could build a one-block iterator).
-pub enum ReaderResult<B> {
-    /// The tree consists of just a single node and its data-chunk is given here.
-    SingleBlock(Vec<u8>),
-
-    /// The tree has more than one node, so a data-chunk iterator is returned.
-    Tree(SimpleHashTreeReader<B>),
-}
-
 pub enum StackItem {
     Enter(HashRef),
     LeaveBranch(HashRef),
@@ -473,29 +439,6 @@ impl<B: HashTreeBackend> Iterator for LeafIterator<B> {
     }
 }
 
-pub struct NodeIterator<B> {
-    walker: Walker<B>,
-    nodes: VecDeque<(HashRef, usize, Option<Vec<HashRef>>)>,
-    visitor: NodeVisitor,
-}
-
-impl<B: HashTreeBackend> Iterator for NodeIterator<B> {
-    type Item = (HashRef, usize, Option<Vec<HashRef>>);
-
-    fn next(&mut self) -> Option<Self::Item> {
-        if let Some(n) = self.nodes.pop_front() {
-            return Some(n);
-        }
-
-        self.walker.resume(&mut self.visitor, &mut self.nodes).unwrap();
-        if self.nodes.len() == 0 {
-            None
-        } else {
-            self.next()
-        }
-    }
-}
-
 pub struct NodeVisitor {
     stack: Vec<Vec<HashRef>>,
 }
@@ -516,99 +459,48 @@ impl Visitor for NodeVisitor {
         true
     }
     fn leaf_enter(&mut self, href: &HashRef, out: &mut Self::State) -> bool {
-        // Do not proceed to fetch leaf data. We just need the metadata.
         out.push_back((href.clone(), 0, None));
+        // Do not proceed to fetch leaf data. We just need the metadata.
         false
     }
 }
 
+pub struct NodeIterator<B> {
+    walker: Walker<B>,
+    nodes: VecDeque<(HashRef, usize, Option<Vec<HashRef>>)>,
+    visitor: NodeVisitor,
+}
 
-impl<B: HashTreeBackend> SimpleHashTreeReader<B> {
-    /// Creates a new `HashTreeReader` that reads through the `backend` the blocks of the hash tree
-    /// defined by `root_hash` and `root_ref`.
-    pub fn open(backend: B,
-                root_hash: &Hash,
-                root_ref: Option<ChunkRef>)
-                -> Result<Option<ReaderResult<B>>, B::Err> {
-        if root_hash.bytes.is_empty() {
-            return Ok(None);
-        }
-
-        let pref = if let None = root_ref {
-                backend.fetch_persistent_ref(root_hash)
-            } else {
-                root_ref
+impl<B> NodeIterator<B>
+    where B: HashTreeBackend
+{
+    pub fn new(backend: B,
+               root_hash: &Hash,
+               root_ref: Option<ChunkRef>)
+               -> Result<Option<NodeIterator<B>>, B::Err> {
+        Ok(try!(Walker::new(backend, root_hash.clone(), root_ref)).map(|w| {
+            NodeIterator {
+                walker: w,
+                nodes: VecDeque::new(),
+                visitor: NodeVisitor { stack: vec![] },
             }
-            .expect("Could not find tree root hash");
-        let kind = pref.kind.clone();
-
-        let data = try!(backend.fetch_chunk(&root_hash, Some(&pref)))
-            .expect("Could not find tree root hash.");
-        match kind {
-            // This is a raw data block.
-            Kind::TreeLeaf => Ok(Some(ReaderResult::SingleBlock(data))),
-            Kind::TreeBranch => {
-                // This is a tree node.
-                let mut childs = hash_refs_from_bytes(&data[..]).unwrap();
-                childs.reverse();
-                Ok(Some(ReaderResult::Tree(SimpleHashTreeReader {
-                    stack: childs,
-                    backend: backend,
-                })))
-            }
-        }
+        }))
     }
+}
 
-    pub fn list_entries(&mut self,
-                        out: &mut Vec<(Option<Vec<Hash>>, Entry)>)
-                        -> Result<(Vec<Hash>, i64), B::Err> {
-        let mut level = 1;
-        let mut hashes = vec![];
-        while !self.stack.is_empty() {
-            let child = self.stack.pop().expect("!is_empty()");
-            let hash = child.hash.clone();
-            hashes.push(hash.clone());
+impl<B: HashTreeBackend> Iterator for NodeIterator<B> {
+    type Item = (HashRef, usize, Option<Vec<HashRef>>);
 
-            match child.persistent_ref.kind {
-                Kind::TreeLeaf => {
-                    out.push((None,
-                              Entry {
-                        hash: hash,
-                        persistent_ref: Some(child.persistent_ref),
-                        level: 0,
-                        childs: None,
-                    }))
-                }
-                Kind::TreeBranch => {
-                    let data = try!(self.backend
-                            .fetch_chunk(&hash, Some(&child.persistent_ref)))
-                        .expect("Invalid hash ref");
-
-                    let mut new_childs = hash_refs_from_bytes(&data[..]).unwrap();
-                    new_childs.reverse();
-
-                    let mut next = SimpleHashTreeReader {
-                        stack: new_childs,
-                        backend: self.backend.clone(),
-                    };
-                    let (child_hashes, child_level) = try!(next.list_entries(out));
-                    out.push((Some(child_hashes),
-                              Entry {
-                        hash: hash,
-                        persistent_ref: Some(child.persistent_ref),
-                        level: child_level,
-                        childs: None,
-                    }));
-
-                    let my_level = 1 + child_level;
-                    assert!(level == 1 || level == my_level);
-                    level = my_level;
-                }
-            }
-
+    fn next(&mut self) -> Option<Self::Item> {
+        if let Some(n) = self.nodes.pop_front() {
+            return Some(n);
         }
-        assert!(!hashes.is_empty());
 
-        Ok((hashes, level))
+        self.walker.resume(&mut self.visitor, &mut self.nodes).unwrap();
+        if self.nodes.len() == 0 {
+            None
+        } else {
+            self.next()
+        }
     }
 }
