@@ -117,10 +117,6 @@ impl Blob {
     }
 
     pub fn refs_from_bytes(&self, bytes: &[u8]) -> Result<Vec<HashRef>, BlobError> {
-        if bytes.len() == 0 {
-            return Ok(Vec::new());
-        }
-
         let (_rest, footer_vec) = try!(self.master_key.unseal(CipherTextRef::new(bytes)));
         let mut footer_pos = footer_vec.as_bytes();
 

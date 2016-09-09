@@ -21,7 +21,7 @@ use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 
 pub struct PlainText(Vec<u8>);
 pub struct PlainTextRef<'a>(&'a [u8]);
-pub struct CipherText{
+pub struct CipherText {
     chunks: Vec<Vec<u8>>,
     len: usize,
 }
@@ -111,11 +111,17 @@ impl PlainText {
 
 impl CipherText {
     pub fn empty() -> CipherText {
-        CipherText{chunks: vec![], len: 0}
+        CipherText {
+            chunks: vec![],
+            len: 0,
+        }
     }
     pub fn new(ct: Vec<u8>) -> CipherText {
         let len = ct.len();
-        CipherText{chunks: vec![ct], len: len}
+        CipherText {
+            chunks: vec![ct],
+            len: len,
+        }
     }
     pub fn append(&mut self, mut other: CipherText) {
         self.len += other.len();
@@ -142,7 +148,7 @@ impl CipherText {
         }
         out
     }
-    
+
     pub fn slices(&self) -> Vec<&[u8]> {
         self.chunks.iter().map(|x| &x[..]).collect()
     }
@@ -158,23 +164,28 @@ impl<'a> CipherTextRef<'a> {
     pub fn len(&self) -> usize {
         self.0.len()
     }
-    pub fn split_from_right(&self, len: usize) -> (CipherTextRef<'a>, CipherTextRef<'a>) {
-        assert!(self.len() >= len);
-        (self.slice(0, self.len() - len), self.slice(self.len() - len, self.len()))
+    pub fn split_from_right(&self,
+                            len: usize)
+                            -> Result<(CipherTextRef<'a>, CipherTextRef<'a>), CryptoError> {
+        if self.len() < len {
+            Err("crypto read failed".into())
+        } else {
+            Ok((self.slice(0, self.len() - len), self.slice(self.len() - len, self.len())))
+        }
     }
     pub fn to_plaintext(&self,
                         nonce: &authed::desc::Nonce,
                         key: &authed::desc::Key)
                         -> Result<PlainText, CryptoError> {
         Ok((PlainText::new(try!(authed::imp::open(&self.0, &nonce, &key)
-            .map_err(|()| "Crypto failed to open authenticated message")))))
+            .map_err(|()| "crypto read failed")))))
     }
     pub fn to_sealed_plaintext(&self,
                                pubkey: &sealed::desc::PublicKey,
                                seckey: &sealed::desc::SecretKey)
                                -> Result<PlainText, CryptoError> {
         Ok(PlainText::new(try!(sealed::imp::open(&self.0, &pubkey, &seckey)
-            .map_err(|()| "Crypto failed to open sealed message"))))
+            .map_err(|()| "crypto read failed"))))
     }
 }
 
@@ -199,16 +210,17 @@ impl RefKey {
                   cref: &ChunkRef,
                   ct: CipherTextRef)
                   -> Result<PlainText, CryptoError> {
-        assert!(ct.len() >= cref.offset + cref.length);
+        assert!(ct.len() > cref.offset + cref.length);
         let ct = ct.slice(cref.offset, cref.offset + cref.length);
         match cref.key {
-            Some(Key::XSalsa20Poly1305(ref key)) => {
-                let nonce =
-                    authed::desc::Nonce::from_slice(&hash.bytes[..authed::desc::NONCEBYTES])
-                        .unwrap();
-                Ok(try!(ct.to_plaintext(&nonce, &key)))
+            Some(Key::XSalsa20Poly1305(ref key)) if hash.bytes.len() >=
+                                                    authed::desc::NONCEBYTES => {
+                match authed::desc::Nonce::from_slice(&hash.bytes[..authed::desc::NONCEBYTES]) {
+                    None => Err("crypto read failed".into()),
+                    Some(nonce) => Ok(try!(ct.to_plaintext(&nonce, &key))),
+                }
             }
-            _ => panic!("Unknown blob key type"),
+            _ => Err("crypto read failed".into()),
         }
     }
 }
@@ -250,15 +262,17 @@ impl FixedKey {
         let seckey = self.seckey.as_ref().expect("unseal requires access to read-key");
 
         // Read sealed ciphertext length and unseal it.
-        let (rest, foot_ct) = ct.split_from_right(sealed::desc::footer_cipher_bytes());
+        let (rest, foot_ct) = try!(ct.split_from_right(sealed::desc::footer_cipher_bytes()));
         let foot_pt = try!(foot_ct.to_sealed_plaintext(&self.pubkey, &seckey));
         assert_eq!(foot_pt.len(), sealed::desc::footer_plain_bytes());
 
         // Parse back from encoded LittleEndian.
-        let ct_len = foot_pt.as_bytes().read_u64::<LittleEndian>().unwrap();
+        let ct_len = try!(foot_pt.as_bytes()
+            .read_u64::<LittleEndian>()
+            .map_err(|_| "crypto read failed"));
 
         // Read and unseal original ciphertext.
-        let (rest, ct) = rest.split_from_right(ct_len as usize);
+        let (rest, ct) = try!(rest.split_from_right(ct_len as usize));
         Ok((rest, try!(ct.to_sealed_plaintext(&self.pubkey, &seckey))))
     }
 }

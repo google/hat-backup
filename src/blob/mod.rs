@@ -101,8 +101,9 @@ impl<B: StoreBackend> StoreInner<B> {
         let old_blob_desc = self.reserve_new_blob();
 
         self.blob_index.in_air(&old_blob_desc);
-        self.backend.store(&old_blob_desc.name[..], &ct)
-                    .expect("Store operation failed");
+        self.backend
+            .store(&old_blob_desc.name[..], &ct)
+            .expect("Store operation failed");
         self.blob_index.commit_done(&old_blob_desc);
 
         // Go through callbacks
