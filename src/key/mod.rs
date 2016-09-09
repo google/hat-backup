@@ -14,17 +14,17 @@
 
 //! External API for creating and manipulating snapshots.
 
-use std::io;
-use std::sync::Arc;
-use std::borrow::Cow;
 
 use backend::StoreBackend;
 use blob;
+use errors::{DieselError, RetryError};
 use hash;
 use hash::tree::{LeafIterator, SimpleHashTreeWriter};
+use std::borrow::Cow;
+use std::io;
+use std::sync::Arc;
 
 use util::{FnBox, MsgHandler, Process};
-use errors::{DieselError, RetryError};
 
 mod schema;
 mod index;

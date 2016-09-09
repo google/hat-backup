@@ -12,21 +12,21 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+
+use backend::StoreBackend;
+use blob;
+use capnp;
+use errors::HatError;
+use hash;
+use hat::insert_path_handler::InsertPathHandler;
+use key;
+use root_capnp;
 use std::fs;
 use std::io::Write;
 use std::path::PathBuf;
 use std::str;
 use std::sync::mpsc;
-use capnp;
-
-use backend::StoreBackend;
-use blob;
-use hash;
-use key;
-use root_capnp;
 use util::{FileIterator, FnBox, PathHandler};
-use errors::HatError;
-use hat::insert_path_handler::InsertPathHandler;
 
 fn try_a_few_times_then_panic<F>(mut f: F, msg: &str)
     where F: FnMut() -> bool

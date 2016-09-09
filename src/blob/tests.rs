@@ -12,13 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License
 
-use blob::{Blob, BlobError, BlobIndex, BlobStore, ChunkRef, Key, Kind};
 use backend::{MemoryBackend, StoreBackend};
+use blob::{Blob, BlobError, BlobIndex, BlobStore, ChunkRef, Key, Kind};
 use hash;
+use quickcheck;
 
 use std::collections::HashSet;
 use std::sync::Arc;
-use quickcheck;
 
 #[test]
 fn identity() {

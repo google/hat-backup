@@ -14,12 +14,12 @@
 
 //! Helpers for reading directory structures from the local filesystem.
 
+
+use scoped_pool;
 use std::fs;
 use std::io;
 use std::iter;
 use std::path::PathBuf;
-
-use scoped_pool;
 
 
 pub trait HasPath {

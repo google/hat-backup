@@ -12,11 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+
+use backend::StoreBackend;
 use crypto::CipherText;
 use std::collections::BTreeMap;
 use std::sync::Mutex;
-
-use backend::StoreBackend;
 
 pub struct MemoryBackend {
     files: Mutex<BTreeMap<Vec<u8>, Vec<u8>>>,
