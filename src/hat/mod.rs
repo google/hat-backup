@@ -33,6 +33,7 @@ use void::Void;
 
 mod family;
 mod insert_path_handler;
+mod walker;
 use self::family::Family;
 
 #[cfg(test)]

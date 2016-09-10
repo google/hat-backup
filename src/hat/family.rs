@@ -19,6 +19,7 @@ use capnp;
 use errors::HatError;
 use hash;
 use hat::insert_path_handler::InsertPathHandler;
+use hat::walker;
 use key;
 use root_capnp;
 use std::fs;
