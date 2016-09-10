@@ -437,9 +437,7 @@ impl<B: StoreBackend> HatRc<B> {
                 childs: None,
             },
         };
-        try!(recover_entry(&self.hash_index, &self.blob_store, node));
-
-        let final_id = self.hash_index.get_id(hash).unwrap();
+        let final_id = try!(recover_entry(&self.hash_index, &self.blob_store, node));
         try!(self.gc.register_final(&info, final_id));
 
         try!(self.commit_finalize(&family, info, hash));
