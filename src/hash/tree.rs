@@ -336,7 +336,7 @@ impl<B> Walker<B>
                         })],
         }))
     }
-    pub fn resume<V>(&mut self, visitor: &mut V, mut state: &mut V::State) -> Result<(), B::Err>
+    pub fn resume<V>(&mut self, visitor: &mut V, mut state: &mut V::State) -> Result<bool, B::Err>
         where V: Visitor
     {
         // Basic cycle detection to spot some programming mistakes.
@@ -348,7 +348,7 @@ impl<B> Walker<B>
                 StackItem::LeaveBranch(href) => {
                     self.height += 1;
                     if visitor.branch_leave(&href, self.height, &mut state) {
-                        return Ok(());
+                        return Ok(true);
                     }
                     continue;
                 }
@@ -370,7 +370,7 @@ impl<B> Walker<B>
                     if visitor.leaf_enter(&node, &mut state) {
                         let data = try!(fetch_chunk(&self.backend, &node));
                         if visitor.leaf_leave(data, &node, &mut state) {
-                            return Ok(());
+                            return Ok(true);
                         }
                     }
                 }
@@ -386,7 +386,7 @@ impl<B> Walker<B>
             }
         }
 
-        Ok(())
+        Ok(false)
     }
 }
 
@@ -426,16 +426,9 @@ impl<B: HashTreeBackend> Iterator for LeafIterator<B> {
     type Item = Vec<u8>;
 
     fn next(&mut self) -> Option<Vec<u8>> {
-        if let Some(l) = self.leafs.pop_front() {
-            return Some(l);
-        }
-
-        self.walker.resume(&mut LeafVisitor, &mut self.leafs).unwrap();
-        if self.leafs.len() == 0 {
-            None
-        } else {
-            self.next()
-        }
+        while self.leafs.is_empty() &&
+              self.walker.resume(&mut LeafVisitor, &mut self.leafs).unwrap() {}
+        self.leafs.pop_front()
     }
 }
 
@@ -492,15 +485,8 @@ impl<B: HashTreeBackend> Iterator for NodeIterator<B> {
     type Item = (HashRef, usize, Option<Vec<HashRef>>);
 
     fn next(&mut self) -> Option<Self::Item> {
-        if let Some(n) = self.nodes.pop_front() {
-            return Some(n);
-        }
-
-        self.walker.resume(&mut self.visitor, &mut self.nodes).unwrap();
-        if self.nodes.len() == 0 {
-            None
-        } else {
-            self.next()
-        }
+        while self.nodes.is_empty() &&
+              self.walker.resume(&mut self.visitor, &mut self.nodes).unwrap() {}
+        self.nodes.pop_front()
     }
 }
