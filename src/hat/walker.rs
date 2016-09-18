@@ -13,7 +13,6 @@
 // limitations under the License.
 
 
-use std::collections::VecDeque;
 use backend::StoreBackend;
 use blob;
 use capnp;
@@ -22,6 +21,7 @@ use hash;
 use hat::insert_path_handler::InsertPathHandler;
 use key;
 use root_capnp;
+use std::collections::VecDeque;
 use std::fs;
 use std::io::Write;
 use std::path::PathBuf;
@@ -32,10 +32,14 @@ use util::{FileIterator, FnBox, PathHandler};
 struct FileEntry(hash::Hash, blob::ChunkRef, key::Entry);
 
 trait Visitor {
-    type State;
-
-    fn enter_file(&mut self, _file: &FileEntry, &mut Self::State) -> bool {
+    fn enter_file(&mut self, _file: &FileEntry) -> bool {
         true
+    }
+}
+
+trait HasFiles {
+    fn files(&mut self) -> Vec<FileEntry> {
+        vec![]
     }
 }
 
@@ -46,37 +50,63 @@ struct Walker<B> {
     stack: VecDeque<Walker<B>>,
 }
 
-impl<B> Walker<B> where B: hash::tree::HashTreeBackend {
-    pub fn new(backend: B, root_hash: hash::Hash, root_ref: Option<blob::ChunkRef>) -> Result<Walker<B>, B::Err> {
+impl<B> Walker<B>
+    where B: hash::tree::HashTreeBackend
+{
+    pub fn new(backend: B,
+               root_hash: hash::Hash,
+               root_ref: Option<blob::ChunkRef>)
+               -> Result<Walker<B>, B::Err> {
         let tree = try!(hash::tree::Walker::new(backend.clone(), root_hash, root_ref)).unwrap();
-        Ok(Walker{
+        Ok(Walker {
             backend: backend,
             tree: tree,
             child: None,
-            stack: VecDeque::new()})
+            stack: VecDeque::new(),
+        })
     }
-    pub fn resume<V, TV>(&mut self, mut visitor: &mut V, mut state: &mut V::State, mut tvisitor: &mut TV) -> Result<bool, B::Err>
-        where V: Visitor, TV: hash::tree::Visitor<State=Vec<FileEntry>>
+
+    pub fn resume_child<V, TV>(&mut self,
+                               mut visitor: &mut V,
+                               mut tvisitor: &mut TV)
+                               -> Result<bool, B::Err>
+        where V: Visitor,
+              TV: hash::tree::Visitor,
+              TV: HasFiles
     {
         if let Some(ref mut c) = self.child.as_mut() {
-            if try!(c.resume(visitor, &mut state, tvisitor)) {
+            if try!(c.resume(visitor, tvisitor)) {
                 return Ok(true);
             }
+        }
+        return Ok(false);
+    }
+
+
+    pub fn resume<V, TV>(&mut self,
+                         mut visitor: &mut V,
+                         mut tvisitor: &mut TV)
+                         -> Result<bool, B::Err>
+        where V: Visitor,
+              TV: hash::tree::Visitor,
+              TV: HasFiles
+    {
+        if try!(self.resume_child(visitor, tvisitor)) {
+            return Ok(true);
         }
 
         self.child = self.stack.pop_front().map(Box::new);
         if self.child.is_none() {
-            let mut files = Vec::new();
-            if !try!(self.tree.resume(tvisitor, &mut files)) {
+            if !try!(self.tree.resume(tvisitor)) {
                 return Ok(false);
             }
-            for file in files {
-                if visitor.enter_file(&file, &mut state) {
-                    self.stack.push_back(
-                        try!(Walker::new(self.backend.clone(), file.0, Some(file.1))));
+            for file in tvisitor.files() {
+                if visitor.enter_file(&file) {
+                    self.stack
+                        .push_back(try!(Walker::new(self.backend.clone(), file.0, Some(file.1))));
                 }
             }
         }
-        self.resume(visitor, &mut state, tvisitor)
+        self.resume(visitor, tvisitor)
     }
 }

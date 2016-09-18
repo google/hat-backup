@@ -276,24 +276,21 @@ impl<B: HashTreeBackend> SimpleHashTreeWriter<B> {
 
 
 pub trait Visitor {
-    type State;
-
     fn branch_enter(&mut self,
                     _href: &HashRef,
-                    _childs: &Vec<HashRef>,
-                    _s: &mut Self::State)
+                    _childs: &Vec<HashRef>)
                     -> bool {
         true
     }
-    fn branch_leave(&mut self, _href: &HashRef, _height: usize, _s: &mut Self::State) -> bool {
+    fn branch_leave(&mut self, _href: &HashRef, _height: usize) -> bool {
         // Do nothing by default.
         false
     }
 
-    fn leaf_enter(&mut self, _href: &HashRef, _s: &mut Self::State) -> bool {
+    fn leaf_enter(&mut self, _href: &HashRef) -> bool {
         true
     }
-    fn leaf_leave(&mut self, _chunk: Vec<u8>, _href: &HashRef, _s: &mut Self::State) -> bool {
+    fn leaf_leave(&mut self, _chunk: Vec<u8>, _href: &HashRef) -> bool {
         // Do nothing by default.
         false
     }
@@ -336,7 +333,7 @@ impl<B> Walker<B>
                         })],
         }))
     }
-    pub fn resume<V>(&mut self, visitor: &mut V, mut state: &mut V::State) -> Result<bool, B::Err>
+    pub fn resume<V>(&mut self, visitor: &mut V) -> Result<bool, B::Err>
         where V: Visitor
     {
         // Basic cycle detection to spot some programming mistakes.
@@ -347,7 +344,7 @@ impl<B> Walker<B>
                 StackItem::Enter(href) => href,
                 StackItem::LeaveBranch(href) => {
                     self.height += 1;
-                    if visitor.branch_leave(&href, self.height, &mut state) {
+                    if visitor.branch_leave(&href, self.height) {
                         return Ok(true);
                     }
                     continue;
@@ -367,9 +364,9 @@ impl<B> Walker<B>
                 &Kind::TreeLeaf => {
                     // Reset height.
                     self.height = 0;
-                    if visitor.leaf_enter(&node, &mut state) {
+                    if visitor.leaf_enter(&node) {
                         let data = try!(fetch_chunk(&self.backend, &node));
-                        if visitor.leaf_leave(data, &node, &mut state) {
+                        if visitor.leaf_leave(data, &node) {
                             return Ok(true);
                         }
                     }
@@ -377,7 +374,7 @@ impl<B> Walker<B>
                 &Kind::TreeBranch => {
                     let data = try!(fetch_chunk(&self.backend, &node));
                     let mut new_childs = hash_refs_from_bytes(&data[..]).unwrap();
-                    if visitor.branch_enter(&node, &new_childs, &mut state) {
+                    if visitor.branch_enter(&node, &new_childs) {
                         self.stack.push(StackItem::LeaveBranch(node));
                         new_childs.reverse();
                         self.stack.extend(new_childs.into_iter().map(|x| StackItem::Enter(x)));
@@ -392,7 +389,7 @@ impl<B> Walker<B>
 
 pub struct LeafIterator<B> {
     walker: Walker<B>,
-    leafs: VecDeque<Vec<u8>>,
+    visitor: LeafVisitor,
 }
 
 impl<B> LeafIterator<B>
@@ -405,19 +402,19 @@ impl<B> LeafIterator<B>
         Ok(try!(Walker::new(backend, root_hash.clone(), root_ref)).map(|w| {
             LeafIterator {
                 walker: w,
-                leafs: VecDeque::new(),
+                visitor: LeafVisitor{leafs: VecDeque::new()},
             }
         }))
     }
 }
 
-pub struct LeafVisitor;
+pub struct LeafVisitor {
+    leafs: VecDeque<Vec<u8>>,
+}
 
 impl Visitor for LeafVisitor {
-    type State = VecDeque<Vec<u8>>;
-
-    fn leaf_leave(&mut self, leaf: Vec<u8>, _href: &HashRef, out: &mut Self::State) -> bool {
-        out.push_back(leaf);
+    fn leaf_leave(&mut self, leaf: Vec<u8>, _href: &HashRef) -> bool {
+        self.leafs.push_back(leaf);
         true
     }
 }
@@ -426,33 +423,31 @@ impl<B: HashTreeBackend> Iterator for LeafIterator<B> {
     type Item = Vec<u8>;
 
     fn next(&mut self) -> Option<Vec<u8>> {
-        while self.leafs.is_empty() &&
-              self.walker.resume(&mut LeafVisitor, &mut self.leafs).unwrap() {}
-        self.leafs.pop_front()
+        while self.visitor.leafs.is_empty() &&
+              self.walker.resume(&mut self.visitor).unwrap() {}
+        self.visitor.leafs.pop_front()
     }
 }
 
 pub struct NodeVisitor {
     stack: Vec<Vec<HashRef>>,
+    nodes: VecDeque<(HashRef, usize, Option<Vec<HashRef>>)>,
 }
 
 impl Visitor for NodeVisitor {
-    type State = VecDeque<(HashRef, usize, Option<Vec<HashRef>>)>;
-
-    fn branch_leave(&mut self, href: &HashRef, height: usize, out: &mut Self::State) -> bool {
-        out.push_back((href.clone(), height, self.stack.pop()));
+    fn branch_leave(&mut self, href: &HashRef, height: usize) -> bool {
+        self.nodes.push_back((href.clone(), height, self.stack.pop()));
         true
     }
     fn branch_enter(&mut self,
                     _href: &HashRef,
-                    childs: &Vec<HashRef>,
-                    _out: &mut Self::State)
+                    childs: &Vec<HashRef>)
                     -> bool {
         self.stack.push(childs.clone());
         true
     }
-    fn leaf_enter(&mut self, href: &HashRef, out: &mut Self::State) -> bool {
-        out.push_back((href.clone(), 0, None));
+    fn leaf_enter(&mut self, href: &HashRef) -> bool {
+        self.nodes.push_back((href.clone(), 0, None));
         // Do not proceed to fetch leaf data. We just need the metadata.
         false
     }
@@ -460,7 +455,6 @@ impl Visitor for NodeVisitor {
 
 pub struct NodeIterator<B> {
     walker: Walker<B>,
-    nodes: VecDeque<(HashRef, usize, Option<Vec<HashRef>>)>,
     visitor: NodeVisitor,
 }
 
@@ -474,8 +468,7 @@ impl<B> NodeIterator<B>
         Ok(try!(Walker::new(backend, root_hash.clone(), root_ref)).map(|w| {
             NodeIterator {
                 walker: w,
-                nodes: VecDeque::new(),
-                visitor: NodeVisitor { stack: vec![] },
+                visitor: NodeVisitor { stack: vec![], nodes: VecDeque::new() },
             }
         }))
     }
@@ -485,8 +478,8 @@ impl<B: HashTreeBackend> Iterator for NodeIterator<B> {
     type Item = (HashRef, usize, Option<Vec<HashRef>>);
 
     fn next(&mut self) -> Option<Self::Item> {
-        while self.nodes.is_empty() &&
-              self.walker.resume(&mut self.visitor, &mut self.nodes).unwrap() {}
-        self.nodes.pop_front()
+        while self.visitor.nodes.is_empty() &&
+              self.walker.resume(&mut self.visitor).unwrap() {}
+        self.visitor.nodes.pop_front()
     }
 }
