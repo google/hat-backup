@@ -192,21 +192,6 @@ fn list_snapshot<'a, B: StoreBackend>(backend: &'a key::HashStoreBackend<B>,
     }
 }
 
-#[derive(Clone)]
-enum RecoverType {
-    Top,
-    Branch,
-    Leaf,
-}
-
-#[derive(Clone)]
-struct RecoverNode {
-    t: RecoverType,
-    data: hash::Entry,
-    childs: Option<Vec<hash::Hash>>,
-}
-
-
 
 impl<B: StoreBackend> HatRc<B> {
     pub fn open_repository(repository_root: PathBuf,
@@ -365,14 +350,14 @@ impl<B: StoreBackend> HatRc<B> {
     fn recover_snapshot(&mut self,
                         family_name: String,
                         info: snapshot::Info,
-                        hash: &hash::Hash,
+                        final_hash: &hash::Hash,
                         dir_ref: blob::ChunkRef)
                         -> Result<(), HatError> {
         fn recover_entry<B: StoreBackend>(hashes: &hash::HashIndex,
                                           blobs: &blob::BlobStore<B>,
-                                          mut node: RecoverNode)
-                                          -> Result<i64, HatError> {
-            let pref = node.data.persistent_ref.clone().unwrap();
+                                          node: family::recover::Node)
+        {
+            let pref = node.data.persistent_ref.clone();
 
             // Make sure we have the blob described.
             blobs.recover(hash::tree::HashRef {
@@ -381,45 +366,62 @@ impl<B: StoreBackend> HatRc<B> {
             });
 
             // Convert child hashes to child IDs.
-            let c = match &node.childs {
+            let child_ids = match &node.childs {
                 &Some(ref hs) => {
                     Some(hs.iter()
-                        .map(|h| hashes.get_id(h).expect("Child hash not yet recovered"))
+                        .map(|h| hashes.get_id(&h.hash).expect("Child hash not yet recovered"))
                         .collect())
                 }
                 &None => None,
             };
-            node.data.childs = c;
 
             // Now insert the hash information if needed.
-            let id = match hashes.reserve(&node.data) {
-                hash::ReserveResult::HashKnown(id) => id,
-                hash::ReserveResult::ReserveOk(id) => {
-                    // Commit hash.
-                    hashes.commit(&node.data.hash, pref);
-                    id
-                }
+            let entry = hash::Entry{
+                hash: node.data.hash,
+                persistent_ref: Some(pref.clone()),
+                level: node.height as i64,
+                childs: child_ids,
             };
 
-            Ok(id)
+            if let hash::ReserveResult::ReserveOk(..) = hashes.reserve(&entry) {
+                // Commit hash.
+                hashes.commit(&entry.hash, pref);
+            };
+        }
+
+        let mut dir_v = family::recover::DirVisitor::new();
+        let mut file_v = family::recover::FileVisitor::new();
+        let mut walk =
+            try!(walker::Walker::new(self.hash_backend(), final_hash.clone(), Some(dir_ref.clone())));
+
+        let mut tops = vec![];
+        loop {
+            while dir_v.is_empty() && file_v.is_empty() &&
+                  try!(walk.resume(&mut file_v, &mut dir_v)) {}
+            if dir_v.is_empty() && file_v.is_empty() {
+                break;
+            }
+            for node in file_v.nodes() {
+                recover_entry(&self.hash_index, &self.blob_store, node);
+            }
+            tops.append(&mut file_v.tops());
+            for node in dir_v.nodes() {
+                recover_entry(&self.hash_index, &self.blob_store, node);
+            }
         }
 
         let family = self.open_family(family_name.clone())
             .expect(&format!("Could not open family '{}'", family_name));
-        let mut register = Vec::new();
-        let (final_childs, final_level) =
-            try!(self.recover_dir_ref(&family, hash, dir_ref.clone(), &mut register));
 
         // Recover hashes for tree-tops. These are also registered with the GC.
         let (id_sender, id_receiver) = mpsc::channel();
         let local_hash_index = self.hash_index.clone();
-        let local_blob_store = self.blob_store.clone();
+        let local_final_hash = final_hash.clone();
         thread::spawn(move || {
-            for node in &register {
-                 let id = recover_entry(&local_hash_index, &local_blob_store, node.clone())
-                     .unwrap();
-                 if let &RecoverType::Top = &node.t {
-                   id_sender.send(id).unwrap();
+            for hash in tops {
+                if hash != local_final_hash {
+                    let id = local_hash_index.get_id(&hash).unwrap();
+                    id_sender.send(id).unwrap();
                 }
             }
         });
@@ -427,98 +429,10 @@ impl<B: StoreBackend> HatRc<B> {
         try!(self.gc.register(&info, id_receiver));
         self.flush_blob_store();
 
-        // Recover final root hash for the snapshot.
-        let node = RecoverNode {
-            t: RecoverType::Top,
-            childs: final_childs,
-            data: hash::Entry {
-                hash: hash.clone(),
-                persistent_ref: Some(dir_ref),
-                level: final_level,
-                childs: None,
-            },
-        };
-        let final_id = try!(recover_entry(&self.hash_index, &self.blob_store, node));
+        let final_id = self.hash_index.get_id(&final_hash).unwrap();
         try!(self.gc.register_final(&info, final_id));
-
-        try!(self.commit_finalize(&family, info, hash));
-
+        try!(self.commit_finalize(&family, info, final_hash));
         Ok(())
-    }
-
-    fn recover_dir_ref(&mut self,
-                       family: &Family<B>,
-                       dir_hash: &hash::Hash,
-                       dir_ref: blob::ChunkRef,
-                       recover_out: &mut Vec<RecoverNode>)
-                       -> Result<(Option<Vec<hash::Hash>>, i64), HatError> {
-        fn recover_tree<B: hash::tree::HashTreeBackend<Err = key::MsgError>>
-            (backend: B,
-             hash: &hash::Hash,
-             pref: blob::ChunkRef,
-             out: &mut Vec<RecoverNode>)
-             -> Result<(Option<Vec<hash::Hash>>, i64), HatError> {
-            fn hashrefs_to_hashs(hashrefs: Option<Vec<hash::tree::HashRef>>)
-                                 -> Option<Vec<hash::Hash>> {
-                hashrefs.map(|cs| cs.into_iter().map(|c| c.hash).collect())
-            }
-            let mut node_iter = try!(hash::tree::NodeIterator::new(backend, &hash, Some(pref)))
-                .unwrap()
-                .map(|(href, height, childs_opt)| {
-                    (hashrefs_to_hashs(childs_opt),
-                     hash::Entry {
-                        hash: href.hash,
-                        persistent_ref: Some(href.persistent_ref),
-                        level: height as i64,
-                        childs: None,
-                    })
-                })
-                .peekable();
-            loop {
-                match (node_iter.next(), node_iter.peek()) {
-                    (None, _) => unreachable!(),
-                    (Some((childs_opt, href)), None) => {
-                        return Ok((childs_opt, href.level));
-                    }
-                    (Some((childs_opt, entry)), Some(_)) => {
-                        let t = if entry.level == 0 {
-                            RecoverType::Leaf
-                        } else {
-                            RecoverType::Branch
-                        };
-                        out.push(RecoverNode {
-                            data: entry,
-                            t: t,
-                            childs: childs_opt,
-                        });
-                    }
-                }
-            }
-        }
-        for (file, hash, pref) in
-            try!(family.fetch_dir_data(&dir_hash, dir_ref.clone(), self.hash_backend())) {
-            let (childs, level) = match file.data_hash {
-                Some(..) => {
-                    // Entry is a data leaf. Read the hash tree.
-                    try!(recover_tree(self.hash_backend(), &hash, pref.clone(), recover_out))
-                }
-                None => try!(self.recover_dir_ref(&family, &hash, pref.clone(), recover_out)),
-            };
-            // We register the top hash with the GC (tree nodes are inferred).
-            let entry = hash::Entry {
-                hash: hash,
-                persistent_ref: Some(pref),
-                level: level,
-                childs: None,
-            };
-            recover_out.push(RecoverNode {
-                t: RecoverType::Top,
-                data: entry,
-                childs: childs,
-            });
-        }
-
-        recover_tree(self.hash_backend(), dir_hash, dir_ref, recover_out)
     }
 
     pub fn resume(&mut self) -> Result<(), HatError> {

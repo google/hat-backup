@@ -276,10 +276,7 @@ impl<B: HashTreeBackend> SimpleHashTreeWriter<B> {
 
 
 pub trait Visitor {
-    fn branch_enter(&mut self,
-                    _href: &HashRef,
-                    _childs: &Vec<HashRef>)
-                    -> bool {
+    fn branch_enter(&mut self, _href: &HashRef, _childs: &Vec<HashRef>) -> bool {
         true
     }
     fn branch_leave(&mut self, _href: &HashRef, _height: usize) -> bool {
@@ -402,7 +399,7 @@ impl<B> LeafIterator<B>
         Ok(try!(Walker::new(backend, root_hash.clone(), root_ref)).map(|w| {
             LeafIterator {
                 walker: w,
-                visitor: LeafVisitor{leafs: VecDeque::new()},
+                visitor: LeafVisitor { leafs: VecDeque::new() },
             }
         }))
     }
@@ -423,63 +420,7 @@ impl<B: HashTreeBackend> Iterator for LeafIterator<B> {
     type Item = Vec<u8>;
 
     fn next(&mut self) -> Option<Vec<u8>> {
-        while self.visitor.leafs.is_empty() &&
-              self.walker.resume(&mut self.visitor).unwrap() {}
+        while self.visitor.leafs.is_empty() && self.walker.resume(&mut self.visitor).unwrap() {}
         self.visitor.leafs.pop_front()
-    }
-}
-
-pub struct NodeVisitor {
-    stack: Vec<Vec<HashRef>>,
-    nodes: VecDeque<(HashRef, usize, Option<Vec<HashRef>>)>,
-}
-
-impl Visitor for NodeVisitor {
-    fn branch_leave(&mut self, href: &HashRef, height: usize) -> bool {
-        self.nodes.push_back((href.clone(), height, self.stack.pop()));
-        true
-    }
-    fn branch_enter(&mut self,
-                    _href: &HashRef,
-                    childs: &Vec<HashRef>)
-                    -> bool {
-        self.stack.push(childs.clone());
-        true
-    }
-    fn leaf_enter(&mut self, href: &HashRef) -> bool {
-        self.nodes.push_back((href.clone(), 0, None));
-        // Do not proceed to fetch leaf data. We just need the metadata.
-        false
-    }
-}
-
-pub struct NodeIterator<B> {
-    walker: Walker<B>,
-    visitor: NodeVisitor,
-}
-
-impl<B> NodeIterator<B>
-    where B: HashTreeBackend
-{
-    pub fn new(backend: B,
-               root_hash: &Hash,
-               root_ref: Option<ChunkRef>)
-               -> Result<Option<NodeIterator<B>>, B::Err> {
-        Ok(try!(Walker::new(backend, root_hash.clone(), root_ref)).map(|w| {
-            NodeIterator {
-                walker: w,
-                visitor: NodeVisitor { stack: vec![], nodes: VecDeque::new() },
-            }
-        }))
-    }
-}
-
-impl<B: HashTreeBackend> Iterator for NodeIterator<B> {
-    type Item = (HashRef, usize, Option<Vec<HashRef>>);
-
-    fn next(&mut self) -> Option<Self::Item> {
-        while self.visitor.nodes.is_empty() &&
-              self.walker.resume(&mut self.visitor).unwrap() {}
-        self.visitor.nodes.pop_front()
     }
 }

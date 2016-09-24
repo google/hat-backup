@@ -40,6 +40,204 @@ fn try_a_few_times_then_panic<F>(mut f: F, msg: &str)
     panic!(msg.to_owned());
 }
 
+pub mod recover {
+    use hash;
+    use hash::tree;
+    use hat::walker;
+    use std::collections::VecDeque;
+    use std::mem;
+    use super::parse_dir_data;
+
+    #[derive(Clone)]
+    pub struct Node {
+        pub data: tree::HashRef,
+        pub height: usize,
+        pub childs: Option<Vec<tree::HashRef>>,
+    }
+
+    pub struct FileVisitor {
+        tops: Vec<hash::Hash>,
+        nodes: VecDeque<Node>,
+        stack: Vec<Vec<tree::HashRef>>,
+    }
+
+    impl FileVisitor {
+        pub fn new() -> FileVisitor {
+            FileVisitor {
+                tops: vec![],
+                nodes: VecDeque::new(),
+                stack: vec![],
+            }
+        }
+        pub fn is_empty(&self) -> bool {
+            self.tops.is_empty() && self.nodes.is_empty()
+        }
+        pub fn tops(&mut self) -> Vec<hash::Hash> {
+            mem::replace(&mut self.tops, vec![])
+        }
+        pub fn nodes(&mut self) -> VecDeque<Node> {
+            mem::replace(&mut self.nodes, VecDeque::new())
+        }
+    }
+
+    impl tree::Visitor for FileVisitor {
+        fn branch_enter(&mut self, _href: &tree::HashRef, childs: &Vec<tree::HashRef>) -> bool {
+            self.stack.push(childs.clone());
+            true
+        }
+        fn branch_leave(&mut self, href: &tree::HashRef, height: usize) -> bool {
+            self.nodes.push_back(Node {
+                data: href.clone(),
+                height: height,
+                childs: self.stack.pop(),
+            });
+            true
+        }
+        fn leaf_enter(&mut self, href: &tree::HashRef) -> bool {
+            self.nodes.push_back(Node {
+                data: href.clone(),
+                height: 0,
+                childs: None,
+            });
+
+            // Do not proceed to read the actual file data.
+            false
+        }
+        fn leaf_leave(&mut self, _chunk: Vec<u8>, _href: &tree::HashRef) -> bool {
+            unreachable!();
+        }
+    }
+
+    impl walker::LikesFiles for FileVisitor {
+        fn include_file(&mut self, file: &walker::FileEntry) -> bool {
+            if file.meta.data_hash.is_some() {
+                self.tops.push(file.hash.clone());
+                true
+            } else {
+                false
+            }
+        }
+
+        fn include_dir(&mut self, file: &walker::FileEntry) -> bool {
+            if file.meta.data_hash.is_none() {
+                self.tops.push(file.hash.clone());
+                true
+            } else {
+                false
+            }
+        }
+    }
+
+    pub struct DirVisitor {
+        nodes: VecDeque<Node>,
+        stack: Vec<Vec<tree::HashRef>>,
+        files: Vec<walker::FileEntry>,
+    }
+
+    impl DirVisitor {
+        pub fn new() -> DirVisitor {
+            DirVisitor {
+                nodes: VecDeque::new(),
+                stack: vec![],
+                files: vec![],
+            }
+        }
+        pub fn is_empty(&self) -> bool {
+            self.nodes.is_empty()
+        }
+        pub fn nodes(&mut self) -> VecDeque<Node> {
+            mem::replace(&mut self.nodes, VecDeque::new())
+        }
+     }
+
+    impl walker::HasFiles for DirVisitor {
+        fn files(&mut self) -> Vec<walker::FileEntry> {
+            mem::replace(&mut self.files, vec![])
+        }
+    }
+
+    impl tree::Visitor for DirVisitor {
+        fn branch_enter(&mut self, _href: &tree::HashRef, childs: &Vec<tree::HashRef>) -> bool {
+            self.stack.push(childs.clone());
+            true
+        }
+        fn branch_leave(&mut self, href: &tree::HashRef, height: usize) -> bool {
+            self.nodes.push_back(Node { data:href.clone(), height:height, childs: self.stack.pop()});
+            true
+        }
+        fn leaf_leave(&mut self, chunk: Vec<u8>, href: &tree::HashRef) -> bool {
+            self.nodes.push_back(Node { data: href.clone(), height: 0, childs: None});
+            parse_dir_data(&chunk[..], &mut self.files).unwrap();
+            true
+        }
+    }
+}
+
+fn parse_dir_data(chunk: &[u8], mut out: &mut Vec<walker::FileEntry>) -> Result<(), HatError> {
+    if chunk.is_empty() {
+        return Ok(())
+    }
+
+    let reader = try!(capnp::serialize_packed::read_message(&mut &chunk[..],
+                                                            capnp::message::ReaderOptions::new()));
+
+    let list = reader.get_root::<root_capnp::file_list::Reader>().unwrap();
+    for f in list.get_files().unwrap().iter() {
+        if f.get_name().unwrap().len() == 0 {
+            // Empty entry at end.
+            // TODO(jos): Can we get rid of these?
+            break;
+        }
+        let entry = key::Entry {
+            id: Some(f.get_id()),
+            name: f.get_name().unwrap().to_owned(),
+            created: match f.get_created().which().unwrap() {
+                root_capnp::file::created::Unknown(()) => None,
+                root_capnp::file::created::Timestamp(ts) => Some(ts),
+            },
+            modified: match f.get_modified().which().unwrap() {
+                root_capnp::file::modified::Unknown(()) => None,
+                root_capnp::file::modified::Timestamp(ts) => Some(ts),
+            },
+            accessed: match f.get_accessed().which().unwrap() {
+                root_capnp::file::accessed::Unknown(()) => None,
+                root_capnp::file::accessed::Timestamp(ts) => Some(ts),
+            },
+            data_hash: match f.get_content().which().unwrap() {
+                root_capnp::file::content::Data(r) => {
+                    Some(r.unwrap().get_hash().unwrap().to_owned())
+                }
+                root_capnp::file::content::Directory(_) => None,
+            },
+            // TODO(jos): Implement support for these remaining fields.
+            user_id: None,
+            group_id: None,
+            permissions: None,
+            data_length: None,
+            parent_id: None,
+        };
+        let hash = match f.get_content().which().unwrap() {
+            root_capnp::file::content::Data(r) => r.unwrap().get_hash().unwrap().to_owned(),
+            root_capnp::file::content::Directory(d) => d.unwrap().get_hash().unwrap().to_owned(),
+        };
+        let pref = match f.get_content().which().unwrap() {
+            root_capnp::file::content::Data(r) => {
+                blob::ChunkRef::read_msg(&r.unwrap().get_chunk_ref().unwrap()).unwrap()
+            }
+            root_capnp::file::content::Directory(d) => {
+                blob::ChunkRef::read_msg(&d.unwrap().get_chunk_ref().unwrap()).unwrap()
+            }
+        };
+
+        out.push(walker::FileEntry {
+            hash: hash::Hash { bytes: hash },
+            pref: pref,
+            meta: entry,
+        });
+    }
+    Ok(())
+}
+
 pub struct Family<B> {
     pub name: String,
     pub key_store: key::Store<B>,
@@ -143,74 +341,17 @@ impl<B: StoreBackend> Family<B> {
          dir_ref: blob::ChunkRef,
          backend: HTB)
          -> Result<Vec<(key::Entry, hash::Hash, blob::ChunkRef)>, HatError> {
-        let mut out = Vec::new();
         let it = try!(hash::tree::LeafIterator::new(backend, &dir_hash, Some(dir_ref)))
             .expect("unable to open dir");
 
+        let mut out = Vec::new();
         for chunk in it {
-            if chunk.is_empty() {
-                continue;
-            }
-            let reader =
-                capnp::serialize_packed::read_message(&mut &chunk[..],
-                                                      capnp::message::ReaderOptions::new())
-                    .unwrap();
-
-            let list = reader.get_root::<root_capnp::file_list::Reader>().unwrap();
-            for f in list.get_files().unwrap().iter() {
-                if f.get_name().unwrap().len() == 0 {
-                    // Empty entry at end.
-                    // TODO(jos): Can we get rid of these?
-                    break;
-                }
-                let entry = key::Entry {
-                    id: Some(f.get_id()),
-                    name: f.get_name().unwrap().to_owned(),
-                    created: match f.get_created().which().unwrap() {
-                        root_capnp::file::created::Unknown(()) => None,
-                        root_capnp::file::created::Timestamp(ts) => Some(ts),
-                    },
-                    modified: match f.get_modified().which().unwrap() {
-                        root_capnp::file::modified::Unknown(()) => None,
-                        root_capnp::file::modified::Timestamp(ts) => Some(ts),
-                    },
-                    accessed: match f.get_accessed().which().unwrap() {
-                        root_capnp::file::accessed::Unknown(()) => None,
-                        root_capnp::file::accessed::Timestamp(ts) => Some(ts),
-                    },
-                    data_hash: match f.get_content().which().unwrap() {
-                        root_capnp::file::content::Data(r) => {
-                            Some(r.unwrap().get_hash().unwrap().to_owned())
-                        }
-                        root_capnp::file::content::Directory(_) => None,
-                    },
-                    // TODO(jos): Implement support for these remaining fields.
-                    user_id: None,
-                    group_id: None,
-                    permissions: None,
-                    data_length: None,
-                    parent_id: None,
-                };
-                let hash = match f.get_content().which().unwrap() {
-                    root_capnp::file::content::Data(r) => r.unwrap().get_hash().unwrap().to_owned(),
-                    root_capnp::file::content::Directory(d) => {
-                        d.unwrap().get_hash().unwrap().to_owned()
-                    }
-                };
-                let pref = match f.get_content().which().unwrap() {
-                    root_capnp::file::content::Data(r) => {
-                        blob::ChunkRef::read_msg(&r.unwrap().get_chunk_ref().unwrap()).unwrap()
-                    }
-                    root_capnp::file::content::Directory(d) => {
-                        blob::ChunkRef::read_msg(&d.unwrap().get_chunk_ref().unwrap()).unwrap()
-                    }
-                };
-
-                out.push((entry, hash::Hash { bytes: hash }, pref));
+            if !chunk.is_empty() {
+                try!(parse_dir_data(&chunk[..], &mut out));
             }
         }
 
-        Ok(out)
+        Ok(out.into_iter().map(|f| (f.meta, f.hash, f.pref)).collect())
     }
 
     pub fn commit(&mut self,

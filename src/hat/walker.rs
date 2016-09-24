@@ -13,41 +13,49 @@
 // limitations under the License.
 
 
-use backend::StoreBackend;
 use blob;
-use capnp;
-use errors::HatError;
 use hash;
-use hat::insert_path_handler::InsertPathHandler;
 use key;
-use root_capnp;
 use std::collections::VecDeque;
-use std::fs;
-use std::io::Write;
-use std::path::PathBuf;
-use std::str;
-use std::sync::mpsc;
-use util::{FileIterator, FnBox, PathHandler};
 
-struct FileEntry(hash::Hash, blob::ChunkRef, key::Entry);
 
-trait Visitor {
-    fn enter_file(&mut self, _file: &FileEntry) -> bool {
+#[derive(Clone)]
+pub struct FileEntry {
+    pub hash: hash::Hash,
+    pub pref: blob::ChunkRef,
+    pub meta: key::Entry,
+}
+
+pub trait LikesFiles {
+    fn include_file(&mut self, _file: &FileEntry) -> bool {
+        true
+    }
+    fn include_dir(&mut self, _file: &FileEntry) -> bool {
         true
     }
 }
 
-trait HasFiles {
+pub trait HasFiles {
     fn files(&mut self) -> Vec<FileEntry> {
         vec![]
     }
 }
 
-struct Walker<B> {
+enum StackItem {
+    File(FileEntry),
+    Dir(FileEntry),
+}
+
+enum Child<B> {
+    File(hash::tree::Walker<B>),
+    Dir(Box<Walker<B>>),
+}
+
+pub struct Walker<B> {
     backend: B,
     tree: hash::tree::Walker<B>,
-    child: Option<Box<Walker<B>>>,
-    stack: VecDeque<Walker<B>>,
+    child: Option<Child<B>>,
+    stack: VecDeque<StackItem>,
 }
 
 impl<B> Walker<B>
@@ -66,47 +74,62 @@ impl<B> Walker<B>
         })
     }
 
-    pub fn resume_child<V, TV>(&mut self,
-                               mut visitor: &mut V,
-                               mut tvisitor: &mut TV)
-                               -> Result<bool, B::Err>
-        where V: Visitor,
-              TV: hash::tree::Visitor,
-              TV: HasFiles
+    pub fn resume_child<FV, DV>(&mut self,
+                                mut file_v: &mut FV,
+                                mut dir_v: &mut DV)
+                                -> Result<bool, B::Err>
+        where FV: LikesFiles,
+              DV: HasFiles,
+              FV: hash::tree::Visitor,
+              DV: hash::tree::Visitor
     {
-        if let Some(ref mut c) = self.child.as_mut() {
-            if try!(c.resume(visitor, tvisitor)) {
-                return Ok(true);
-            }
-        }
-        return Ok(false);
+        Ok(match self.child.as_mut() {
+            Some(&mut Child::File(ref mut tree)) => try!(tree.resume(file_v)),
+            Some(&mut Child::Dir(ref mut walker)) => try!(walker.resume(file_v, dir_v)),
+            None => false,
+        })
     }
 
 
-    pub fn resume<V, TV>(&mut self,
-                         mut visitor: &mut V,
-                         mut tvisitor: &mut TV)
-                         -> Result<bool, B::Err>
-        where V: Visitor,
-              TV: hash::tree::Visitor,
-              TV: HasFiles
+    pub fn resume<FV, DV>(&mut self,
+                          mut file_v: &mut FV,
+                          mut dir_v: &mut DV)
+                          -> Result<bool, B::Err>
+        where FV: LikesFiles,
+              DV: HasFiles,
+              FV: hash::tree::Visitor,
+              DV: hash::tree::Visitor
     {
-        if try!(self.resume_child(visitor, tvisitor)) {
+        if try!(self.resume_child(file_v, dir_v)) {
             return Ok(true);
         }
 
-        self.child = self.stack.pop_front().map(Box::new);
+        self.child = match self.stack.pop_front() {
+            Some(StackItem::File(f)) => {
+                Some(Child::File(try!(hash::tree::Walker::new(self.backend.clone(),
+                                                              f.hash,
+                                                              Some(f.pref)))
+                    .unwrap()))
+            }
+            Some(StackItem::Dir(f)) => {
+                Some(Child::Dir(Box::new(Walker::new(self.backend.clone(), f.hash, Some(f.pref))
+                    .unwrap())))
+            }
+            None => None,
+        };
+
         if self.child.is_none() {
-            if !try!(self.tree.resume(tvisitor)) {
+            if !try!(self.tree.resume(dir_v)) {
                 return Ok(false);
             }
-            for file in tvisitor.files() {
-                if visitor.enter_file(&file) {
-                    self.stack
-                        .push_back(try!(Walker::new(self.backend.clone(), file.0, Some(file.1))));
+            for file in dir_v.files() {
+                if file_v.include_file(&file) {
+                    self.stack.push_back(StackItem::File(file.clone()));
+                } else if file_v.include_dir(&file) {
+                    self.stack.push_back(StackItem::Dir(file));
                 }
             }
         }
-        self.resume(visitor, tvisitor)
+        self.resume(file_v, dir_v)
     }
 }
