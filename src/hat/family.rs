@@ -148,7 +148,7 @@ pub mod recover {
         pub fn nodes(&mut self) -> VecDeque<Node> {
             mem::replace(&mut self.nodes, VecDeque::new())
         }
-     }
+    }
 
     impl walker::HasFiles for DirVisitor {
         fn files(&mut self) -> Vec<walker::FileEntry> {
@@ -162,11 +162,19 @@ pub mod recover {
             true
         }
         fn branch_leave(&mut self, href: &tree::HashRef, height: usize) -> bool {
-            self.nodes.push_back(Node { data:href.clone(), height:height, childs: self.stack.pop()});
+            self.nodes.push_back(Node {
+                data: href.clone(),
+                height: height,
+                childs: self.stack.pop(),
+            });
             true
         }
         fn leaf_leave(&mut self, chunk: Vec<u8>, href: &tree::HashRef) -> bool {
-            self.nodes.push_back(Node { data: href.clone(), height: 0, childs: None});
+            self.nodes.push_back(Node {
+                data: href.clone(),
+                height: 0,
+                childs: None,
+            });
             parse_dir_data(&chunk[..], &mut self.files).unwrap();
             true
         }
@@ -175,7 +183,7 @@ pub mod recover {
 
 fn parse_dir_data(chunk: &[u8], mut out: &mut Vec<walker::FileEntry>) -> Result<(), HatError> {
     if chunk.is_empty() {
-        return Ok(())
+        return Ok(());
     }
 
     let reader = try!(capnp::serialize_packed::read_message(&mut &chunk[..],

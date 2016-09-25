@@ -355,8 +355,7 @@ impl<B: StoreBackend> HatRc<B> {
                         -> Result<(), HatError> {
         fn recover_entry<B: StoreBackend>(hashes: &hash::HashIndex,
                                           blobs: &blob::BlobStore<B>,
-                                          node: family::recover::Node)
-        {
+                                          node: family::recover::Node) {
             let pref = node.data.persistent_ref.clone();
 
             // Make sure we have the blob described.
@@ -376,7 +375,7 @@ impl<B: StoreBackend> HatRc<B> {
             };
 
             // Now insert the hash information if needed.
-            let entry = hash::Entry{
+            let entry = hash::Entry {
                 hash: node.data.hash,
                 persistent_ref: Some(pref.clone()),
                 level: node.height as i64,
@@ -391,8 +390,9 @@ impl<B: StoreBackend> HatRc<B> {
 
         let mut dir_v = family::recover::DirVisitor::new();
         let mut file_v = family::recover::FileVisitor::new();
-        let mut walk =
-            try!(walker::Walker::new(self.hash_backend(), final_hash.clone(), Some(dir_ref.clone())));
+        let mut walk = try!(walker::Walker::new(self.hash_backend(),
+                                                final_hash.clone(),
+                                                Some(dir_ref.clone())));
 
         let mut tops = vec![];
         loop {
