@@ -263,14 +263,14 @@ impl<B: StoreBackend> Family<B> {
                            file: key::Entry,
                            is_directory: bool,
                            contents: Option<FileIterator>)
-                           -> Result<(), HatError> {
+                           -> Result<u64, HatError> {
         let f = if is_directory {
             None
         } else {
             Some(Box::new(move |()| contents) as Box<FnBox<(), _>>)
         };
         match try!(self.key_store_process[0].send_reply(key::Msg::Insert(file, f))) {
-            key::Reply::Id(..) => return Ok(()),
+            key::Reply::Id(id) => return Ok(id),
             _ => Err(From::from("Unexpected reply from key store")),
         }
     }
