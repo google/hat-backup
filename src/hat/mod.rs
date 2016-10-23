@@ -395,12 +395,7 @@ impl<B: StoreBackend> HatRc<B> {
                                                 Some(dir_ref.clone())));
 
         let mut tops = vec![];
-        loop {
-            while dir_v.is_empty() && file_v.is_empty() &&
-                  try!(walk.resume(&mut file_v, &mut dir_v)) {}
-            if dir_v.is_empty() && file_v.is_empty() {
-                break;
-            }
+        while {
             for node in file_v.nodes() {
                 recover_entry(&self.hash_index, &self.blob_store, node);
             }
@@ -408,7 +403,8 @@ impl<B: StoreBackend> HatRc<B> {
             for node in dir_v.nodes() {
                 recover_entry(&self.hash_index, &self.blob_store, node);
             }
-        }
+            try!(walk.resume(&mut file_v, &mut dir_v))
+        } {}
 
         let family = self.open_family(family_name.clone())
             .expect(&format!("Could not open family '{}'", family_name));
