@@ -34,7 +34,7 @@ sodiumoxide = "*"
 time = "*"
 void = "1"
 scoped-pool = "1.*"
-
+enum_primitive = "0.1.*"
 
 [dependencies.diesel]
 default-features = false
