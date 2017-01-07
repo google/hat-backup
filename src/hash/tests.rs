@@ -71,11 +71,6 @@ impl HashTreeBackend for MemoryBackend {
                     blob_id: hash.bytes.clone(),
                     offset: 0,
                     length: chunk.len(),
-                    kind: if *level == 0 {
-                        Kind::TreeLeaf
-                    } else {
-                        Kind::TreeBranch
-                    },
                     packing: None,
                     key: None,
                 })
@@ -89,31 +84,24 @@ impl HashTreeBackend for MemoryBackend {
                     level: i64,
                     childs: Option<Vec<i64>>,
                     chunk: &[u8])
-                    -> Result<(i64, HashRef), Self::Err> {
+                    -> Result<(i64, ChunkRef), Self::Err> {
+        let len = chunk.len();
         let mut guarded_seen = self.seen_chunks.lock().unwrap();
         guarded_seen.insert(chunk.to_vec());
 
         let mut guarded_chunks = self.chunks.lock().unwrap();
         guarded_chunks.insert(hash.bytes.clone(), (level, childs, chunk.to_vec()));
 
-        let len = hash.bytes.len();
 
         Ok((0,
-            (HashRef {
-            hash: hash.clone(),
-            persistent_ref: ChunkRef {
+            ChunkRef {
                 blob_id: hash.bytes.clone(),
                 offset: 0,
                 length: len,
-                kind: if level == 0 {
-                    Kind::TreeLeaf
-                } else {
-                    Kind::TreeBranch
-                },
                 packing: None,
                 key: None,
             },
-        })))
+        ))
     }
 }
 
@@ -127,9 +115,9 @@ fn identity_many_small_blocks() {
             ht.append(b"a").unwrap();
         }
 
-        let (hash, hash_ref) = ht.hash().unwrap();
+        let hash_ref = ht.hash().unwrap();
 
-        let mut tree_it = LeafIterator::new(backend, &hash, Some(hash_ref))
+        let mut tree_it = LeafIterator::new(backend, hash_ref)
             .unwrap()
             .expect("tree not found");
 
@@ -162,9 +150,9 @@ fn identity_empty() {
 
     ht.append(&block[..]).unwrap();
 
-    let (hash, hash_ref) = ht.hash().unwrap();
+    let hash_ref = ht.hash().unwrap();
 
-    let mut it = LeafIterator::new(backend, &hash, Some(hash_ref))
+    let mut it = LeafIterator::new(backend, hash_ref)
         .unwrap()
         .expect("tree not found");
 
@@ -181,9 +169,9 @@ fn identity_append1() {
 
     ht.append(&block[..]).unwrap();
 
-    let (hash, hash_ref) = ht.hash().unwrap();
+    let hash_ref = ht.hash().unwrap();
 
-    let mut it = LeafIterator::new(backend, &hash, Some(hash_ref))
+    let mut it = LeafIterator::new(backend, hash_ref)
         .unwrap()
         .expect("tree not found");
     assert_eq!(Some(block), it.next());
@@ -202,9 +190,9 @@ fn identity_append5() {
         ht.append(&block[..]).unwrap();
     }
 
-    let (hash, hash_ref) = ht.hash().unwrap();
+    let hash_ref = ht.hash().unwrap();
 
-    let mut it = LeafIterator::new(backend.clone(), &hash, Some(hash_ref))
+    let mut it = LeafIterator::new(backend.clone(), hash_ref)
         .unwrap()
         .expect("tree not found");
 
@@ -233,9 +221,9 @@ fn identity_implicit_flush() {
         assert!(backend.saw_chunk(&vec![i]));
     }
 
-    let (hash, hash_ref) = ht.hash().unwrap();
+    let hash_ref = ht.hash().unwrap();
 
-    let it = LeafIterator::new(backend, &hash, Some(hash_ref))
+    let it = LeafIterator::new(backend, hash_ref)
         .unwrap()
         .expect("tree not found");
 
@@ -257,13 +245,13 @@ fn identity_1_short_of_flush() {
         ht.append(&bytes[..]).unwrap();
     }
 
-    let (hash, hash_ref) = ht.hash().unwrap();
+    let hash_ref = ht.hash().unwrap();
 
     for i in 1u8..order as u8 {
         assert!(backend.saw_chunk(&vec![i]));
     }
 
-    let it = LeafIterator::new(backend, &hash, Some(hash_ref))
+    let it = LeafIterator::new(backend, hash_ref)
         .unwrap()
         .expect("tree not found");
 

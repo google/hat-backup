@@ -30,8 +30,26 @@ pub enum Key {
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub enum Kind {
-    TreeBranch = 1,
-    TreeLeaf = 2,
+    TreeBranch(i64),
+    TreeLeaf,
+}
+
+pub fn node_from_height(height: i64) -> Kind {
+    assert!(height >= 0);
+    match height {
+        0 => Kind::TreeLeaf,
+        h => Kind::TreeBranch(h),
+    }
+}
+
+pub fn node_height(kind: &Kind) -> i64 {
+    match kind {
+        &Kind::TreeBranch(height) => {
+            assert!(height >= 1);
+            height
+        },
+        &Kind::TreeLeaf => 0,
+    }
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -39,7 +57,6 @@ pub struct ChunkRef {
     pub blob_id: Vec<u8>,
     pub offset: usize,
     pub length: usize,
-    pub kind: Kind,
     pub packing: Option<Packing>,
     pub key: Option<Key>,
 }
@@ -70,10 +87,6 @@ impl ChunkRef {
         msg.set_blob_id(&self.blob_id[..]);
         msg.set_offset(self.offset as i64);
         msg.set_length(self.length as i64);
-        match self.kind {
-            Kind::TreeLeaf => msg.borrow().init_kind().set_tree_leaf(()),
-            Kind::TreeBranch => msg.borrow().init_kind().set_tree_branch(()),
-        }
 
         if let Some(Key::XSalsa20Poly1305(ref salsa)) = self.key {
             msg.borrow().init_key().set_xsalsa20_poly1305(salsa.0.as_ref());
@@ -93,10 +106,6 @@ impl ChunkRef {
             blob_id: try!(msg.get_blob_id()).to_owned(),
             offset: msg.get_offset() as usize,
             length: msg.get_length() as usize,
-            kind: match try!(msg.get_kind().which()) {
-                root_capnp::chunk_ref::kind::TreeBranch(()) => Kind::TreeBranch,
-                root_capnp::chunk_ref::kind::TreeLeaf(()) => Kind::TreeLeaf,
-            },
             packing: match try!(msg.get_packing().which()) {
                 root_capnp::chunk_ref::packing::None(()) => None,
                 root_capnp::chunk_ref::packing::Gzip(()) => Some(Packing::GZip),

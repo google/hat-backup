@@ -14,7 +14,6 @@
 
 
 use backend::StoreBackend;
-use blob;
 use capnp;
 use errors::HatError;
 use hash;
@@ -111,7 +110,7 @@ pub mod recover {
     impl walker::LikesFiles for FileVisitor {
         fn include_file(&mut self, file: &walker::FileEntry) -> bool {
             if file.meta.data_hash.is_some() {
-                self.tops.push(file.hash.clone());
+                self.tops.push(file.hash_ref.hash.clone());
                 true
             } else {
                 false
@@ -120,7 +119,7 @@ pub mod recover {
 
         fn include_dir(&mut self, file: &walker::FileEntry) -> bool {
             if file.meta.data_hash.is_none() {
-                self.tops.push(file.hash.clone());
+                self.tops.push(file.hash_ref.hash.clone());
                 true
             } else {
                 false
@@ -186,8 +185,16 @@ fn parse_dir_data(chunk: &[u8], mut out: &mut Vec<walker::FileEntry>) -> Result<
         return Ok(());
     }
 
-    let reader = try!(capnp::serialize_packed::read_message(&mut &chunk[..],
-                                                            capnp::message::ReaderOptions::new()));
+    use std::hash::{Hash, Hasher, SipHasher};
+
+    fn hash<T: Hash>(t: &T) -> u64 {
+        let mut s = SipHasher::new();
+        t.hash(&mut s);
+        s.finish()
+    }
+
+    let reader = capnp::serialize_packed::read_message(&mut &chunk[..],
+                                                       capnp::message::ReaderOptions::new()).unwrap();
 
     let list = reader.get_root::<root_capnp::file_list::Reader>().unwrap();
     for f in list.get_files().unwrap().iter() {
@@ -224,22 +231,13 @@ fn parse_dir_data(chunk: &[u8], mut out: &mut Vec<walker::FileEntry>) -> Result<
             data_length: None,
             parent_id: None,
         };
-        let hash = match f.get_content().which().unwrap() {
-            root_capnp::file::content::Data(r) => r.unwrap().get_hash().unwrap().to_owned(),
-            root_capnp::file::content::Directory(d) => d.unwrap().get_hash().unwrap().to_owned(),
-        };
-        let pref = match f.get_content().which().unwrap() {
-            root_capnp::file::content::Data(r) => {
-                blob::ChunkRef::read_msg(&r.unwrap().get_chunk_ref().unwrap()).unwrap()
-            }
-            root_capnp::file::content::Directory(d) => {
-                blob::ChunkRef::read_msg(&d.unwrap().get_chunk_ref().unwrap()).unwrap()
-            }
-        };
+        let hash_ref = match f.get_content().which().unwrap() {
+            root_capnp::file::content::Data(r) => hash::tree::HashRef::read_msg(&r.expect("File has no data reference")),
+            root_capnp::file::content::Directory(d) => hash::tree::HashRef::read_msg(&d.expect("Directory has no listing reference")),
+        }.unwrap();
 
         out.push(walker::FileEntry {
-            hash: hash::Hash { bytes: hash },
-            pref: pref,
+            hash_ref: hash_ref,
             meta: entry,
         });
     }
@@ -345,11 +343,10 @@ impl<B: StoreBackend> Family<B> {
 
     pub fn fetch_dir_data<HTB: hash::tree::HashTreeBackend<Err = key::MsgError>>
         (&self,
-         dir_hash: &hash::Hash,
-         dir_ref: blob::ChunkRef,
+         dir_hash: hash::tree::HashRef,
          backend: HTB)
-         -> Result<Vec<(key::Entry, hash::Hash, blob::ChunkRef)>, HatError> {
-        let it = try!(hash::tree::LeafIterator::new(backend, &dir_hash, Some(dir_ref)))
+         -> Result<Vec<(key::Entry, hash::tree::HashRef)>, HatError> {
+        let it = try!(hash::tree::LeafIterator::new(backend, dir_hash))
             .expect("unable to open dir");
 
         let mut out = Vec::new();
@@ -359,12 +356,12 @@ impl<B: StoreBackend> Family<B> {
             }
         }
 
-        Ok(out.into_iter().map(|f| (f.meta, f.hash, f.pref)).collect())
+        Ok(out.into_iter().map(|f| (f.meta, f.hash_ref)).collect())
     }
 
     pub fn commit(&mut self,
                   hash_ch: &mpsc::Sender<hash::Hash>)
-                  -> Result<(hash::Hash, blob::ChunkRef), HatError> {
+                  -> Result<hash::tree::HashRef, HatError> {
         let mut top_tree = self.key_store.hash_tree_writer();
         try!(self.commit_to_tree(&mut top_tree, None, hash_ch));
 
@@ -421,9 +418,8 @@ impl<B: StoreBackend> Family<B> {
                             hash_ref_msg.init_root::<root_capnp::hash_ref::Builder>();
 
                         // Populate data hash and ChunkRef.
-                        hash_ref_root.set_hash(&hash_bytes);
                         data_ref.expect("has data")
-                            .populate_msg(hash_ref_root.borrow().init_chunk_ref());
+                            .populate_msg(hash_ref_root.borrow());
                         // Set as file content.
                         try!(file_msg.borrow()
                             .init_content()
@@ -436,21 +432,20 @@ impl<B: StoreBackend> Family<B> {
                         let mut inner_tree = self.key_store.hash_tree_writer();
                         try!(self.commit_to_tree(&mut inner_tree, entry.id, hash_ch));
                         // Store a reference for the sub-tree in our tree:
-                        let (dir_hash, dir_ref) = try!(inner_tree.hash());
+                        let dir_hash_ref = try!(inner_tree.hash());
 
                         let mut hash_ref_msg = capnp::message::Builder::new_default();
                         let mut hash_ref_root =
                             hash_ref_msg.init_root::<root_capnp::hash_ref::Builder>();
 
                         // Populate directory hash and ChunkRef.
-                        hash_ref_root.set_hash(&dir_hash.bytes);
-                        dir_ref.populate_msg(hash_ref_root.borrow().init_chunk_ref());
+                        dir_hash_ref.populate_msg(hash_ref_root.borrow());
                         // Set as directory content.
                         try!(file_msg.borrow()
                             .init_content()
                             .set_directory(hash_ref_root.as_reader()));
 
-                        hash_ch.send(dir_hash).unwrap();
+                        hash_ch.send(dir_hash_ref.hash).unwrap();
                     }
                 }
             }

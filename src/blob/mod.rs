@@ -40,7 +40,7 @@ mod benchmarks;
 
 
 pub use self::blob::Blob;
-pub use self::chunk::{ChunkRef, Key, Kind, Packing};
+pub use self::chunk::{ChunkRef, Key, Kind, Packing, node_from_height, node_height};
 pub use self::index::{BlobDesc, BlobIndex};
 
 
@@ -121,11 +121,11 @@ impl<B: StoreBackend> StoreInner<B> {
         if chunk.is_empty() {
             let href = HashRef {
                 hash: hash,
+                kind: kind,
                 persistent_ref: ChunkRef {
                     blob_id: vec![0],
                     offset: 0,
                     length: 0,
-                    kind: kind,
                     packing: None,
                     key: None,
                 },
@@ -137,9 +137,9 @@ impl<B: StoreBackend> StoreInner<B> {
 
         let mut href = HashRef {
             hash: hash,
+            kind: kind,
             persistent_ref: ChunkRef {
                 blob_id: self.blob_desc.name.clone(),
-                kind: kind,
                 packing: None,
                 // updated by try_append:
                 offset: 0,
@@ -178,11 +178,11 @@ impl<B: StoreBackend> StoreInner<B> {
         blob.try_append(&data,
                         &mut HashRef {
                             hash: hash,
+                            kind: Kind::TreeLeaf,
                             persistent_ref: ChunkRef {
                                 blob_id: name.as_bytes().to_owned(),
                                 offset: 0,
                                 length: 0,
-                                kind: Kind::TreeLeaf,
                                 packing: None,
                                 key: None,
                             },

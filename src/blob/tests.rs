@@ -115,7 +115,6 @@ fn blobid_identity() {
             blob_id: name.to_vec(),
             offset: offset,
             length: length,
-            kind: Kind::TreeBranch,
             packing: None,
             key: None,
         };
@@ -129,11 +128,11 @@ fn blobid_identity() {
 fn blob_reuse() {
     let mut c1 = hash::tree::HashRef {
         hash: hash::Hash::new(&[]),
+        kind: Kind::TreeLeaf,
         persistent_ref: ChunkRef {
             blob_id: Vec::new(),
             offset: 0,
             length: 0,
-            kind: Kind::TreeLeaf,
             packing: None,
             key: None,
         },
@@ -175,11 +174,11 @@ fn blob_identity() {
         for chunk in chunks.iter() {
             let mut cref = hash::tree::HashRef {
                 hash: hash::Hash::new(&[]),
+                kind: Kind::TreeLeaf,
                 persistent_ref: ChunkRef {
                     blob_id: Vec::new(),
                     offset: 0,
                     length: 0,
-                    kind: Kind::TreeLeaf,
                     packing: None,
                     key: None,
                 },
@@ -233,7 +232,6 @@ fn random_input_fails() {
             blob_id: Vec::new(),
             offset: 0,
             length: 0,
-            kind: Kind::TreeLeaf,
             packing: None,
             key: Some(Key::XSalsa20Poly1305(xsalsa20poly1305::Key::from_slice(&key[..]).unwrap())),
         };
@@ -255,11 +253,11 @@ fn empty_blocks_blob_ciphertext(blob: &mut Blob, blocksize: usize) -> Vec<u8> {
     loop {
         let mut cref = hash::tree::HashRef {
             hash: hash::Hash::new(&block[..]),
+            kind: Kind::TreeLeaf,
             persistent_ref: ChunkRef {
                 blob_id: Vec::new(),
                 offset: 0,
                 length: block.len(),
-                kind: Kind::TreeLeaf,
                 packing: None,
                 key: None,
             },

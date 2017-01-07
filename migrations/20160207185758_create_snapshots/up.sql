@@ -5,5 +5,5 @@ CREATE TABLE IF NOT EXISTS snapshots (
         snapshot_id	INTEGER,
         msg		BLOB,
 	hash		BLOB,
-	tree_ref	BLOB
+	hash_ref	BLOB
 );

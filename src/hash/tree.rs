@@ -18,7 +18,7 @@
 //! a streaming hash-tree reader.
 
 
-use blob::{ChunkRef, Kind};
+use blob::{ChunkRef, Kind, node_height, node_from_height};
 
 use capnp;
 use hash::Hash;
@@ -33,22 +33,25 @@ use std::fmt;
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct HashRef {
     pub hash: Hash,
+    pub kind: Kind,
     pub persistent_ref: ChunkRef,
 }
 
 impl HashRef {
-    fn populate_msg(&self, msg: root_capnp::hash_ref::Builder) {
+    pub fn populate_msg(&self, msg: root_capnp::hash_ref::Builder) {
         let mut msg = msg;
         msg.set_hash(&self.hash.bytes[..]);
+        msg.set_height(node_height(&self.kind));
         {
             let mut chunk_ref = msg.init_chunk_ref();
             self.persistent_ref.populate_msg(chunk_ref.borrow());
         }
     }
 
-    fn read_msg(msg: &root_capnp::hash_ref::Reader) -> Result<HashRef, capnp::Error> {
+    pub fn read_msg(msg: &root_capnp::hash_ref::Reader) -> Result<HashRef, capnp::Error> {
         Ok(HashRef {
             hash: Hash { bytes: try!(msg.get_hash()).to_owned() },
+            kind: node_from_height(msg.get_height()),
             persistent_ref: try!(ChunkRef::read_msg(&try!(msg.get_chunk_ref()))),
         })
     }
@@ -86,7 +89,7 @@ pub trait HashTreeBackend: Clone {
                     i64,
                     Option<Vec<i64>>,
                     &[u8])
-                    -> Result<(i64, HashRef), Self::Err>;
+                    -> Result<(i64, ChunkRef), Self::Err>;
 }
 
 
@@ -129,14 +132,14 @@ fn test_hash_refs_identity() {
             blob_id: blob.clone(),
             offset: n,
             length: n,
-            kind: Kind::TreeBranch,
             packing: None,
             key: None,
         };
         let mut v = vec![];
-        for _ in 0..count {
+        for i in 1..count+1 {
             v.push(HashRef {
                 hash: Hash { bytes: hash.clone() },
+                kind: Kind::TreeBranch(i as i64),
                 persistent_ref: chunk_ref.clone(),
             });
         }
@@ -204,7 +207,11 @@ impl<B: HashTreeBackend> SimpleHashTreeWriter<B> {
                  childs: Option<Vec<i64>>)
                  -> Result<(), B::Err> {
         let hash = Hash::new(&data[..]);
-        let (id, hash_ref) = try!(self.backend.insert_chunk(&hash, level as i64, childs, &data));
+        let (id, chunk_ref) = try!(self.backend.insert_chunk(&hash, level as i64, childs, &data));
+        let hash_ref = HashRef{
+            hash: hash,
+            kind: node_from_height(level as i64),
+            persistent_ref: chunk_ref};
         self.append_hashref_at(level, id, hash_ref)
     }
 
@@ -244,7 +251,7 @@ impl<B: HashTreeBackend> SimpleHashTreeWriter<B> {
     /// This also flushes and finalizes the tree. It should be considered frozen after calling
     /// `hash()`, i.e. it's Ok to call `hash()` multiple times, but it's **not Ok** to call
     /// `append()` after `hash()`.
-    pub fn hash(&mut self) -> Result<(Hash, ChunkRef), B::Err> {
+    pub fn hash(&mut self) -> Result<HashRef, B::Err> {
         // Empty hash tree is equivalent to hash tree of one empty block:
         if self.levels.is_empty() {
             try!(self.append(&[]));
@@ -270,7 +277,7 @@ impl<B: HashTreeBackend> SimpleHashTreeWriter<B> {
         assert_eq!(self.levels.last().map(|x| x.len()), Some(1));
         let &(_, ref hashref) = self.levels.last().and_then(|x| x.last()).expect("asserted");
 
-        Ok((hashref.hash.clone(), hashref.persistent_ref.clone()))
+        Ok(hashref.clone())
     }
 }
 
@@ -308,28 +315,15 @@ impl<B> Walker<B>
     where B: HashTreeBackend
 {
     pub fn new(backend: B,
-               root_hash: Hash,
-               root_ref: Option<ChunkRef>)
+               root_hash: HashRef)
                -> Result<Option<Walker<B>>, B::Err> {
-        if root_hash.bytes.is_empty() {
-            return Ok(None);
-        }
-
-        let pref = if let None = root_ref {
-                backend.fetch_persistent_ref(&root_hash)
-            } else {
-                root_ref
-            }
-            .expect("Could not find tree root hash");
         Ok(Some(Walker {
             backend: backend,
-            height: 0,
-            stack: vec![StackItem::Enter(HashRef {
-                            hash: root_hash,
-                            persistent_ref: pref,
-                        })],
+            height: 0, // node_height(&root_hash.kind) as usize,
+            stack: vec![StackItem::Enter(root_hash)]
         }))
     }
+
     pub fn resume<V>(&mut self, visitor: &mut V) -> Result<bool, B::Err>
         where V: Visitor
     {
@@ -357,7 +351,7 @@ impl<B> Walker<B>
                     .map(|opt| opt.expect("Invalid hash ref"))
             };
 
-            match &node.persistent_ref.kind {
+            match &node.kind {
                 &Kind::TreeLeaf => {
                     // Reset height.
                     self.height = 0;
@@ -368,7 +362,7 @@ impl<B> Walker<B>
                         }
                     }
                 }
-                &Kind::TreeBranch => {
+                &Kind::TreeBranch(..) => {
                     let data = try!(fetch_chunk(&self.backend, &node));
                     let mut new_childs = hash_refs_from_bytes(&data[..]).unwrap();
                     if visitor.branch_enter(&node, &new_childs) {
@@ -393,10 +387,9 @@ impl<B> LeafIterator<B>
     where B: HashTreeBackend
 {
     pub fn new(backend: B,
-               root_hash: &Hash,
-               root_ref: Option<ChunkRef>)
+               root_ref: HashRef)
                -> Result<Option<LeafIterator<B>>, B::Err> {
-        Ok(try!(Walker::new(backend, root_hash.clone(), root_ref)).map(|w| {
+        Ok(try!(Walker::new(backend, root_ref)).map(|w| {
             LeafIterator {
                 walker: w,
                 visitor: LeafVisitor { leafs: VecDeque::new() },

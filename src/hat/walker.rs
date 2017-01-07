@@ -13,7 +13,6 @@
 // limitations under the License.
 
 
-use blob;
 use hash;
 use key;
 use std::collections::VecDeque;
@@ -21,8 +20,7 @@ use std::collections::VecDeque;
 
 #[derive(Clone)]
 pub struct FileEntry {
-    pub hash: hash::Hash,
-    pub pref: blob::ChunkRef,
+    pub hash_ref: hash::tree::HashRef,
     pub meta: key::Entry,
 }
 
@@ -61,11 +59,8 @@ pub struct Walker<B> {
 impl<B> Walker<B>
     where B: hash::tree::HashTreeBackend
 {
-    pub fn new(backend: B,
-               root_hash: hash::Hash,
-               root_ref: Option<blob::ChunkRef>)
-               -> Result<Walker<B>, B::Err> {
-        let tree = try!(hash::tree::Walker::new(backend.clone(), root_hash, root_ref)).unwrap();
+    pub fn new(backend: B, root_hash: hash::tree::HashRef) -> Result<Walker<B>, B::Err> {
+        let tree = try!(hash::tree::Walker::new(backend.clone(), root_hash)).unwrap();
         Ok(Walker {
             backend: backend,
             tree: tree,
@@ -106,14 +101,11 @@ impl<B> Walker<B>
 
         self.child = match self.stack.pop_front() {
             Some(StackItem::File(f)) => {
-                Some(Child::File(try!(hash::tree::Walker::new(self.backend.clone(),
-                                                              f.hash,
-                                                              Some(f.pref)))
+                Some(Child::File(try!(hash::tree::Walker::new(self.backend.clone(), f.hash_ref))
                     .unwrap()))
             }
             Some(StackItem::Dir(f)) => {
-                Some(Child::Dir(Box::new(Walker::new(self.backend.clone(), f.hash, Some(f.pref))
-                    .unwrap())))
+                Some(Child::Dir(Box::new(Walker::new(self.backend.clone(), f.hash_ref).unwrap())))
             }
             None => None,
         };
