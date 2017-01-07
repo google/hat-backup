@@ -33,7 +33,7 @@ rustc-serialize = "*"
 sodiumoxide = "*"
 time = "*"
 void = "1"
-scoped-pool = "1.*"
+scoped-pool = "*"
 
 
 [dependencies.diesel]
