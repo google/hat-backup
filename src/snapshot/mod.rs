@@ -174,10 +174,10 @@ impl SnapshotIndex {
 
         row_opt.map(|snap| {
             (Info {
-                unique_id: snap.id,
-                family_id: snap.family_id,
-                snapshot_id: snap.snapshot_id,
-            },
+                 unique_id: snap.id,
+                 family_id: snap.family_id,
+                 snapshot_id: snap.snapshot_id,
+             },
              ::hash::Hash { bytes: snap.hash.unwrap().to_vec() },
              snap.hash_ref.and_then(|r| ::hash::tree::HashRef::from_bytes(&mut &r[..]).ok()))
         })
@@ -262,7 +262,9 @@ impl SnapshotIndex {
     }
 
     /// Extract latest snapshot data for family.
-    pub fn latest(&mut self, family: &str) -> Option<(Info, hash::Hash, Option<hash::tree::HashRef>)> {
+    pub fn latest(&mut self,
+                  family: &str)
+                  -> Option<(Info, hash::Hash, Option<hash::tree::HashRef>)> {
         let family_id_opt = self.get_family_id(&family);
         family_id_opt.and_then(|family_id_| {
             use self::schema::snapshots::dsl::*;
@@ -275,13 +277,12 @@ impl SnapshotIndex {
 
             row_opt.map(|snap| {
                 (Info {
-                    unique_id: snap.id,
-                    family_id: snap.family_id,
-                    snapshot_id: snap.snapshot_id,
+                     unique_id: snap.id,
+                     family_id: snap.family_id,
+                     snapshot_id: snap.snapshot_id,
                  },
                  ::hash::Hash { bytes: snap.hash.expect("Snapshot without top hash") },
-                 snap.hash_ref.and_then(|r| ::hash::tree::HashRef::from_bytes(&mut &r[..]).ok())
-                 )
+                 snap.hash_ref.and_then(|r| ::hash::tree::HashRef::from_bytes(&mut &r[..]).ok()))
             })
         })
     }

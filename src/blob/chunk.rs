@@ -47,7 +47,7 @@ pub fn node_height(kind: &Kind) -> i64 {
         &Kind::TreeBranch(height) => {
             assert!(height >= 1);
             height
-        },
+        }
         &Kind::TreeLeaf => 0,
     }
 }

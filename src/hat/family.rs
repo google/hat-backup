@@ -194,7 +194,8 @@ fn parse_dir_data(chunk: &[u8], mut out: &mut Vec<walker::FileEntry>) -> Result<
     }
 
     let reader = capnp::serialize_packed::read_message(&mut &chunk[..],
-                                                       capnp::message::ReaderOptions::new()).unwrap();
+                                                       capnp::message::ReaderOptions::new())
+        .unwrap();
 
     let list = reader.get_root::<root_capnp::file_list::Reader>().unwrap();
     for f in list.get_files().unwrap().iter() {
@@ -232,9 +233,14 @@ fn parse_dir_data(chunk: &[u8], mut out: &mut Vec<walker::FileEntry>) -> Result<
             parent_id: None,
         };
         let hash_ref = match f.get_content().which().unwrap() {
-            root_capnp::file::content::Data(r) => hash::tree::HashRef::read_msg(&r.expect("File has no data reference")),
-            root_capnp::file::content::Directory(d) => hash::tree::HashRef::read_msg(&d.expect("Directory has no listing reference")),
-        }.unwrap();
+                root_capnp::file::content::Data(r) => {
+                    hash::tree::HashRef::read_msg(&r.expect("File has no data reference"))
+                }
+                root_capnp::file::content::Directory(d) => {
+                    hash::tree::HashRef::read_msg(&d.expect("Directory has no listing reference"))
+                }
+            }
+            .unwrap();
 
         out.push(walker::FileEntry {
             hash_ref: hash_ref,
@@ -385,9 +391,10 @@ impl<B: StoreBackend> Family<B> {
                 let files_root = file_block_msg.init_root::<root_capnp::file_list::Builder>();
                 let mut files = files_root.init_files(files_at_a_time as u32);
 
-                for (idx, (entry, data_ref, _data_res_open)) in it.by_ref()
-                    .take(files_at_a_time)
-                    .enumerate() {
+                for (idx, (entry, data_ref, _data_res_open)) in
+                    it.by_ref()
+                        .take(files_at_a_time)
+                        .enumerate() {
                     assert!(idx < files_at_a_time);
 
                     current_msg_is_empty = false;

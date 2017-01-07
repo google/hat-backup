@@ -100,8 +100,7 @@ impl HashTreeBackend for MemoryBackend {
                 length: len,
                 packing: None,
                 key: None,
-            },
-        ))
+            }))
     }
 }
 

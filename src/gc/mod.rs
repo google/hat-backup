@@ -12,6 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+
+use hash::{GcData, UpdateFn};
+use snapshot;
 #[cfg(test)]
 use std::collections::HashMap;
 #[cfg(test)]
@@ -22,9 +25,6 @@ use std::mem;
 use std::sync::{Arc, Mutex};
 
 use std::sync::mpsc;
-
-use hash::{GcData, UpdateFn};
-use snapshot;
 use tags;
 
 mod noop;

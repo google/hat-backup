@@ -234,22 +234,22 @@ impl InternalKeyIndex {
         Ok(rows.into_iter()
             .map(|mut r| {
                 (Entry {
-                    id: Some(r.id as u64),
-                    parent_id: r.parent.map(|x| x as u64),
-                    name: r.name,
-                    created: r.created,
-                    modified: r.modified,
-                    accessed: r.accessed,
-                    permissions: r.permissions
-                        .map(|x| x as u64),
-                    user_id: r.user_id.map(|x| x as u64),
-                    group_id: r.group_id.map(|x| x as u64),
-                    data_hash: r.hash,
-                    data_length: None,
-                },
+                     id: Some(r.id as u64),
+                     parent_id: r.parent.map(|x| x as u64),
+                     name: r.name,
+                     created: r.created,
+                     modified: r.modified,
+                     accessed: r.accessed,
+                     permissions: r.permissions
+                         .map(|x| x as u64),
+                     user_id: r.user_id.map(|x| x as u64),
+                     group_id: r.group_id.map(|x| x as u64),
+                     data_hash: r.hash,
+                     data_length: None,
+                 },
                  r.hash_ref
-                    .as_mut()
-                    .map(|p| ::hash::tree::HashRef::from_bytes(&mut &p[..]).unwrap()))
+                     .as_mut()
+                     .map(|p| ::hash::tree::HashRef::from_bytes(&mut &p[..]).unwrap()))
             })
             .collect())
     }

@@ -136,7 +136,7 @@ fn test_hash_refs_identity() {
             key: None,
         };
         let mut v = vec![];
-        for i in 1..count+1 {
+        for i in 1..count + 1 {
             v.push(HashRef {
                 hash: Hash { bytes: hash.clone() },
                 kind: Kind::TreeBranch(i as i64),
@@ -208,10 +208,11 @@ impl<B: HashTreeBackend> SimpleHashTreeWriter<B> {
                  -> Result<(), B::Err> {
         let hash = Hash::new(&data[..]);
         let (id, chunk_ref) = try!(self.backend.insert_chunk(&hash, level as i64, childs, &data));
-        let hash_ref = HashRef{
+        let hash_ref = HashRef {
             hash: hash,
             kind: node_from_height(level as i64),
-            persistent_ref: chunk_ref};
+            persistent_ref: chunk_ref,
+        };
         self.append_hashref_at(level, id, hash_ref)
     }
 
@@ -314,13 +315,11 @@ pub struct Walker<B> {
 impl<B> Walker<B>
     where B: HashTreeBackend
 {
-    pub fn new(backend: B,
-               root_hash: HashRef)
-               -> Result<Option<Walker<B>>, B::Err> {
+    pub fn new(backend: B, root_hash: HashRef) -> Result<Option<Walker<B>>, B::Err> {
         Ok(Some(Walker {
             backend: backend,
             height: 0, // node_height(&root_hash.kind) as usize,
-            stack: vec![StackItem::Enter(root_hash)]
+            stack: vec![StackItem::Enter(root_hash)],
         }))
     }
 
@@ -386,9 +385,7 @@ pub struct LeafIterator<B> {
 impl<B> LeafIterator<B>
     where B: HashTreeBackend
 {
-    pub fn new(backend: B,
-               root_ref: HashRef)
-               -> Result<Option<LeafIterator<B>>, B::Err> {
+    pub fn new(backend: B, root_ref: HashRef) -> Result<Option<LeafIterator<B>>, B::Err> {
         Ok(try!(Walker::new(backend, root_ref)).map(|w| {
             LeafIterator {
                 walker: w,

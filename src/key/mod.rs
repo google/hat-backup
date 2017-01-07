@@ -196,11 +196,12 @@ impl<IT: io::Read, B: StoreBackend> MsgHandler<Msg<IT>, Reply<B>> for Store<B> {
                     Ok(entries) => {
                         let mut my_entries: Vec<DirElem<B>> = Vec::with_capacity(entries.len());
                         for (entry, hash_ref_opt) in entries.into_iter() {
-                           let hash_ref = hash_ref_opt
-                                    .or_else(|| entry.data_hash.as_ref().and_then(|bytes| {
-                                        let h = hash::Hash { bytes: bytes.clone() };
-                                        self.hash_index.fetch_hash_ref(&h).expect("Unknown hash")
-                                    }));
+                            let hash_ref = hash_ref_opt.or_else(|| {
+                                entry.data_hash.as_ref().and_then(|bytes| {
+                                    let h = hash::Hash { bytes: bytes.clone() };
+                                    self.hash_index.fetch_hash_ref(&h).expect("Unknown hash")
+                                })
+                            });
                             let open_fn = hash_ref.as_ref().map(|r| {
                                 HashTreeReaderInitializer {
                                     hash_ref: r.clone(),

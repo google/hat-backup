@@ -167,10 +167,10 @@ impl<'a, B: StoreBackend> Iterator for SnapshotLister<'a, B> {
                     return Some(Err(e));
                 }
                 return Some(Ok(hash_ref.clone()));
-            },
+            }
             Some((ref hash_ref, _)) => {
                 return Some(Ok(hash_ref.clone()));
-            },
+            }
             None => None,
         }
     }
@@ -324,8 +324,7 @@ impl<B: StoreBackend> HatRc<B> {
         let snapshot_list = message_reader.get_root::<root_capnp::snapshot_list::Reader>().unwrap();
 
         for s in snapshot_list.get_snapshots().unwrap().iter() {
-            let hash_ref = hash::tree::HashRef::from_bytes(&mut s.get_hash_ref().unwrap())
-                .unwrap();
+            let hash_ref = hash::tree::HashRef::from_bytes(&mut s.get_hash_ref().unwrap()).unwrap();
             self.snapshot_index
                 .recover(s.get_id(),
                          s.get_family_name()
@@ -383,8 +382,7 @@ impl<B: StoreBackend> HatRc<B> {
 
         let mut dir_v = family::recover::DirVisitor::new();
         let mut file_v = family::recover::FileVisitor::new();
-        let mut walk = try!(walker::Walker::new(self.hash_backend(),
-                                                final_hash.clone()));
+        let mut walk = try!(walker::Walker::new(self.hash_backend(), final_hash.clone()));
 
         let mut tops = vec![];
         while {
@@ -461,7 +459,8 @@ impl<B: StoreBackend> HatRc<B> {
                             println!("Resuming recovery of: {}", snapshot.family_name);
                             let hash_ref_bytes = try!(snapshot.hash_ref
                                 .ok_or("Recovered hash tree has no root hash"));
-                            let hash_ref = try!(hash::tree::HashRef::from_bytes(&mut &hash_ref_bytes[..]));
+                            let hash_ref =
+                                try!(hash::tree::HashRef::from_bytes(&mut &hash_ref_bytes[..]));
                             try!(self.recover_snapshot(snapshot.family_name,
                                                        snapshot.info,
                                                        &hash_ref))
@@ -667,8 +666,7 @@ impl<B: StoreBackend> HatRc<B> {
                         dir_hash: hash::tree::HashRef)
                         -> Result<(), HatError> {
         fs::create_dir_all(&output).unwrap();
-        for (entry, hash_ref) in
-            try!(family.fetch_dir_data(dir_hash, self.hash_backend())) {
+        for (entry, hash_ref) in try!(family.fetch_dir_data(dir_hash, self.hash_backend())) {
             assert!(entry.name.len() > 0);
 
             output.push(str::from_utf8(&entry.name[..]).unwrap());
@@ -676,8 +674,7 @@ impl<B: StoreBackend> HatRc<B> {
 
             if entry.data_hash.is_some() {
                 let mut fd = fs::File::create(&output).unwrap();
-                let tree_opt =
-                    try!(hash::tree::LeafIterator::new(self.hash_backend(), hash_ref));
+                let tree_opt = try!(hash::tree::LeafIterator::new(self.hash_backend(), hash_ref));
                 if let Some(tree) = tree_opt {
                     family.write_file_chunks(&mut fd, tree);
                 }
