@@ -49,8 +49,7 @@ pub mod recover {
 
     #[derive(Clone)]
     pub struct Node {
-        pub data: tree::HashRef,
-        pub height: usize,
+        pub href: tree::HashRef,
         pub childs: Option<Vec<tree::HashRef>>,
     }
 
@@ -86,16 +85,14 @@ pub mod recover {
         }
         fn branch_leave(&mut self, href: &tree::HashRef, height: usize) -> bool {
             self.nodes.push_back(Node {
-                data: href.clone(),
-                height: height,
+                href: href.clone(),
                 childs: self.stack.pop(),
             });
             true
         }
         fn leaf_enter(&mut self, href: &tree::HashRef) -> bool {
             self.nodes.push_back(Node {
-                data: href.clone(),
-                height: 0,
+                href: href.clone(),
                 childs: None,
             });
 
@@ -162,16 +159,14 @@ pub mod recover {
         }
         fn branch_leave(&mut self, href: &tree::HashRef, height: usize) -> bool {
             self.nodes.push_back(Node {
-                data: href.clone(),
-                height: height,
+                href: href.clone(),
                 childs: self.stack.pop(),
             });
             true
         }
         fn leaf_leave(&mut self, chunk: Vec<u8>, href: &tree::HashRef) -> bool {
             self.nodes.push_back(Node {
-                data: href.clone(),
-                height: 0,
+                href: href.clone(),
                 childs: None,
             });
             parse_dir_data(&chunk[..], &mut self.files).unwrap();

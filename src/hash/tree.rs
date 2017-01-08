@@ -308,7 +308,6 @@ pub enum StackItem {
 
 pub struct Walker<B> {
     backend: B,
-    height: usize,
     stack: Vec<StackItem>,
 }
 
@@ -318,7 +317,6 @@ impl<B> Walker<B>
     pub fn new(backend: B, root_hash: HashRef) -> Result<Option<Walker<B>>, B::Err> {
         Ok(Some(Walker {
             backend: backend,
-            height: 0, // node_height(&root_hash.kind) as usize,
             stack: vec![StackItem::Enter(root_hash)],
         }))
     }
@@ -333,8 +331,7 @@ impl<B> Walker<B>
             let node = match self.stack.pop().expect("!is_empty()") {
                 StackItem::Enter(href) => href,
                 StackItem::LeaveBranch(href) => {
-                    self.height += 1;
-                    if visitor.branch_leave(&href, self.height) {
+                    if visitor.branch_leave(&href, node_height(&href.kind) as usize) {
                         return Ok(true);
                     }
                     continue;
@@ -352,8 +349,6 @@ impl<B> Walker<B>
 
             match &node.kind {
                 &Kind::TreeLeaf => {
-                    // Reset height.
-                    self.height = 0;
                     if visitor.leaf_enter(&node) {
                         let data = try!(fetch_chunk(&self.backend, &node));
                         if visitor.leaf_leave(data, &node) {
