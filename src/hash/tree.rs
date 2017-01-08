@@ -324,6 +324,11 @@ impl<B> Walker<B>
     pub fn resume<V>(&mut self, visitor: &mut V) -> Result<bool, B::Err>
         where V: Visitor
     {
+        if self.stack.is_empty() {
+            // All empty, we can never discover more work.
+            return Ok(false);
+        }
+        
         // Basic cycle detection to spot some programming mistakes.
         let mut cycle_start = None;
 
@@ -332,7 +337,7 @@ impl<B> Walker<B>
                 StackItem::Enter(href) => href,
                 StackItem::LeaveBranch(href) => {
                     if visitor.branch_leave(&href) {
-                        return Ok(true);
+                        break;
                     }
                     continue;
                 }
@@ -352,7 +357,7 @@ impl<B> Walker<B>
                     if visitor.leaf_enter(&node) {
                         let data = try!(fetch_chunk(&self.backend, &node));
                         if visitor.leaf_leave(data, &node) {
-                            return Ok(true);
+                            break;
                         }
                     }
                 }
@@ -368,7 +373,8 @@ impl<B> Walker<B>
             }
         }
 
-        Ok(false)
+        // At least 1 work item was processed.
+        Ok(true)
     }
 }
 

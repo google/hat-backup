@@ -274,13 +274,17 @@ impl InternalHashIndex {
         my_id
     }
 
+    fn reserved_id(&mut self, hash_entry: &Entry) -> Option<i64> {
+        self.queue.find_key(&hash_entry.hash.bytes).cloned()
+    }
+
     fn update_reserved(&mut self, hash_entry: Entry) {
+        let id_opt = self.reserved_id(&hash_entry);
         let Entry { hash, level, childs, persistent_ref } = hash_entry;
         assert!(!hash.bytes.is_empty());
         let old_entry = self.locate(&hash).expect("hash was reserved");
 
         // If we didn't already commit and pop() the hash, update it:
-        let id_opt = self.queue.find_key(&hash.bytes).cloned();
         if id_opt.is_some() {
             assert_eq!(id_opt, Some(old_entry.id));
             self.queue.update_value(&hash.bytes, |qe| {
@@ -601,6 +605,11 @@ impl HashIndex {
                 ReserveResult::ReserveOk(id)
             }
         }
+    }
+
+    /// Check whether an entry was previously reserved.
+    pub fn reserved_id(&self, hash_entry: &Entry) -> Option<i64> {
+        self.lock().reserved_id(hash_entry)
     }
 
     /// Update the info for a reserved `Hash`. The `Hash` remains reserved. This is used to update

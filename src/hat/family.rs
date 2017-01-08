@@ -56,7 +56,6 @@ pub mod recover {
     pub struct FileVisitor {
         tops: Vec<hash::Hash>,
         nodes: VecDeque<Node>,
-        stack: Vec<Vec<tree::HashRef>>,
     }
 
     impl FileVisitor {
@@ -64,7 +63,6 @@ pub mod recover {
             FileVisitor {
                 tops: vec![],
                 nodes: VecDeque::new(),
-                stack: vec![],
             }
         }
         pub fn is_empty(&self) -> bool {
@@ -79,14 +77,10 @@ pub mod recover {
     }
 
     impl tree::Visitor for FileVisitor {
-        fn branch_enter(&mut self, _href: &tree::HashRef, childs: &Vec<tree::HashRef>) -> bool {
-            self.stack.push(childs.clone());
-            true
-        }
-        fn branch_leave(&mut self, href: &tree::HashRef) -> bool {
+        fn branch_enter(&mut self, href: &tree::HashRef, childs: &Vec<tree::HashRef>) -> bool {
             self.nodes.push_back(Node {
                 href: href.clone(),
-                childs: self.stack.pop(),
+                childs: Some(childs.clone()),
             });
             true
         }
@@ -126,7 +120,6 @@ pub mod recover {
 
     pub struct DirVisitor {
         nodes: VecDeque<Node>,
-        stack: Vec<Vec<tree::HashRef>>,
         files: Vec<walker::FileEntry>,
     }
 
@@ -134,7 +127,6 @@ pub mod recover {
         pub fn new() -> DirVisitor {
             DirVisitor {
                 nodes: VecDeque::new(),
-                stack: vec![],
                 files: vec![],
             }
         }
@@ -153,14 +145,10 @@ pub mod recover {
     }
 
     impl tree::Visitor for DirVisitor {
-        fn branch_enter(&mut self, _href: &tree::HashRef, childs: &Vec<tree::HashRef>) -> bool {
-            self.stack.push(childs.clone());
-            true
-        }
-        fn branch_leave(&mut self, href: &tree::HashRef) -> bool {
+        fn branch_enter(&mut self, href: &tree::HashRef, childs: &Vec<tree::HashRef>) -> bool {
             self.nodes.push_back(Node {
                 href: href.clone(),
-                childs: self.stack.pop(),
+                childs: Some(childs.clone()),
             });
             true
         }

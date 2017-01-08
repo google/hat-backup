@@ -355,12 +355,25 @@ impl<B: StoreBackend> HatRc<B> {
                 kind: node.href.kind.clone(),
                 persistent_ref: pref.clone(),
             });
+            
+            fn entry(href: hash::tree::HashRef, childs: Option<Vec<i64>>) -> hash::Entry {
+                hash::Entry {
+                    hash: href.hash,
+                    persistent_ref: Some(href.persistent_ref),
+                    level: blob::node_height(&href.kind),
+                    childs: childs,
+                }
+             }
 
             // Convert child hashes to child IDs.
             let child_ids = match &node.childs {
                 &Some(ref hs) => {
                     Some(hs.iter()
-                        .map(|h| hashes.get_id(&h.hash).expect("Child hash not yet recovered"))
+                        .map(|h| 
+                            match hashes.reserve(&entry(h.clone(), None)) {
+                                hash::ReserveResult::HashKnown(id) => id,
+                                hash::ReserveResult::ReserveOk(id) => id,
+                            })
                         .collect())
                 }
                 &None => None,
@@ -374,10 +387,16 @@ impl<B: StoreBackend> HatRc<B> {
                 childs: child_ids,
             };
 
-            if let hash::ReserveResult::ReserveOk(..) = hashes.reserve(&entry) {
-                // Commit hash.
-                hashes.commit(&entry.hash, pref);
-            };
+            if let hash::ReserveResult::HashKnown(..) = hashes.reserve(&entry) {
+                if hashes.reserved_id(&entry).is_none() {
+                    // This is a repeat hash that was already fully committed.
+                    return
+                }
+                // Update previously reserved hash.
+                hashes.update_reserved(entry.clone());
+            }
+            // Commit hash.
+            hashes.commit(&entry.hash, pref);
         }
 
         let mut dir_v = family::recover::DirVisitor::new();
@@ -415,7 +434,7 @@ impl<B: StoreBackend> HatRc<B> {
         try!(self.gc.register(&info, id_receiver));
         self.flush_blob_store();
 
-        let final_id = self.hash_index.get_id(&final_hash.hash).unwrap();
+        let final_id = self.hash_index.get_id(&final_hash.hash).expect("final hash has no id");
         try!(self.gc.register_final(&info, final_id));
         try!(self.commit_finalize(&family, info, &final_hash.hash));
         Ok(())
