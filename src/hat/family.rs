@@ -83,7 +83,7 @@ pub mod recover {
             self.stack.push(childs.clone());
             true
         }
-        fn branch_leave(&mut self, href: &tree::HashRef, height: usize) -> bool {
+        fn branch_leave(&mut self, href: &tree::HashRef) -> bool {
             self.nodes.push_back(Node {
                 href: href.clone(),
                 childs: self.stack.pop(),
@@ -157,7 +157,7 @@ pub mod recover {
             self.stack.push(childs.clone());
             true
         }
-        fn branch_leave(&mut self, href: &tree::HashRef, height: usize) -> bool {
+        fn branch_leave(&mut self, href: &tree::HashRef) -> bool {
             self.nodes.push_back(Node {
                 href: href.clone(),
                 childs: self.stack.pop(),

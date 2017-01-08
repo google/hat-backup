@@ -287,7 +287,7 @@ pub trait Visitor {
     fn branch_enter(&mut self, _href: &HashRef, _childs: &Vec<HashRef>) -> bool {
         true
     }
-    fn branch_leave(&mut self, _href: &HashRef, _height: usize) -> bool {
+    fn branch_leave(&mut self, _href: &HashRef) -> bool {
         // Do nothing by default.
         false
     }
@@ -331,7 +331,7 @@ impl<B> Walker<B>
             let node = match self.stack.pop().expect("!is_empty()") {
                 StackItem::Enter(href) => href,
                 StackItem::LeaveBranch(href) => {
-                    if visitor.branch_leave(&href, node_height(&href.kind) as usize) {
+                    if visitor.branch_leave(&href) {
                         return Ok(true);
                     }
                     continue;
