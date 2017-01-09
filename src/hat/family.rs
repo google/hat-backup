@@ -65,9 +65,6 @@ pub mod recover {
                 nodes: VecDeque::new(),
             }
         }
-        pub fn is_empty(&self) -> bool {
-            self.tops.is_empty() && self.nodes.is_empty()
-        }
         pub fn tops(&mut self) -> Vec<hash::Hash> {
             mem::replace(&mut self.tops, vec![])
         }
@@ -129,9 +126,6 @@ pub mod recover {
                 nodes: VecDeque::new(),
                 files: vec![],
             }
-        }
-        pub fn is_empty(&self) -> bool {
-            self.nodes.is_empty()
         }
         pub fn nodes(&mut self) -> VecDeque<Node> {
             mem::replace(&mut self.nodes, VecDeque::new())
@@ -257,7 +251,7 @@ impl<B: StoreBackend> Family<B> {
             Some(Box::new(move |()| contents) as Box<FnBox<(), _>>)
         };
         match try!(self.key_store_process[0].send_reply(key::Msg::Insert(file, f))) {
-            key::Reply::Id(id) => return Ok(id),
+            key::Reply::Id(id) => Ok(id),
             _ => Err(From::from("Unexpected reply from key store")),
         }
     }
@@ -287,7 +281,7 @@ impl<B: StoreBackend> Family<B> {
                            dir_id: Option<u64>)
                            -> Result<(), HatError> {
         let mut path = output_dir;
-        for (entry, _ref, read_fn_opt) in try!(self.list_from_key_store(dir_id)).into_iter() {
+        for (entry, _ref, read_fn_opt) in try!(self.list_from_key_store(dir_id)) {
             // Extend directory with filename:
             path.push(str::from_utf8(&entry.name[..]).unwrap());
 

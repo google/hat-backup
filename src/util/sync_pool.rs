@@ -66,7 +66,7 @@ impl<V> SyncPool<V> {
             vs.pop().unwrap()
         };
         Ok(SyncPoolGuard {
-            m: &self,
+            m: self,
             v: Some(v),
         })
     }

@@ -166,10 +166,10 @@ impl<'a, B: StoreBackend> Iterator for SnapshotLister<'a, B> {
                     self.queue.push((hash_ref.clone(), false));
                     return Some(Err(e));
                 }
-                return Some(Ok(hash_ref.clone()));
+                Some(Ok(hash_ref.clone()))
             }
             Some((ref hash_ref, _)) => {
-                return Some(Ok(hash_ref.clone()));
+                Some(Ok(hash_ref.clone()))
             }
             None => None,
         }
@@ -355,7 +355,7 @@ impl<B: StoreBackend> HatRc<B> {
                 kind: node.href.kind.clone(),
                 persistent_ref: pref.clone(),
             });
-            
+
             fn entry(href: hash::tree::HashRef, childs: Option<Vec<i64>>) -> hash::Entry {
                 hash::Entry {
                     hash: href.hash,
@@ -366,17 +366,16 @@ impl<B: StoreBackend> HatRc<B> {
              }
 
             // Convert child hashes to child IDs.
-            let child_ids = match &node.childs {
-                &Some(ref hs) => {
+            let child_ids = match node.childs {
+                Some(ref hs) => {
                     Some(hs.iter()
-                        .map(|h| 
+                        .map(|h|
                             match hashes.reserve(&entry(h.clone(), None)) {
-                                hash::ReserveResult::HashKnown(id) => id,
-                                hash::ReserveResult::ReserveOk(id) => id,
+                                hash::ReserveResult::HashKnown(id) | hash::ReserveResult::ReserveOk(id) => id,
                             })
                         .collect())
                 }
-                &None => None,
+                None => None,
             };
 
             // Now insert the hash information if needed.
@@ -443,13 +442,13 @@ impl<B: StoreBackend> HatRc<B> {
     pub fn resume(&mut self) -> Result<(), HatError> {
         let need_work = self.snapshot_index.list_not_done();
 
-        for snapshot in need_work.into_iter() {
+        for snapshot in need_work {
             match snapshot.status {
                 snapshot::WorkStatus::CommitInProgress |
                 snapshot::WorkStatus::RecoverInProgress => {
-                    let done_hash_opt = match &snapshot.hash {
-                        &None => None,
-                        &Some(ref h) => {
+                    let done_hash_opt = match snapshot.hash {
+                        None => None,
+                        Some(ref h) => {
                             let status_res = self.hash_index
                                 .get_id(h)
                                 .map(|id| self.gc.status(id));
@@ -492,13 +491,13 @@ impl<B: StoreBackend> HatRc<B> {
                     }
                 }
                 snapshot::WorkStatus::CommitComplete => {
-                    match &snapshot.hash {
-                        &Some(ref h) => {
+                    match snapshot.hash {
+                        Some(ref h) => {
                             try!(self.commit_finalize_by_name(snapshot.family_name,
                                                               snapshot.info,
                                                               h))
                         }
-                        &None => {
+                        None => {
                             // This should not happen.
                             return Err(From::from(format!("Snapshot {:?} is fully registered \
                                                            in GC, but has no hash",
@@ -806,7 +805,7 @@ impl<B: StoreBackend> HatRc<B> {
         self.blob_store.tag_all(tags::Tag::InProgress);
 
         let mut live_blobs = 0;
-        for entry in entries.into_iter() {
+        for entry in entries {
             if let Some(pref) = entry.persistent_ref {
                 live_blobs += 1;
                 self.blob_store.tag(pref, tags::Tag::Reserved);

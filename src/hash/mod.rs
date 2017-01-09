@@ -204,7 +204,7 @@ impl InternalHashIndex {
     }
 
     fn locate(&mut self, hash: &Hash) -> Option<QueueEntry> {
-        let result_opt = self.queue.find_value_of_key(&hash.bytes).map(|x| x.clone());
+        let result_opt = self.queue.find_value_of_key(&hash.bytes).cloned();
         result_opt.or_else(|| self.index_locate(hash))
     }
 
@@ -529,7 +529,7 @@ impl InternalHashIndex {
 
 impl HashIndex {
     pub fn new(path: &str) -> Result<HashIndex, DieselError> {
-        InternalHashIndex::new(path).map(|index| HashIndex(Mutex::new((index))))
+        InternalHashIndex::new(path).map(|index| HashIndex(Mutex::new(index)))
     }
 
     #[cfg(test)]
@@ -544,7 +544,7 @@ impl HashIndex {
     /// Locate the local ID of this hash.
     pub fn get_id(&self, hash: &Hash) -> Option<i64> {
         assert!(!hash.bytes.is_empty());
-        self.lock().locate(&hash).map(|entry| entry.id)
+        self.lock().locate(hash).map(|entry| entry.id)
     }
 
     /// Locate hash entry from its ID.

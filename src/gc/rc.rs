@@ -125,7 +125,7 @@ impl<B: gc::GcBackend> gc::Gc<B> for GcRc<B> {
         // Everything that is still 'Done' is unused.
         // Everything that is 'Reserved' is used.
         for r in try!(self.backend.list_ids_by_tag(tags::Tag::Done)).iter() {
-            if let Err(_) = refs.send(r) {
+            if refs.send(r).is_err() {
                 break;
             }
         }

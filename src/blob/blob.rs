@@ -72,7 +72,7 @@ impl Blob {
     }
 
     pub fn try_append(&mut self, chunk: &[u8], mut href: &mut HashRef) -> Result<(), ()> {
-        let ct = crypto::RefKey::seal(&mut href, PlainTextRef::new(&chunk));
+        let ct = crypto::RefKey::seal(&mut href, PlainTextRef::new(chunk));
 
         href.persistent_ref.offset = self.chunks.len();
         let mut href_bytes = href.as_bytes();

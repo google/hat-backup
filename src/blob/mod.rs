@@ -148,11 +148,11 @@ impl<B: StoreBackend> StoreInner<B> {
             },
         };
 
-        if let Err(()) = self.blob.try_append(&chunk, &mut href) {
+        if let Err(()) = self.blob.try_append(chunk, &mut href) {
             self.flush();
 
             href.persistent_ref.blob_id = self.blob_desc.name.clone();
-            self.blob.try_append(&chunk, &mut href).unwrap();
+            self.blob.try_append(chunk, &mut href).unwrap();
         }
         self.blob_refs.push((href.clone(), callback));
 
@@ -175,7 +175,7 @@ impl<B: StoreBackend> StoreInner<B> {
         assert!(data.len() < self.max_blob_size);
         let hash = Hash::new(&data[..]);
         let mut blob = Blob::new(self.max_blob_size);
-        blob.try_append(&data,
+        blob.try_append(data,
                         &mut HashRef {
                             hash: hash,
                             kind: Kind::TreeLeaf,
@@ -230,7 +230,7 @@ impl<B: StoreBackend> StoreInner<B> {
 
     fn delete_by_tag(&mut self, tag: tags::Tag) -> Result<(), String> {
         let blobs = self.blob_index.list_by_tag(tag);
-        for b in blobs.iter() {
+        for b in &blobs {
             try!(self.backend.delete(&b.name));
         }
         self.blob_index.delete_by_tag(tag);
@@ -257,7 +257,7 @@ impl<B: StoreBackend> BlobStore<B> {
                  callback: Box<FnBox<HashRef, ()>>)
                  -> HashRef {
         let mut guard = self.lock();
-        guard.store(&chunk, hash, kind, callback)
+        guard.store(chunk, hash, kind, callback)
     }
 
     /// Retrieve the data chunk identified by `ChunkRef`.
@@ -267,7 +267,7 @@ impl<B: StoreBackend> BlobStore<B> {
 
     /// Store a full named blob (used for writing root).
     pub fn store_named(&self, name: &str, data: &[u8]) -> Result<(), String> {
-        self.lock().store_named(name, &data)
+        self.lock().store_named(name, data)
     }
 
     /// Retrieve full named blob.

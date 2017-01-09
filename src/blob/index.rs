@@ -160,13 +160,13 @@ impl InternalBlobIndex {
                     .execute(&self.conn)
                     .expect("Error updating blob tags")
             }
-            Some(ref t) if t.id > 0 => {
+            Some(t) if t.id > 0 => {
                 diesel::update(blobs.find(t.id))
                     .set(tag.eq(tag_ as i32))
                     .execute(&self.conn)
                     .expect("Error updating blob tags")
             }
-            Some(ref t) if !t.name.is_empty() => {
+            Some(t) if !t.name.is_empty() => {
                 diesel::update(blobs.filter(name.eq(&t.name)))
                     .set(tag.eq(tag_ as i32))
                     .execute(&self.conn)
@@ -222,7 +222,7 @@ impl BlobIndex {
     /// blob is in this state when the system starts up, it may or may not exist in the persistent
     /// storage, but **should not** be referenced elsewhere, and is therefore safe to delete.
     pub fn in_air(&self, blob: &BlobDesc) {
-        self.lock().in_air(&blob)
+        self.lock().in_air(blob)
     }
 
     /// Report that this blob has been fully committed to persistent storage. We can now use its

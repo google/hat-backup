@@ -48,7 +48,7 @@ impl<B: StoreBackend> HashStoreBackend<B> {
         assert!(!hash.bytes.is_empty());
         match try!(self.hash_index.fetch_persistent_ref(hash)) {
             None => Ok(None),
-            Some(chunk_ref) => self.fetch_chunk_from_persistent_ref(&hash, &chunk_ref),
+            Some(chunk_ref) => self.fetch_chunk_from_persistent_ref(hash, &chunk_ref),
         }
     }
 
@@ -70,7 +70,7 @@ impl<B: StoreBackend> HashTreeBackend for HashStoreBackend<B> {
                    -> Result<Option<Vec<u8>>, MsgError> {
         assert!(!hash.bytes.is_empty());
 
-        let data_opt = if let Some(ref r) = persistent_ref {
+        let data_opt = if let Some(r) = persistent_ref {
             try!(self.fetch_chunk_from_persistent_ref(&hash, &r))
         } else {
             try!(self.fetch_chunk_from_hash(&hash))
@@ -137,7 +137,7 @@ impl<B: StoreBackend> HashTreeBackend for HashStoreBackend<B> {
                     local_hash_index.commit(&href.hash, href.persistent_ref);
                 });
                 let kind = blob::node_from_height(height);
-                let href = self.blob_store.store(&chunk, hash.clone(), kind, callback);
+                let href = self.blob_store.store(chunk, hash.clone(), kind, callback);
                 hash_entry.persistent_ref = Some(href.persistent_ref.clone());
                 self.hash_index.update_reserved(hash_entry);
                 Ok((id, href.persistent_ref))

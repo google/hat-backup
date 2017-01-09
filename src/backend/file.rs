@@ -40,7 +40,7 @@ impl FileBackend {
     fn guarded_cache_get(&self, name: &[u8]) -> Option<Result<Option<Vec<u8>>, String>> {
         match self.read_cache.lock() {
             Err(e) => Some(Err(e.to_string())),
-            Ok(cache) => cache.get(name).map(|v| v.clone()),
+            Ok(cache) => cache.get(name).cloned(),
         }
     }
 

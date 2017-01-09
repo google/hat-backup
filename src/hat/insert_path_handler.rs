@@ -110,7 +110,7 @@ impl<B: StoreBackend> PathHandler<Option<u64>> for InsertPathHandler<B> {
             }
         }
 
-        match FileEntry::new(path.clone(), parent.clone()) {
+        match FileEntry::new(path.clone(), *parent) {
             Err(e) => {
                 println!("Skipping '{}': {}", path.display(), e);
             }

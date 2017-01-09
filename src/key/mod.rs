@@ -195,7 +195,7 @@ impl<IT: io::Read, B: StoreBackend> MsgHandler<Msg<IT>, Reply<B>> for Store<B> {
                 match self.index.list_dir(parent) {
                     Ok(entries) => {
                         let mut my_entries: Vec<DirElem<B>> = Vec::with_capacity(entries.len());
-                        for (entry, hash_ref_opt) in entries.into_iter() {
+                        for (entry, hash_ref_opt) in entries {
                             let hash_ref = hash_ref_opt.or_else(|| {
                                 entry.data_hash.as_ref().and_then(|bytes| {
                                     let h = hash::Hash { bytes: bytes.clone() };

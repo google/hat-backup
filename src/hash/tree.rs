@@ -198,7 +198,7 @@ impl<B: HashTreeBackend> SimpleHashTreeWriter<B> {
     /// 1-byte blocks when reading; if needed, accummulation of data must be handled by the
     /// `backend`).
     pub fn append(&mut self, chunk: &[u8]) -> Result<(), B::Err> {
-        self.append_at(0, &chunk, None)
+        self.append_at(0, chunk, None)
     }
 
     fn append_at(&mut self,
@@ -352,8 +352,8 @@ impl<B> Walker<B>
                     .map(|opt| opt.expect("Invalid hash ref"))
             };
 
-            match &node.kind {
-                &Kind::TreeLeaf => {
+            match node.kind {
+                Kind::TreeLeaf => {
                     if visitor.leaf_enter(&node) {
                         let data = try!(fetch_chunk(&self.backend, &node));
                         if visitor.leaf_leave(data, &node) {
@@ -361,13 +361,13 @@ impl<B> Walker<B>
                         }
                     }
                 }
-                &Kind::TreeBranch(..) => {
+                Kind::TreeBranch(..) => {
                     let data = try!(fetch_chunk(&self.backend, &node));
                     let mut new_childs = hash_refs_from_bytes(&data[..]).unwrap();
                     if visitor.branch_enter(&node, &new_childs) {
                         self.stack.push(StackItem::LeaveBranch(node));
                         new_childs.reverse();
-                        self.stack.extend(new_childs.into_iter().map(|x| StackItem::Enter(x)));
+                        self.stack.extend(new_childs.into_iter().map(StackItem::Enter));
                     }
                 }
             }

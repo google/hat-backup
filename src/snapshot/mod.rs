@@ -265,7 +265,7 @@ impl SnapshotIndex {
     pub fn latest(&mut self,
                   family: &str)
                   -> Option<(Info, hash::Hash, Option<hash::tree::HashRef>)> {
-        let family_id_opt = self.get_family_id(&family);
+        let family_id_opt = self.get_family_id(family);
         family_id_opt.and_then(|family_id_| {
             use self::schema::snapshots::dsl::*;
 
