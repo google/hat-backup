@@ -27,11 +27,11 @@ const CHUNKSIZE: usize = 128 * 1024;
 fn dummy_hashref() -> HashRef {
     HashRef {
         hash: Hash::new(&[]),
+        kind: Kind::TreeLeaf,
         persistent_ref: ChunkRef {
             blob_id: vec![],
             offset: 0,
             length: 0,
-            kind: Kind::TreeLeaf,
             packing: None,
             key: None,
         },
