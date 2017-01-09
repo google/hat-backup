@@ -12,7 +12,7 @@ CREATE TABLE keys (
 	group_id       Integer,
 
         hash           BLOB,
-        persistent_ref BLOB
+        hash_ref       BLOB
 );
 
 CREATE UNIQUE INDEX Keys_UniqueParentName ON keys(parent, name);

@@ -23,14 +23,14 @@ extern crate sodiumoxide;
 #[macro_use]
 extern crate clap;
 
-use std::borrow::ToOwned;
-use std::convert::From;
-use std::path::PathBuf;
-use std::sync::Arc;
 
 use clap::{App, SubCommand};
 
 use hat::backend;
+use std::borrow::ToOwned;
+use std::convert::From;
+use std::path::PathBuf;
+use std::sync::Arc;
 
 static MAX_BLOB_SIZE: usize = 4 * 1024 * 1024;
 

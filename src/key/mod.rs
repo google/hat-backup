@@ -14,17 +14,17 @@
 
 //! External API for creating and manipulating snapshots.
 
-use std::io;
-use std::sync::Arc;
-use std::borrow::Cow;
 
 use backend::StoreBackend;
 use blob;
+use errors::{DieselError, RetryError};
 use hash;
-use hash::tree::{ReaderResult, SimpleHashTreeReader, SimpleHashTreeWriter};
+use hash::tree::{LeafIterator, SimpleHashTreeWriter};
+use std::borrow::Cow;
+use std::io;
+use std::sync::Arc;
 
 use util::{FnBox, MsgHandler, Process};
-use errors::{DieselError, RetryError};
 
 mod schema;
 mod index;
@@ -62,19 +62,18 @@ error_type! {
 
 pub type StoreProcess<IT, B> = Process<Msg<IT>, Reply<B>, MsgError>;
 
-pub type DirElem<B> = (Entry, Option<blob::ChunkRef>, Option<HashTreeReaderInitializer<B>>);
+pub type DirElem<B> = (Entry, Option<hash::tree::HashRef>, Option<HashTreeReaderInitializer<B>>);
 
 pub struct HashTreeReaderInitializer<B> {
-    hash: hash::Hash,
-    persistent_ref: Option<blob::ChunkRef>,
+    hash_ref: hash::tree::HashRef,
     hash_index: Arc<hash::HashIndex>,
     blob_store: Arc<blob::BlobStore<B>>,
 }
 
 impl<B: StoreBackend> HashTreeReaderInitializer<B> {
-    pub fn init(self) -> Result<Option<ReaderResult<HashStoreBackend<B>>>, MsgError> {
+    pub fn init(self) -> Result<Option<LeafIterator<HashStoreBackend<B>>>, MsgError> {
         let backend = HashStoreBackend::new(self.hash_index, self.blob_store);
-        SimpleHashTreeReader::open(backend, &self.hash, self.persistent_ref)
+        LeafIterator::new(backend, self.hash_ref.clone())
     }
 }
 
@@ -196,17 +195,22 @@ impl<IT: io::Read, B: StoreBackend> MsgHandler<Msg<IT>, Reply<B>> for Store<B> {
                 match self.index.list_dir(parent) {
                     Ok(entries) => {
                         let mut my_entries: Vec<DirElem<B>> = Vec::with_capacity(entries.len());
-                        for (entry, persistent_ref) in entries.into_iter() {
-                            let open_fn = entry.data_hash.as_ref().map(|bytes| {
+                        for (entry, hash_ref_opt) in entries {
+                            let hash_ref = hash_ref_opt.or_else(|| {
+                                entry.data_hash.as_ref().and_then(|bytes| {
+                                    let h = hash::Hash { bytes: bytes.clone() };
+                                    self.hash_index.fetch_hash_ref(&h).expect("Unknown hash")
+                                })
+                            });
+                            let open_fn = hash_ref.as_ref().map(|r| {
                                 HashTreeReaderInitializer {
-                                    hash: hash::Hash { bytes: bytes.clone() },
-                                    persistent_ref: persistent_ref.clone(),
+                                    hash_ref: r.clone(),
                                     hash_index: self.hash_index.clone(),
                                     blob_store: self.blob_store.clone(),
                                 }
                             });
 
-                            my_entries.push((entry, persistent_ref, open_fn));
+                            my_entries.push((entry, hash_ref, open_fn));
                         }
                         reply_ok!(Reply::ListResult(my_entries))
                     }
@@ -290,15 +294,15 @@ impl<IT: io::Read, B: StoreBackend> MsgHandler<Msg<IT>, Reply<B>> for Store<B> {
                 });
 
                 // Get top tree hash:
-                let (hash, persistent_ref) = try!(tree.hash());
+                let hash_ref = try!(tree.hash());
 
                 // Update hash in key index.
                 // It is OK that this has is not yet valid, as we check hashes at snapshot time.
                 try!(self.index.update_data_hash(
                     entry.id.unwrap(),
                     entry.modified,
-                    Some(hash),
-                    Some(persistent_ref)
+                    Some(hash_ref.hash.clone()),
+                    Some(hash_ref)
                 ));
 
                 Ok(())

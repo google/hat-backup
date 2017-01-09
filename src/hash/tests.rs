@@ -12,17 +12,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use hash::tree::*;
-
-use std::sync::{Arc, Mutex};
 
 use blob::{ChunkRef, Kind};
 use hash::Hash;
+use hash::tree::*;
 use key;
+use quickcheck;
 
 use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet};
-use quickcheck;
+
+use std::sync::{Arc, Mutex};
 
 #[derive(Clone)]
 pub struct MemoryBackend {
@@ -48,10 +48,10 @@ impl HashTreeBackend for MemoryBackend {
 
     fn fetch_chunk(&self,
                    hash: &Hash,
-                   ref_opt: Option<ChunkRef>)
+                   ref_opt: Option<&ChunkRef>)
                    -> Result<Option<Vec<u8>>, Self::Err> {
         let hash = match ref_opt {
-            Some(b) => Cow::Owned(Hash { bytes: b.blob_id }),  // blob names are chunk hashes.
+            Some(ref b) => Cow::Owned(Hash { bytes: b.blob_id.clone() }), // blob name is chunk hash
             None => Cow::Borrowed(hash),
         };
         let guarded_chunks = self.chunks.lock().unwrap();
@@ -71,11 +71,6 @@ impl HashTreeBackend for MemoryBackend {
                     blob_id: hash.bytes.clone(),
                     offset: 0,
                     length: chunk.len(),
-                    kind: if *level == 0 {
-                        Kind::TreeLeaf
-                    } else {
-                        Kind::TreeBranch
-                    },
                     packing: None,
                     key: None,
                 })
@@ -89,31 +84,23 @@ impl HashTreeBackend for MemoryBackend {
                     level: i64,
                     childs: Option<Vec<i64>>,
                     chunk: &[u8])
-                    -> Result<(i64, HashRef), Self::Err> {
+                    -> Result<(i64, ChunkRef), Self::Err> {
+        let len = chunk.len();
         let mut guarded_seen = self.seen_chunks.lock().unwrap();
         guarded_seen.insert(chunk.to_vec());
 
         let mut guarded_chunks = self.chunks.lock().unwrap();
         guarded_chunks.insert(hash.bytes.clone(), (level, childs, chunk.to_vec()));
 
-        let len = hash.bytes.len();
 
         Ok((0,
-            (HashRef {
-            hash: hash.clone(),
-            persistent_ref: ChunkRef {
+            ChunkRef {
                 blob_id: hash.bytes.clone(),
                 offset: 0,
                 length: len,
-                kind: if level == 0 {
-                    Kind::TreeLeaf
-                } else {
-                    Kind::TreeBranch
-                },
                 packing: None,
                 key: None,
-            },
-        })))
+            }))
     }
 }
 
@@ -127,9 +114,9 @@ fn identity_many_small_blocks() {
             ht.append(b"a").unwrap();
         }
 
-        let (hash, hash_ref) = ht.hash().unwrap();
+        let hash_ref = ht.hash().unwrap();
 
-        let mut tree_it = SimpleHashTreeReader::open(backend, &hash, Some(hash_ref))
+        let mut tree_it = LeafIterator::new(backend, hash_ref)
             .unwrap()
             .expect("tree not found");
 
@@ -162,9 +149,9 @@ fn identity_empty() {
 
     ht.append(&block[..]).unwrap();
 
-    let (hash, hash_ref) = ht.hash().unwrap();
+    let hash_ref = ht.hash().unwrap();
 
-    let mut it = SimpleHashTreeReader::open(backend, &hash, Some(hash_ref))
+    let mut it = LeafIterator::new(backend, hash_ref)
         .unwrap()
         .expect("tree not found");
 
@@ -181,9 +168,9 @@ fn identity_append1() {
 
     ht.append(&block[..]).unwrap();
 
-    let (hash, hash_ref) = ht.hash().unwrap();
+    let hash_ref = ht.hash().unwrap();
 
-    let mut it = SimpleHashTreeReader::open(backend, &hash, Some(hash_ref))
+    let mut it = LeafIterator::new(backend, hash_ref)
         .unwrap()
         .expect("tree not found");
     assert_eq!(Some(block), it.next());
@@ -202,9 +189,9 @@ fn identity_append5() {
         ht.append(&block[..]).unwrap();
     }
 
-    let (hash, hash_ref) = ht.hash().unwrap();
+    let hash_ref = ht.hash().unwrap();
 
-    let mut it = SimpleHashTreeReader::open(backend.clone(), &hash, Some(hash_ref))
+    let mut it = LeafIterator::new(backend.clone(), hash_ref)
         .unwrap()
         .expect("tree not found");
 
@@ -233,9 +220,9 @@ fn identity_implicit_flush() {
         assert!(backend.saw_chunk(&vec![i]));
     }
 
-    let (hash, hash_ref) = ht.hash().unwrap();
+    let hash_ref = ht.hash().unwrap();
 
-    let it = SimpleHashTreeReader::open(backend, &hash, Some(hash_ref))
+    let it = LeafIterator::new(backend, hash_ref)
         .unwrap()
         .expect("tree not found");
 
@@ -257,13 +244,13 @@ fn identity_1_short_of_flush() {
         ht.append(&bytes[..]).unwrap();
     }
 
-    let (hash, hash_ref) = ht.hash().unwrap();
+    let hash_ref = ht.hash().unwrap();
 
     for i in 1u8..order as u8 {
         assert!(backend.saw_chunk(&vec![i]));
     }
 
-    let it = SimpleHashTreeReader::open(backend, &hash, Some(hash_ref))
+    let it = LeafIterator::new(backend, hash_ref)
         .unwrap()
         .expect("tree not found");
 

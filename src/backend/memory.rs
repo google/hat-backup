@@ -12,11 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+
+use backend::StoreBackend;
 use crypto::CipherText;
 use std::collections::BTreeMap;
 use std::sync::Mutex;
-
-use backend::StoreBackend;
 
 pub struct MemoryBackend {
     files: Mutex<BTreeMap<Vec<u8>, Vec<u8>>>,
@@ -39,7 +39,7 @@ impl MemoryBackend {
     fn guarded_retrieve(&self, key: &[u8]) -> Result<Option<Vec<u8>>, String> {
         match self.files.lock() {
             Err(e) => Err(e.to_string()),
-            Ok(map) => Ok(map.get(key).map(|v| v.clone())),
+            Ok(map) => Ok(map.get(key).cloned()),
         }
     }
 

@@ -28,7 +28,7 @@ pub use self::file_iterator::FileIterator;
 pub use self::fnbox::FnBox;
 pub use self::infowriter::InfoWriter;
 pub use self::listdir::{HasPath, PathHandler};
-pub use self::sync_pool::{SyncPool, SyncPoolGuard};
 pub use self::periodic_timer::PeriodicTimer;
 pub use self::process::{MsgHandler, Process};
+pub use self::sync_pool::{SyncPool, SyncPoolGuard};
 pub use self::unique_priority_queue::UniquePriorityQueue;

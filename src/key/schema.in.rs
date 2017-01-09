@@ -29,7 +29,7 @@ table! {
         group_id -> Nullable<BigInt>,
 
         hash -> Nullable<Binary>,
-        persistent_ref -> Nullable<Binary>,
+        hash_ref -> Nullable<Binary>,
     }
 }
 
@@ -51,7 +51,7 @@ pub struct Key {
     pub group_id: Option<i64>,
 
     pub hash: Option<Vec<u8>>,
-    pub persistent_ref: Option<Vec<u8>>,
+    pub hash_ref: Option<Vec<u8>>,
 }
 
 #[insertable_into(keys)]
@@ -68,5 +68,5 @@ pub struct NewKey<'a> {
     pub group_id: Option<i64>,
 
     pub hash: Option<&'a [u8]>,
-    pub persistent_ref: Option<&'a [u8]>,
+    pub hash_ref: Option<&'a [u8]>,
 }

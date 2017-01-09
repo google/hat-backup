@@ -12,15 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+
+use backend::StoreBackend;
+use crypto::CipherText;
 use rustc_serialize::hex::ToHex;
 use std::collections::BTreeMap;
 use std::fs;
 use std::io::{Read, Write};
 use std::path::PathBuf;
 use std::sync::Mutex;
-
-use backend::StoreBackend;
-use crypto::CipherText;
 
 pub struct FileBackend {
     root: PathBuf,
@@ -40,7 +40,7 @@ impl FileBackend {
     fn guarded_cache_get(&self, name: &[u8]) -> Option<Result<Option<Vec<u8>>, String>> {
         match self.read_cache.lock() {
             Err(e) => Some(Err(e.to_string())),
-            Ok(cache) => cache.get(name).map(|v| v.clone()),
+            Ok(cache) => cache.get(name).cloned(),
         }
     }
 

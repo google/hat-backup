@@ -12,14 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::io;
-use std::sync::{Arc, Mutex};
-use test::Bencher;
 
 use backend::DevNullBackend;
 use hat::HatRc;
 use hat::family::Family;
 use hat::tests::{entry, setup_hat};
+use std::io;
+use std::sync::{Arc, Mutex};
+use test::Bencher;
 use util::FileIterator;
 
 

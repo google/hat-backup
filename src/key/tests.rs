@@ -12,17 +12,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use key::*;
-use std::io;
-use std::sync::Arc;
 
 use backend::{MemoryBackend, StoreBackend};
-use util::Process;
+use key::*;
+
+use quickcheck;
 
 use rand::Rng;
 use rand::thread_rng;
-
-use quickcheck;
+use std::io;
+use std::sync::Arc;
+use util::Process;
 
 fn random_ascii_bytes() -> Vec<u8> {
     let ascii: String = thread_rng().gen_ascii_chars().take(32).collect();

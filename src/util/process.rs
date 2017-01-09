@@ -51,8 +51,8 @@
 /// times will likely cause runtime panicure when using `send_reply()`.
 
 use std::fmt;
-use std::thread;
 use std::sync::mpsc;
+use std::thread;
 
 
 pub struct Process<Msg, Reply, E> {

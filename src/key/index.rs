@@ -14,19 +14,18 @@
 
 //! Local state for keys in the snapshot in progress (the "index").
 
+
 use diesel;
 use diesel::prelude::*;
 use diesel::sqlite::SqliteConnection;
-
-use std::sync::{Mutex, MutexGuard};
-use time::Duration;
-
-use blob;
 use errors::DieselError;
 use hash;
-use util::{InfoWriter, PeriodicTimer};
+
+use std::sync::{Mutex, MutexGuard};
 
 use super::schema;
+use time::Duration;
+use util::{InfoWriter, PeriodicTimer};
 
 #[derive(Clone, Debug)]
 pub struct Entry {
@@ -124,7 +123,7 @@ impl InternalKeyIndex {
                         group_id: entry.group_id.map(|x| x as i64),
                         user_id: entry.user_id.map(|x| x as i64),
                         hash: None,
-                        persistent_ref: None,
+                        hash_ref: None,
                     };
 
                     try!(diesel::insert(&new)
@@ -189,25 +188,25 @@ impl InternalKeyIndex {
                         id_: u64,
                         last_modified: Option<i64>,
                         hash_opt: Option<hash::Hash>,
-                        persistent_ref_opt: Option<blob::ChunkRef>)
+                        hash_ref_opt: Option<hash::tree::HashRef>)
                         -> Result<(), DieselError> {
         use super::schema::keys::dsl::*;
 
         let id_ = id_ as i64;
-        assert!(hash_opt.is_some() == persistent_ref_opt.is_some());
+        assert!(hash_opt.is_some() == hash_ref_opt.is_some());
 
         let hash_bytes = hash_opt.map(|h| h.bytes);
-        let persistent_ref_bytes = persistent_ref_opt.map(|p| p.as_bytes());
+        let hash_ref_bytes = hash_ref_opt.map(|p| p.as_bytes());
 
         if last_modified.is_some() {
             try!(diesel::update(keys.find(id_)
                     .filter(modified.eq::<Option<i64>>(None)
                         .or(modified.le(last_modified))))
-                .set((hash.eq(hash_bytes), persistent_ref.eq(persistent_ref_bytes)))
+                .set((hash.eq(hash_bytes), hash_ref.eq(hash_ref_bytes)))
                 .execute(&self.conn));
         } else {
             try!(diesel::update(keys.find(id_))
-                .set((hash.eq(hash_bytes), persistent_ref.eq(persistent_ref_bytes)))
+                .set((hash.eq(hash_bytes), hash_ref.eq(hash_ref_bytes)))
                 .execute(&self.conn));
         }
 
@@ -218,7 +217,7 @@ impl InternalKeyIndex {
     /// Returns `ListResult` with all the entries under the given parent.
     fn list_dir(&mut self,
                 parent_opt: Option<u64>)
-                -> Result<Vec<(Entry, Option<blob::ChunkRef>)>, DieselError> {
+                -> Result<Vec<(Entry, Option<hash::tree::HashRef>)>, DieselError> {
         use super::schema::keys::dsl::*;
 
         let rows = match parent_opt {
@@ -235,22 +234,22 @@ impl InternalKeyIndex {
         Ok(rows.into_iter()
             .map(|mut r| {
                 (Entry {
-                    id: Some(r.id as u64),
-                    parent_id: r.parent.map(|x| x as u64),
-                    name: r.name,
-                    created: r.created,
-                    modified: r.modified,
-                    accessed: r.accessed,
-                    permissions: r.permissions
-                        .map(|x| x as u64),
-                    user_id: r.user_id.map(|x| x as u64),
-                    group_id: r.group_id.map(|x| x as u64),
-                    data_hash: r.hash,
-                    data_length: None,
-                },
-                 r.persistent_ref
-                    .as_mut()
-                    .map(|p| blob::ChunkRef::from_bytes(&mut &p[..]).unwrap()))
+                     id: Some(r.id as u64),
+                     parent_id: r.parent.map(|x| x as u64),
+                     name: r.name,
+                     created: r.created,
+                     modified: r.modified,
+                     accessed: r.accessed,
+                     permissions: r.permissions
+                         .map(|x| x as u64),
+                     user_id: r.user_id.map(|x| x as u64),
+                     group_id: r.group_id.map(|x| x as u64),
+                     data_hash: r.hash,
+                     data_length: None,
+                 },
+                 r.hash_ref
+                     .as_mut()
+                     .map(|p| ::hash::tree::HashRef::from_bytes(&mut &p[..]).unwrap()))
             })
             .collect())
     }
@@ -285,14 +284,14 @@ impl KeyIndex {
                             id: u64,
                             last_modified: Option<i64>,
                             hash_opt: Option<hash::Hash>,
-                            persistent_ref_opt: Option<blob::ChunkRef>)
+                            hash_ref_opt: Option<hash::tree::HashRef>)
                             -> Result<(), DieselError> {
-        self.lock().update_data_hash(id, last_modified, hash_opt, persistent_ref_opt)
+        self.lock().update_data_hash(id, last_modified, hash_opt, hash_ref_opt)
     }
 
     pub fn list_dir(&self,
                     parent_opt: Option<u64>)
-                    -> Result<Vec<(Entry, Option<blob::ChunkRef>)>, DieselError> {
+                    -> Result<Vec<(Entry, Option<hash::tree::HashRef>)>, DieselError> {
         self.lock().list_dir(parent_opt)
     }
 

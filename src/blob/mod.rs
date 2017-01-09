@@ -14,16 +14,16 @@
 
 //! Combines data chunks into larger blobs to be stored externally.
 
-use std::borrow::Cow;
-use std::mem;
-use std::sync::{Arc, Mutex, MutexGuard};
-use std::thread;
 
 use backend::StoreBackend;
 use capnp;
 use errors;
 use hash::Hash;
 use hash::tree::HashRef;
+use std::borrow::Cow;
+use std::mem;
+use std::sync::{Arc, Mutex, MutexGuard};
+use std::thread;
 use tags;
 use util::FnBox;
 
@@ -39,8 +39,8 @@ pub mod tests;
 mod benchmarks;
 
 
-pub use self::chunk::{ChunkRef, Key, Kind, Packing};
 pub use self::blob::Blob;
+pub use self::chunk::{ChunkRef, Key, Kind, Packing, node_from_height, node_height};
 pub use self::index::{BlobDesc, BlobIndex};
 
 
@@ -121,11 +121,11 @@ impl<B: StoreBackend> StoreInner<B> {
         if chunk.is_empty() {
             let href = HashRef {
                 hash: hash,
+                kind: kind,
                 persistent_ref: ChunkRef {
                     blob_id: vec![0],
                     offset: 0,
                     length: 0,
-                    kind: kind,
                     packing: None,
                     key: None,
                 },
@@ -137,9 +137,9 @@ impl<B: StoreBackend> StoreInner<B> {
 
         let mut href = HashRef {
             hash: hash,
+            kind: kind,
             persistent_ref: ChunkRef {
                 blob_id: self.blob_desc.name.clone(),
-                kind: kind,
                 packing: None,
                 // updated by try_append:
                 offset: 0,
@@ -148,11 +148,11 @@ impl<B: StoreBackend> StoreInner<B> {
             },
         };
 
-        if let Err(()) = self.blob.try_append(&chunk, &mut href) {
+        if let Err(()) = self.blob.try_append(chunk, &mut href) {
             self.flush();
 
             href.persistent_ref.blob_id = self.blob_desc.name.clone();
-            self.blob.try_append(&chunk, &mut href).unwrap();
+            self.blob.try_append(chunk, &mut href).unwrap();
         }
         self.blob_refs.push((href.clone(), callback));
 
@@ -175,14 +175,14 @@ impl<B: StoreBackend> StoreInner<B> {
         assert!(data.len() < self.max_blob_size);
         let hash = Hash::new(&data[..]);
         let mut blob = Blob::new(self.max_blob_size);
-        blob.try_append(&data,
+        blob.try_append(data,
                         &mut HashRef {
                             hash: hash,
+                            kind: Kind::TreeLeaf,
                             persistent_ref: ChunkRef {
                                 blob_id: name.as_bytes().to_owned(),
                                 offset: 0,
                                 length: 0,
-                                kind: Kind::TreeLeaf,
                                 packing: None,
                                 key: None,
                             },
@@ -230,7 +230,7 @@ impl<B: StoreBackend> StoreInner<B> {
 
     fn delete_by_tag(&mut self, tag: tags::Tag) -> Result<(), String> {
         let blobs = self.blob_index.list_by_tag(tag);
-        for b in blobs.iter() {
+        for b in &blobs {
             try!(self.backend.delete(&b.name));
         }
         self.blob_index.delete_by_tag(tag);
@@ -257,7 +257,7 @@ impl<B: StoreBackend> BlobStore<B> {
                  callback: Box<FnBox<HashRef, ()>>)
                  -> HashRef {
         let mut guard = self.lock();
-        guard.store(&chunk, hash, kind, callback)
+        guard.store(chunk, hash, kind, callback)
     }
 
     /// Retrieve the data chunk identified by `ChunkRef`.
@@ -267,7 +267,7 @@ impl<B: StoreBackend> BlobStore<B> {
 
     /// Store a full named blob (used for writing root).
     pub fn store_named(&self, name: &str, data: &[u8]) -> Result<(), String> {
-        self.lock().store_named(name, &data)
+        self.lock().store_named(name, data)
     }
 
     /// Retrieve full named blob.

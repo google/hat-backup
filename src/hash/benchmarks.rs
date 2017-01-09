@@ -12,10 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use test::Bencher;
+use hash::tests::MemoryBackend;
 
 use hash::tree::*;
-use hash::tests::MemoryBackend;
+use test::Bencher;
 
 #[bench]
 fn append_unknown_16x128_kb(bench: &mut Bencher) {

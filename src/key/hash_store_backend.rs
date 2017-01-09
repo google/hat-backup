@@ -12,14 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::sync::Arc;
 
 use backend::StoreBackend;
 use blob;
 use errors::RetryError;
 use hash;
-use key::MsgError;
 use hash::tree::HashTreeBackend;
+use key::MsgError;
+use std::sync::Arc;
 
 pub struct HashStoreBackend<B> {
     hash_index: Arc<hash::HashIndex>,
@@ -48,7 +48,7 @@ impl<B: StoreBackend> HashStoreBackend<B> {
         assert!(!hash.bytes.is_empty());
         match try!(self.hash_index.fetch_persistent_ref(hash)) {
             None => Ok(None),
-            Some(chunk_ref) => self.fetch_chunk_from_persistent_ref(&hash, &chunk_ref),
+            Some(chunk_ref) => self.fetch_chunk_from_persistent_ref(hash, &chunk_ref),
         }
     }
 
@@ -66,7 +66,7 @@ impl<B: StoreBackend> HashTreeBackend for HashStoreBackend<B> {
 
     fn fetch_chunk(&self,
                    hash: &hash::Hash,
-                   persistent_ref: Option<blob::ChunkRef>)
+                   persistent_ref: Option<&blob::ChunkRef>)
                    -> Result<Option<Vec<u8>>, MsgError> {
         assert!(!hash.bytes.is_empty());
 
@@ -109,15 +109,15 @@ impl<B: StoreBackend> HashTreeBackend for HashStoreBackend<B> {
 
     fn insert_chunk(&self,
                     hash: &hash::Hash,
-                    level: i64,
+                    height: i64,
                     childs: Option<Vec<i64>>,
                     chunk: &[u8])
-                    -> Result<(i64, hash::tree::HashRef), MsgError> {
+                    -> Result<(i64, blob::ChunkRef), MsgError> {
         assert!(!hash.bytes.is_empty());
 
         let mut hash_entry = hash::Entry {
             hash: hash.clone(),
-            level: level,
+            level: height,
             childs: childs,
             persistent_ref: None,
         };
@@ -126,11 +126,8 @@ impl<B: StoreBackend> HashTreeBackend for HashStoreBackend<B> {
             hash::ReserveResult::HashKnown(id) => {
                 // Someone came before us: piggyback on their result.
                 Ok((id,
-                    hash::tree::HashRef {
-                    hash: hash.clone(),
-                    persistent_ref: self.fetch_persistent_ref(hash)
-                        .expect("Could not find persistent_ref for known chunk."),
-                }))
+                    self.fetch_persistent_ref(hash)
+                        .expect("Could not find persistent ref for known hash")))
             }
             hash::ReserveResult::ReserveOk(id) => {
                 // We came first: this data-chunk is ours to process.
@@ -139,15 +136,11 @@ impl<B: StoreBackend> HashTreeBackend for HashStoreBackend<B> {
                 let callback = Box::new(move |href: hash::tree::HashRef| {
                     local_hash_index.commit(&href.hash, href.persistent_ref);
                 });
-                let kind = if level == 0 {
-                    blob::Kind::TreeLeaf
-                } else {
-                    blob::Kind::TreeBranch
-                };
-                let href = self.blob_store.store(&chunk, hash.clone(), kind, callback);
+                let kind = blob::node_from_height(height);
+                let href = self.blob_store.store(chunk, hash.clone(), kind, callback);
                 hash_entry.persistent_ref = Some(href.persistent_ref.clone());
                 self.hash_index.update_reserved(hash_entry);
-                Ok((id, href))
+                Ok((id, href.persistent_ref))
             }
         }
     }

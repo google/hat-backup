@@ -14,22 +14,22 @@
 
 //! Local state for known hashes and their external location (blob reference).
 
-use std::sync::{Mutex, MutexGuard};
-use time::Duration;
+
+use blob;
+
+use capnp;
 
 use diesel;
 use diesel::prelude::*;
 use diesel::sqlite::SqliteConnection;
-
-use libsodium_sys;
-
-use blob;
-use util::{Counter, InfoWriter, PeriodicTimer, UniquePriorityQueue};
-use tags;
 use errors::{DieselError, RetryError};
 
-use capnp;
+use libsodium_sys;
 use root_capnp;
+use std::sync::{Mutex, MutexGuard};
+use tags;
+use time::Duration;
+use util::{Counter, InfoWriter, PeriodicTimer, UniquePriorityQueue};
 
 mod schema;
 pub mod tree;
@@ -204,7 +204,7 @@ impl InternalHashIndex {
     }
 
     fn locate(&mut self, hash: &Hash) -> Option<QueueEntry> {
-        let result_opt = self.queue.find_value_of_key(&hash.bytes).map(|x| x.clone());
+        let result_opt = self.queue.find_value_of_key(&hash.bytes).cloned();
         result_opt.or_else(|| self.index_locate(hash))
     }
 
@@ -274,13 +274,17 @@ impl InternalHashIndex {
         my_id
     }
 
+    fn reserved_id(&mut self, hash_entry: &Entry) -> Option<i64> {
+        self.queue.find_key(&hash_entry.hash.bytes).cloned()
+    }
+
     fn update_reserved(&mut self, hash_entry: Entry) {
+        let id_opt = self.reserved_id(&hash_entry);
         let Entry { hash, level, childs, persistent_ref } = hash_entry;
         assert!(!hash.bytes.is_empty());
         let old_entry = self.locate(&hash).expect("hash was reserved");
 
         // If we didn't already commit and pop() the hash, update it:
-        let id_opt = self.queue.find_key(&hash.bytes).cloned();
         if id_opt.is_some() {
             assert_eq!(id_opt, Some(old_entry.id));
             self.queue.update_value(&hash.bytes, |qe| {
@@ -525,7 +529,7 @@ impl InternalHashIndex {
 
 impl HashIndex {
     pub fn new(path: &str) -> Result<HashIndex, DieselError> {
-        InternalHashIndex::new(path).map(|index| HashIndex(Mutex::new((index))))
+        InternalHashIndex::new(path).map(|index| HashIndex(Mutex::new(index)))
     }
 
     #[cfg(test)]
@@ -540,7 +544,7 @@ impl HashIndex {
     /// Locate the local ID of this hash.
     pub fn get_id(&self, hash: &Hash) -> Option<i64> {
         assert!(!hash.bytes.is_empty());
-        self.lock().locate(&hash).map(|entry| entry.id)
+        self.lock().locate(hash).map(|entry| entry.id)
     }
 
     /// Locate hash entry from its ID.
@@ -570,6 +574,22 @@ impl HashIndex {
         }
     }
 
+    /// Locate the hash reference (including persistent blob reference) for this `Hash~.
+    pub fn fetch_hash_ref(&self, hash: &Hash) -> Result<Option<tree::HashRef>, RetryError> {
+        assert!(!hash.bytes.is_empty());
+        match self.lock().locate(hash) {
+            Some(ref queue_entry) if queue_entry.persistent_ref.is_none() => Err(RetryError),
+            Some(queue_entry) => {
+                Ok(Some(tree::HashRef {
+                    hash: hash.clone(),
+                    kind: blob::node_from_height(queue_entry.level),
+                    persistent_ref: queue_entry.persistent_ref.expect("persistent_ref"),
+                }))
+            }
+            None => Ok(None),
+        }
+    }
+
     /// Reserve a `Hash` in the index, while sending its content to external storage.
     /// This is used to ensure that each `Hash` is stored only once.
     pub fn reserve(&self, hash_entry: &Entry) -> ReserveResult {
@@ -585,6 +605,11 @@ impl HashIndex {
                 ReserveResult::ReserveOk(id)
             }
         }
+    }
+
+    /// Check whether an entry was previously reserved.
+    pub fn reserved_id(&self, hash_entry: &Entry) -> Option<i64> {
+        self.lock().reserved_id(hash_entry)
     }
 
     /// Update the info for a reserved `Hash`. The `Hash` remains reserved. This is used to update

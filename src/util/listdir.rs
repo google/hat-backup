@@ -14,12 +14,12 @@
 
 //! Helpers for reading directory structures from the local filesystem.
 
+
+use scoped_pool;
 use std::fs;
 use std::io;
 use std::iter;
 use std::path::PathBuf;
-
-use scoped_pool;
 
 
 pub trait HasPath {
@@ -71,7 +71,7 @@ pub trait PathHandler<P: Send + 'static>: Sync {
     fn recurse(&self, root: PathBuf, payload: P) {
         let pool = scoped_pool::Pool::new(10);
         pool.scoped(move |scope| {
-            self.recurse_worker(&scope, root, payload);
+            self.recurse_worker(scope, root, payload);
         });
         pool.shutdown();
     }

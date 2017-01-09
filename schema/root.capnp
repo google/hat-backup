@@ -22,8 +22,7 @@ struct Snapshot {
 	familyName @1: Text;
 	msg @2 :Text;
 
-	hash @3 :Data;
-	treeReference @4 :Data;
+	hashRef @3 :Data;
 }
 
 struct SnapshotList {
@@ -36,26 +35,22 @@ struct ChunkRef {
 	offset @1: Int64;
 	length @2: Int64;
 
-	kind :union {
-		treeBranch @3 :Void;
-		treeLeaf @4 :Void;
-	}
-
 	packing :union {
-		none @5 :Void;
-		gzip @6 :Void;
-		snappy @7 :Void;
+		none @3 :Void;
+		gzip @4 :Void;
+		snappy @5 :Void;
 	}
 
 	key :union {
-		none @8 :Void;
-		xsalsa20Poly1305 @9 :Data;
+		none @6 :Void;
+		xsalsa20Poly1305 @7 :Data;
 	}
 }
 
 struct HashRef {
 	hash @0 :Data;
-	chunkRef @1 :ChunkRef;
+	height @1 :Int64;
+	chunkRef @2 :ChunkRef;
 }
 
 struct HashRefList {

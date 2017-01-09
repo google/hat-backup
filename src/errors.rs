@@ -12,11 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::{error, fmt};
+pub use self::crypto_error::CryptoError;
+pub use self::diesel_error::DieselError;
 
 pub use self::hat_error::HatError;
-pub use self::diesel_error::DieselError;
-pub use self::crypto_error::CryptoError;
+use std::{error, fmt};
 
 #[derive(Clone, Copy, Debug)]
 pub struct RetryError;
@@ -34,14 +34,14 @@ impl error::Error for RetryError {
 }
 
 mod hat_error {
+
+    use blob;
+    use capnp;
+    use key;
     use std::{io, str};
     use std::borrow::Cow;
     use std::sync::mpsc;
-    use capnp;
     use void;
-
-    use blob;
-    use key;
 
     error_type! {
         #[derive(Debug)]

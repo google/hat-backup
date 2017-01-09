@@ -12,12 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use errors::CryptoError;
-use sodiumoxide::crypto::stream;
-use hash::Hash;
-use hash::tree::HashRef;
 use blob::{ChunkRef, Key};
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
+use errors::CryptoError;
+use hash::Hash;
+use hash::tree::HashRef;
+use sodiumoxide::crypto::stream;
 
 pub struct PlainText(Vec<u8>);
 pub struct PlainTextRef<'a>(&'a [u8]);
@@ -84,10 +84,10 @@ impl<'a> PlainTextRef<'a> {
                          nonce: &authed::desc::Nonce,
                          key: &authed::desc::Key)
                          -> CipherText {
-        CipherText::new(authed::imp::seal(&self.0, &nonce, &key))
+        CipherText::new(authed::imp::seal(self.0, nonce, key))
     }
     pub fn to_sealed_ciphertext(&self, pubkey: &sealed::desc::PublicKey) -> CipherText {
-        CipherText::new(sealed::imp::seal(&self.0, &pubkey))
+        CipherText::new(sealed::imp::seal(self.0, pubkey))
     }
 }
 
@@ -177,8 +177,8 @@ impl<'a> CipherTextRef<'a> {
                         nonce: &authed::desc::Nonce,
                         key: &authed::desc::Key)
                         -> Result<PlainText, CryptoError> {
-        Ok((PlainText::new(try!(authed::imp::open(&self.0, &nonce, &key)
-            .map_err(|()| "crypto read failed")))))
+        Ok(PlainText::new(try!(authed::imp::open(&self.0, &nonce, &key)
+           .map_err(|()| "crypto read failed"))))
     }
     pub fn to_sealed_plaintext(&self,
                                pubkey: &sealed::desc::PublicKey,

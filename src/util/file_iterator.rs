@@ -47,10 +47,10 @@ impl FileIterator {
 
 impl Read for FileIterator {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-        match self {
-            &mut FileIterator::File(ref mut f) => f.read(buf),
+        match *self {
+            FileIterator::File(ref mut f) => f.read(buf),
             #[cfg(test)]
-            &mut FileIterator::Buf(ref vec, ref mut pos) => {
+            FileIterator::Buf(ref vec, ref mut pos) => {
                 use std::cmp;
                 if *pos >= vec.len() {
                     Ok(0)
@@ -62,7 +62,7 @@ impl Read for FileIterator {
                 }
             }
             #[cfg(all(test, feature = "benchmarks"))]
-            &mut FileIterator::Reader(ref mut r) => r.read(buf),
+            FileIterator::Reader(ref mut r) => r.read(buf),
         }
     }
 }
