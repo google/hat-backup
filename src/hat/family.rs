@@ -168,14 +168,6 @@ fn parse_dir_data(chunk: &[u8], mut out: &mut Vec<walker::FileEntry>) -> Result<
         return Ok(());
     }
 
-    use std::hash::{Hash, Hasher, SipHasher};
-
-    fn hash<T: Hash>(t: &T) -> u64 {
-        let mut s = SipHasher::new();
-        t.hash(&mut s);
-        s.finish()
-    }
-
     let reader = capnp::serialize_packed::read_message(&mut &chunk[..],
                                                        capnp::message::ReaderOptions::new())
         .unwrap();
