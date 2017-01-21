@@ -19,7 +19,11 @@ fn build_diesel(paths: &[(&str, &str)]) {
 }
 
 fn main() {
-    ::capnpc::compile("schema", &["schema/root.capnp"]).unwrap();
+    ::capnpc::CompilerCommand::new()
+        .src_prefix("schema")
+        .file("schema/root.capnp")
+        .run().expect("capnp schema compiler failed");
+
     build_diesel(&[
         ("blob/schema.in.rs", "blob-schema.rs"),
         ("hash/schema.in.rs", "hash-schema.rs"),
