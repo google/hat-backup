@@ -32,7 +32,8 @@ pub struct Blob {
     pub tag: i32,
 }
 
-#[insertable_into(blobs)]
+#[derive(Insertable)]
+#[table_name="blobs"]
 pub struct NewBlob<'a> {
     pub id: i64,
     pub name: &'a [u8],

@@ -48,7 +48,8 @@ pub struct Hash {
     pub blob_ref: Option<Vec<u8>>,
 }
 
-#[insertable_into(hashes)]
+#[derive(Insertable)]
+#[table_name="hashes"]
 pub struct NewHash<'a> {
     pub id: i64,
     pub hash: &'a [u8],
@@ -67,7 +68,8 @@ pub struct GcMetadata {
     pub gc_vec: Vec<u8>,
 }
 
-#[insertable_into(gc_metadata)]
+#[derive(Insertable)]
+#[table_name="gc_metadata"]
 pub struct NewGcMetadata<'a> {
     pub hash_id: i64,
     pub family_id: i64,
