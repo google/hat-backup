@@ -17,7 +17,6 @@ path = "src/main.rs"
 
 [build-dependencies]
 capnpc = "*"
-syntex = "0.42.0"
 
 [dependencies]
 byteorder = "*"
@@ -39,12 +38,12 @@ scoped-pool = "*"
 [dependencies.diesel]
 default-features = false
 features = ["sqlite"]
-version = "0.7.*"
+version = "^0.9.1"
 
 [build-dependencies.diesel_codegen_syntex]
 default-features = false
-features = ["sqlite", "with-syntex"]
-version = "0.7.*"
+features = ["sqlite"]
+version = "^0.9.0"
 
 [features]
 default = []

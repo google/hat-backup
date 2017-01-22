@@ -54,7 +54,8 @@ pub struct Key {
     pub hash_ref: Option<Vec<u8>>,
 }
 
-#[insertable_into(keys)]
+#[derive(Insertable)]
+#[table_name="keys"]
 pub struct NewKey<'a> {
     pub parent: Option<i64>,
     pub name: &'a [u8],

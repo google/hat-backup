@@ -50,7 +50,8 @@ pub struct Family {
     pub name: String,
 }
 
-#[insertable_into(family)]
+#[derive(Insertable)]
+#[table_name="family"]
 pub struct NewFamily<'a> {
     pub name: &'a str,
 }
@@ -67,7 +68,8 @@ pub struct Snapshot {
     pub hash_ref: Option<Vec<u8>>,
 }
 
-#[insertable_into(snapshots)]
+#[derive(Insertable)]
+#[table_name="snapshots"]
 pub struct NewSnapshot<'a> {
     pub tag: i32,
     pub family_id: i64,
