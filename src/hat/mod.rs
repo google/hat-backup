@@ -168,9 +168,7 @@ impl<'a, B: StoreBackend> Iterator for SnapshotLister<'a, B> {
                 }
                 Some(Ok(hash_ref.clone()))
             }
-            Some((ref hash_ref, _)) => {
-                Some(Ok(hash_ref.clone()))
-            }
+            Some((ref hash_ref, _)) => Some(Ok(hash_ref.clone())),
             None => None,
         }
     }
@@ -363,16 +361,16 @@ impl<B: StoreBackend> HatRc<B> {
                     level: blob::node_height(&href.kind),
                     childs: childs,
                 }
-             }
+            }
 
             // Convert child hashes to child IDs.
             let child_ids = match node.childs {
                 Some(ref hs) => {
                     Some(hs.iter()
-                        .map(|h|
-                            match hashes.reserve(&entry(h.clone(), None)) {
-                                hash::ReserveResult::HashKnown(id) | hash::ReserveResult::ReserveOk(id) => id,
-                            })
+                        .map(|h| match hashes.reserve(&entry(h.clone(), None)) {
+                            hash::ReserveResult::HashKnown(id) |
+                            hash::ReserveResult::ReserveOk(id) => id,
+                        })
                         .collect())
                 }
                 None => None,
@@ -389,7 +387,7 @@ impl<B: StoreBackend> HatRc<B> {
             if let hash::ReserveResult::HashKnown(..) = hashes.reserve(&entry) {
                 if hashes.reserved_id(&entry).is_none() {
                     // This is a repeat hash that was already fully committed.
-                    return
+                    return;
                 }
                 // Update previously reserved hash.
                 hashes.update_reserved(entry.clone());

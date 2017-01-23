@@ -328,7 +328,7 @@ impl<B> Walker<B>
             // All empty, we can never discover more work.
             return Ok(false);
         }
-        
+
         // Basic cycle detection to spot some programming mistakes.
         let mut cycle_start = None;
 
