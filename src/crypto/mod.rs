@@ -18,6 +18,7 @@ use errors::CryptoError;
 use hash::Hash;
 use hash::tree::HashRef;
 use sodiumoxide::crypto::stream;
+use std::io;
 
 pub struct PlainText(Vec<u8>);
 pub struct PlainTextRef<'a>(&'a [u8]);
@@ -26,6 +27,7 @@ pub struct CipherText {
     len: usize,
 }
 pub struct CipherTextRef<'a>(&'a [u8]);
+
 
 pub mod authed {
     pub mod desc {
@@ -80,6 +82,9 @@ impl<'a> PlainTextRef<'a> {
     pub fn len(&self) -> usize {
         self.0.len()
     }
+    pub fn read_i64(&self) -> Result<i64, io::Error> {
+        return (&self.0[..]).read_i64::<LittleEndian>();
+    }
     pub fn to_ciphertext(&self,
                          nonce: &authed::desc::Nonce,
                          key: &authed::desc::Key)
@@ -106,6 +111,11 @@ impl PlainText {
     }
     pub fn into_vec(self) -> Vec<u8> {
         self.0
+    }
+    pub fn from_i64(n: i64) -> Self {
+        let mut buf = PlainText::new(Vec::with_capacity(8));
+        buf.0.write_i64::<LittleEndian>(n).unwrap();
+        return buf;
     }
 }
 
@@ -244,8 +254,7 @@ impl FixedKey {
         let mut ct = pt.to_sealed_ciphertext(&self.pubkey);
 
         // Add ciphertext length as LittleEndian.
-        let mut foot_pt = PlainText::new(Vec::with_capacity(8));
-        foot_pt.0.write_u64::<LittleEndian>(ct.len() as u64).unwrap();
+        let foot_pt = PlainText::from_i64(ct.len() as i64);
         assert_eq!(foot_pt.len(), sealed::desc::footer_plain_bytes());
 
         // Append sealed ciphertext length to full ciphertext.
@@ -267,8 +276,8 @@ impl FixedKey {
         assert_eq!(foot_pt.len(), sealed::desc::footer_plain_bytes());
 
         // Parse back from encoded LittleEndian.
-        let ct_len = try!(foot_pt.as_bytes()
-            .read_u64::<LittleEndian>()
+        let ct_len = try!(foot_pt.as_ref()
+            .read_i64()
             .map_err(|_| "crypto read failed"));
 
         // Read and unseal original ciphertext.
