@@ -15,6 +15,8 @@
 //! Local state for external blobs and their states.
 
 
+use crypto;
+
 use diesel;
 use diesel::prelude::*;
 use diesel::sqlite::SqliteConnection;
@@ -38,6 +40,7 @@ pub struct BlobDesc {
 pub struct InternalBlobIndex {
     conn: SqliteConnection,
     next_id: i64,
+    name_key: crypto::FixedKey,
 }
 
 pub struct BlobIndex(Mutex<InternalBlobIndex>);
@@ -47,9 +50,26 @@ impl InternalBlobIndex {
     pub fn new(path: &str) -> Result<InternalBlobIndex, DieselError> {
         let conn = try!(SqliteConnection::establish(path));
 
+        // TODO(jos): Plug an actual crypto key through somehow.
+        let pubkey = crypto::sealed::desc::PublicKey::from_slice(&[215, 136, 80, 128, 158, 109,
+                                                                   227, 141, 219, 63, 118, 91,
+                                                                   123, 97, 1, 97, 65, 237, 62,
+                                                                   171, 83, 159, 200, 11, 68,
+                                                                   138, 40, 82, 24, 47, 187, 29])
+            .unwrap();
+        let seckey = crypto::sealed::desc::SecretKey::from_slice(&[94, 13, 181, 81, 97, 87, 76,
+                                                                   37, 53, 92, 120, 232, 17, 126,
+                                                                   234, 78, 12, 23, 141, 61, 40,
+                                                                   10, 136, 127, 103, 192, 255,
+                                                                   193, 142, 154, 101, 35])
+            .unwrap();
+        let name_key = crypto::FixedKey::new(pubkey, Some(seckey));
+
+
         let mut bi = InternalBlobIndex {
             conn: conn,
             next_id: -1,
+            name_key: name_key,
         };
 
         let dir = try!(diesel::migrations::find_migrations_directory());
@@ -61,10 +81,15 @@ impl InternalBlobIndex {
         Ok(bi)
     }
 
+    fn name_of_id(&self, id: i64) -> Vec<u8> {
+        return self.name_key.seal(crypto::PlainText::from_i64(id).as_ref()).to_vec();
+    }
+
     fn new_blob_desc(&mut self) -> BlobDesc {
+        let id = self.next_id();
         BlobDesc {
-            name: randombytes(24),
-            id: self.next_id(),
+            name: self.name_of_id(id),
+            id: id,
         }
     }
 
@@ -84,7 +109,6 @@ impl InternalBlobIndex {
     fn next_id(&mut self) -> i64 {
         let id = self.next_id;
         self.next_id += 1;
-
         id
     }
 
