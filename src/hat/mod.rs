@@ -16,6 +16,7 @@
 use backend::StoreBackend;
 use blob;
 use capnp;
+use db;
 use errors::HatError;
 use gc::{self, Gc, GcRc};
 use hash;
@@ -50,17 +51,17 @@ pub struct GcBackend {
 impl gc::GcBackend for GcBackend {
     type Err = Void;
 
-    fn get_data(&self, hash_id: gc::Id, family_id: gc::Id) -> Result<hash::GcData, Self::Err> {
+    fn get_data(&self, hash_id: gc::Id, family_id: gc::Id) -> Result<db::GcData, Self::Err> {
         Ok(self.hash_index.read_gc_data(hash_id, family_id))
     }
-    fn update_data<F: hash::UpdateFn>(&mut self,
-                                      hash_id: gc::Id,
-                                      family_id: gc::Id,
-                                      f: F)
-                                      -> Result<hash::GcData, Self::Err> {
+    fn update_data<F: db::UpdateFn>(&mut self,
+                                    hash_id: gc::Id,
+                                    family_id: gc::Id,
+                                    f: F)
+                                    -> Result<db::GcData, Self::Err> {
         Ok(self.hash_index.update_gc_data(hash_id, family_id, f))
     }
-    fn update_all_data_by_family<F: hash::UpdateFn, I: Iterator<Item = F>>
+    fn update_all_data_by_family<F: db::UpdateFn, I: Iterator<Item = F>>
         (&mut self,
          family_id: gc::Id,
          fns: I)
@@ -194,9 +195,10 @@ impl<B: StoreBackend> HatRc<B> {
         let snapshot_index_path = snapshot_index_name(repository_root.clone());
         let blob_index_path = blob_index_name(repository_root.clone());
         let hash_index_path = hash_index_name(repository_root.clone());
+        let db_p = Arc::new(try!(db::Index::new(&hash_index_path)));
         let si_p = try!(snapshot::SnapshotIndex::new(&snapshot_index_path));
-        let bi_p = Arc::new(try!(blob::BlobIndex::new(&blob_index_path)));
-        let hi_p = Arc::new(try!(hash::HashIndex::new(&hash_index_path)));
+        let hi_p = Arc::new(try!(hash::HashIndex::new(db_p.clone())));
+        let bi_p = Arc::new(try!(blob::BlobIndex::new(db_p.clone())));
 
         let bs_p = Arc::new(blob::BlobStore::new(bi_p.clone(), backend.clone(), max_blob_size));
 
@@ -222,9 +224,10 @@ impl<B: StoreBackend> HatRc<B> {
 
     #[cfg(test)]
     pub fn new_for_testing(backend: Arc<B>, max_blob_size: usize) -> Result<HatRc<B>, HatError> {
+        let db_p = Arc::new(db::Index::new_for_testing());
         let si_p = snapshot::SnapshotIndex::new_for_testing().unwrap();
-        let bi_p = Arc::new(blob::BlobIndex::new_for_testing().unwrap());
-        let hi_p = Arc::new(hash::HashIndex::new_for_testing().unwrap());
+        let bi_p = Arc::new(blob::BlobIndex::new(db_p.clone()).unwrap());
+        let hi_p = Arc::new(hash::HashIndex::new(db_p).unwrap());
 
         let bs_p = Arc::new(blob::BlobStore::new(bi_p.clone(), backend.clone(), max_blob_size));
 

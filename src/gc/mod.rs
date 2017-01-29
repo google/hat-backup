@@ -13,7 +13,7 @@
 // limitations under the License.
 
 
-use hash::{GcData, UpdateFn};
+use db::{GcData, UpdateFn};
 use snapshot;
 #[cfg(test)]
 use std::collections::HashMap;

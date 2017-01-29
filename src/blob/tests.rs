@@ -14,6 +14,7 @@
 
 use backend::{MemoryBackend, StoreBackend};
 use blob::{Blob, BlobError, BlobIndex, BlobStore, ChunkRef, Key, Kind};
+use db;
 use hash;
 use quickcheck;
 
@@ -25,7 +26,8 @@ fn identity() {
     fn prop(chunks: Vec<Vec<u8>>) -> bool {
         let backend = Arc::new(MemoryBackend::new());
 
-        let blob_index = Arc::new(BlobIndex::new_for_testing().unwrap());
+        let db = Arc::new(db::Index::new_for_testing());
+        let blob_index = Arc::new(BlobIndex::new(db).unwrap());
         let bs_p = BlobStore::new(blob_index, backend.clone(), 1024);
 
         let mut ids = Vec::new();
@@ -67,7 +69,8 @@ fn identity_with_excessive_flushing() {
     fn prop(chunks: Vec<Vec<u8>>) -> bool {
         let backend = Arc::new(MemoryBackend::new());
 
-        let blob_index = Arc::new(BlobIndex::new_for_testing().unwrap());
+        let db = Arc::new(db::Index::new_for_testing());
+        let blob_index = Arc::new(BlobIndex::new(db).unwrap());
         let bs_p = BlobStore::new(blob_index, backend.clone(), 1024);
 
         let mut ids = Vec::new();

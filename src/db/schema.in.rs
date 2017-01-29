@@ -35,6 +35,14 @@ table! {
     }
 }
 
+table! {
+    blobs {
+        id -> BigInt,
+        name -> Binary,
+        tag -> Integer,
+    }
+}
+
 
 // Rust models.
 
@@ -75,4 +83,19 @@ pub struct NewGcMetadata<'a> {
     pub family_id: i64,
     pub gc_int: i64,
     pub gc_vec: &'a [u8],
+}
+
+#[derive(Queryable)]
+pub struct Blob {
+    pub id: i64,
+    pub name: Vec<u8>,
+    pub tag: i32,
+}
+
+#[derive(Insertable)]
+#[table_name="blobs"]
+pub struct NewBlob<'a> {
+    pub id: i64,
+    pub name: &'a [u8],
+    pub tag: i32,
 }

@@ -22,8 +22,7 @@ fn main() {
         .run().expect("capnp schema compiler failed");
 
     build_diesel(&[
-        ("blob/schema.in.rs", "blob-schema.rs"),
-        ("hash/schema.in.rs", "hash-schema.rs"),
+        ("db/schema.in.rs", "db-schema.rs"),
         ("key/schema.in.rs", "key-schema.rs"),
         ("snapshot/schema.in.rs", "snapshot-schema.rs"),
     ]);

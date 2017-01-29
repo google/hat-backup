@@ -31,7 +31,6 @@ use util::FnBox;
 mod chunk;
 mod blob;
 mod index;
-mod schema;
 #[cfg(test)]
 pub mod tests;
 

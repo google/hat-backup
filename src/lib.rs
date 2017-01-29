@@ -50,6 +50,7 @@ extern crate quickcheck;
 pub mod backend;
 mod blob;
 mod crypto;
+mod db;
 mod errors;
 mod gc;
 mod hash;
