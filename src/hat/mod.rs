@@ -196,7 +196,7 @@ impl<B: StoreBackend> HatRc<B> {
         let blob_index_path = blob_index_name(repository_root.clone());
         let hash_index_path = hash_index_name(repository_root.clone());
         let db_p = Arc::new(try!(db::Index::new(&hash_index_path)));
-        let si_p = try!(snapshot::SnapshotIndex::new(&snapshot_index_path));
+        let si_p = snapshot::SnapshotIndex::new(db_p.clone());
         let hi_p = Arc::new(try!(hash::HashIndex::new(db_p.clone())));
         let bi_p = Arc::new(try!(blob::BlobIndex::new(db_p.clone())));
 
@@ -225,7 +225,7 @@ impl<B: StoreBackend> HatRc<B> {
     #[cfg(test)]
     pub fn new_for_testing(backend: Arc<B>, max_blob_size: usize) -> Result<HatRc<B>, HatError> {
         let db_p = Arc::new(db::Index::new_for_testing());
-        let si_p = snapshot::SnapshotIndex::new_for_testing().unwrap();
+        let si_p = snapshot::SnapshotIndex::new(db_p.clone());
         let bi_p = Arc::new(blob::BlobIndex::new(db_p.clone()).unwrap());
         let hi_p = Arc::new(hash::HashIndex::new(db_p).unwrap());
 
@@ -332,7 +332,7 @@ impl<B: StoreBackend> HatRc<B> {
                              .unwrap(),
                          s.get_msg().unwrap(),
                          &hash_ref,
-                         Some(snapshot::WorkStatus::RecoverInProgress));
+                         Some(db::SnapshotWorkStatus::RecoverInProgress));
         }
         self.flush_snapshot_index();
         try!(self.resume());
@@ -342,7 +342,7 @@ impl<B: StoreBackend> HatRc<B> {
 
     fn recover_snapshot(&mut self,
                         family_name: String,
-                        info: snapshot::Info,
+                        info: db::SnapshotInfo,
                         final_hash: &hash::tree::HashRef)
                         -> Result<(), HatError> {
         fn recover_entry<B: StoreBackend>(hashes: &hash::HashIndex,
@@ -445,8 +445,8 @@ impl<B: StoreBackend> HatRc<B> {
 
         for snapshot in need_work {
             match snapshot.status {
-                snapshot::WorkStatus::CommitInProgress |
-                snapshot::WorkStatus::RecoverInProgress => {
+                db::SnapshotWorkStatus::CommitInProgress |
+                db::SnapshotWorkStatus::RecoverInProgress => {
                     let done_hash_opt = match snapshot.hash {
                         None => None,
                         Some(ref h) => {
@@ -465,16 +465,16 @@ impl<B: StoreBackend> HatRc<B> {
                         }
                     };
                     match (done_hash_opt, snapshot.status) {
-                        (Some(hash), snapshot::WorkStatus::CommitInProgress) => {
+                        (Some(hash), db::SnapshotWorkStatus::CommitInProgress) => {
                             try!(self.commit_finalize_by_name(snapshot.family_name,
                                                               snapshot.info,
                                                               hash))
                         }
-                        (None, snapshot::WorkStatus::CommitInProgress) => {
+                        (None, db::SnapshotWorkStatus::CommitInProgress) => {
                             println!("Resuming commit of: {}", snapshot.family_name);
                             try!(self.commit_by_name(snapshot.family_name, Some(snapshot.info)))
                         }
-                        (None, snapshot::WorkStatus::RecoverInProgress) => {
+                        (None, db::SnapshotWorkStatus::RecoverInProgress) => {
                             println!("Resuming recovery of: {}", snapshot.family_name);
                             let hash_ref_bytes = try!(snapshot.hash_ref
                                 .ok_or("Recovered hash tree has no root hash"));
@@ -491,7 +491,7 @@ impl<B: StoreBackend> HatRc<B> {
                         }
                     }
                 }
-                snapshot::WorkStatus::CommitComplete => {
+                db::SnapshotWorkStatus::CommitComplete => {
                     match snapshot.hash {
                         Some(ref h) => {
                             try!(self.commit_finalize_by_name(snapshot.family_name,
@@ -506,7 +506,7 @@ impl<B: StoreBackend> HatRc<B> {
                         }
                     }
                 }
-                snapshot::WorkStatus::DeleteInProgress => {
+                db::SnapshotWorkStatus::DeleteInProgress => {
                     let hash = snapshot.hash.expect("Snapshot has no hash");
                     let hash_id = self.hash_index
                         .get_id(&hash)
@@ -528,7 +528,7 @@ impl<B: StoreBackend> HatRc<B> {
                         }
                     }
                 }
-                snapshot::WorkStatus::DeleteComplete => {
+                db::SnapshotWorkStatus::DeleteComplete => {
                     let hash = snapshot.hash.expect("Snapshot has no hash");
                     let hash_id = self.hash_index
                         .get_id(&hash)
@@ -549,7 +549,7 @@ impl<B: StoreBackend> HatRc<B> {
 
     pub fn commit_by_name(&mut self,
                           family_name: String,
-                          resume_info: Option<snapshot::Info>)
+                          resume_info: Option<db::SnapshotInfo>)
                           -> Result<(), HatError> {
         let family = try!(self.open_family(family_name));
         try!(self.commit(&family, resume_info));
@@ -559,7 +559,7 @@ impl<B: StoreBackend> HatRc<B> {
 
     pub fn commit(&mut self,
                   family: &Family<B>,
-                  resume_info: Option<snapshot::Info>)
+                  resume_info: Option<db::SnapshotInfo>)
                   -> Result<(), HatError> {
         //  Tag 1:
         //  Reserve the snapshot and commit the reservation.
@@ -622,7 +622,7 @@ impl<B: StoreBackend> HatRc<B> {
 
     fn commit_finalize_by_name(&mut self,
                                family_name: String,
-                               snap_info: snapshot::Info,
+                               snap_info: db::SnapshotInfo,
                                hash: &hash::Hash)
                                -> Result<(), HatError> {
         let family = try!(self.open_family(family_name));
@@ -633,7 +633,7 @@ impl<B: StoreBackend> HatRc<B> {
 
     fn commit_finalize(&mut self,
                        family: &Family<B>,
-                       snap_info: snapshot::Info,
+                       snap_info: db::SnapshotInfo,
                        hash: &hash::Hash)
                        -> Result<(), HatError> {
         // Commit locally. Let the GC perform any needed cleanup.
@@ -760,7 +760,7 @@ impl<B: StoreBackend> HatRc<B> {
 
     fn deregister_finalize_by_name(&mut self,
                                    family_name: String,
-                                   snap_info: snapshot::Info,
+                                   snap_info: db::SnapshotInfo,
                                    hash_id: gc::Id)
                                    -> Result<(), HatError> {
         let family = try!(self.open_family(family_name));
@@ -771,7 +771,7 @@ impl<B: StoreBackend> HatRc<B> {
 
     fn deregister_finalize(&mut self,
                            family: &Family<B>,
-                           snap_info: snapshot::Info,
+                           snap_info: db::SnapshotInfo,
                            final_ref: gc::Id)
                            -> Result<(), HatError> {
         // Mark the snapshot to enable resuming.

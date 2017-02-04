@@ -24,6 +24,5 @@ fn main() {
     build_diesel(&[
         ("db/schema.in.rs", "db-schema.rs"),
         ("key/schema.in.rs", "key-schema.rs"),
-        ("snapshot/schema.in.rs", "snapshot-schema.rs"),
     ]);
 }

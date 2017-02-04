@@ -90,6 +90,52 @@ pub struct GcData {
 pub trait UpdateFn: FnOnce(GcData) -> Option<GcData> {}
 impl<T> UpdateFn for T where T: FnOnce(GcData) -> Option<GcData> {}
 
+#[derive(Clone, Debug)]
+pub struct SnapshotInfo {
+    pub unique_id: i64,
+    pub family_id: i64,
+    pub snapshot_id: i64,
+}
+
+#[derive(Debug)]
+pub enum SnapshotWorkStatus {
+    CommitInProgress,
+    CommitComplete,
+    DeleteInProgress,
+    DeleteComplete,
+    RecoverInProgress,
+}
+
+#[derive(Debug)]
+pub struct SnapshotStatus {
+    pub family_name: String,
+    pub info: SnapshotInfo,
+    pub hash: Option<hash::Hash>,
+    pub hash_ref: Option<Vec<u8>>,
+    pub msg: Option<String>,
+    pub status: SnapshotWorkStatus,
+}
+
+fn tag_to_work_status(tag: tags::Tag) -> SnapshotWorkStatus {
+    match tag {
+        tags::Tag::Reserved | tags::Tag::InProgress => SnapshotWorkStatus::CommitInProgress,
+        tags::Tag::Complete | tags::Tag::Done => SnapshotWorkStatus::CommitComplete,
+        tags::Tag::WillDelete => SnapshotWorkStatus::DeleteInProgress,
+        tags::Tag::ReadyDelete |
+        tags::Tag::DeleteComplete => SnapshotWorkStatus::DeleteComplete,
+        tags::Tag::RecoverInProgress => SnapshotWorkStatus::RecoverInProgress,
+    }
+}
+
+fn work_status_to_tag(status: SnapshotWorkStatus) -> tags::Tag {
+    match status {
+        SnapshotWorkStatus::CommitInProgress => tags::Tag::InProgress,
+        SnapshotWorkStatus::CommitComplete => tags::Tag::Done,
+        SnapshotWorkStatus::DeleteInProgress => tags::Tag::WillDelete,
+        SnapshotWorkStatus::DeleteComplete => tags::Tag::DeleteComplete,
+        SnapshotWorkStatus::RecoverInProgress => tags::Tag::RecoverInProgress,
+    }
+}
 
 /// An entry that can be inserted into the hash index.
 #[derive(Clone)]
@@ -540,5 +586,250 @@ impl InternalIndex {
                 }
             })
             .collect()
+    }
+
+    pub fn last_insert_rowid(&self) -> i64 {
+        diesel::select(diesel::expression::sql("last_insert_rowid()"))
+            .first::<i64>(&self.conn)
+            .unwrap()
+    }
+
+    pub fn family_id_from_name(&mut self, name_: &str) -> Option<i64> {
+        use self::schema::family::dsl::*;
+
+        family.filter(name.eq(name_))
+            .select(id)
+            .first::<i64>(&self.conn)
+            .optional()
+            .expect("Error reading family")
+    }
+
+    /// Delete snapshot.
+    pub fn snapshot_delete(&self, info: SnapshotInfo) {
+        use self::schema::snapshots::dsl::*;
+
+        let count = diesel::delete(snapshots.find(info.unique_id)
+                .filter(family_id.eq(info.family_id))
+                .filter(snapshot_id.eq(info.snapshot_id)))
+            .execute(&self.conn)
+            .expect("Error deleting snapshots");
+        assert!(count <= 1);
+    }
+
+    pub fn get_or_create_family_id(&mut self, name_: &str) -> i64 {
+        let id_opt = self.family_id_from_name(name_);
+        match id_opt {
+            Some(id) => id,
+            None => {
+                use self::schema::family::dsl::*;
+
+                let new = self::schema::NewFamily { name: name_ };
+
+                diesel::insert(&new)
+                    .into(family)
+                    .execute(&self.conn)
+                    .expect("Error inserting family");
+                self.last_insert_rowid()
+            }
+        }
+    }
+
+    pub fn snapshot_latest_id(&mut self, family_id_: i64) -> Option<i64> {
+        use self::schema::snapshots::dsl::*;
+        use diesel::expression::max;
+
+        snapshots.filter(family_id.eq(family_id_))
+            .select(max(snapshot_id).nullable())
+            .first::<Option<i64>>(&self.conn)
+            .optional()
+            .expect("Error reading latest snapshot id")
+            .and_then(|x| x)
+    }
+
+    /// Lookup exact snapshot info from family and snapshot id.
+    pub fn snapshot_lookup(&mut self,
+                           family_name_: &str,
+                           snapshot_id_: i64)
+                           -> Option<(SnapshotInfo, hash::Hash, Option<hash::tree::HashRef>)> {
+        use self::schema::snapshots::dsl::*;
+        use self::schema::family::dsl::{family, name};
+
+        let row_opt = snapshots.inner_join(family)
+            .filter(name.eq(family_name_))
+            .filter(snapshot_id.eq(snapshot_id_))
+            .select((id, tag, family_id, snapshot_id, msg, hash, hash_ref))
+            .first::<self::schema::Snapshot>(&self.conn)
+            .optional()
+            .expect("Error reading snapshot info");
+
+        row_opt.map(|snap| {
+            (SnapshotInfo {
+                 unique_id: snap.id,
+                 family_id: snap.family_id,
+                 snapshot_id: snap.snapshot_id,
+             },
+             ::hash::Hash { bytes: snap.hash.unwrap().to_vec() },
+             snap.hash_ref.and_then(|r| ::hash::tree::HashRef::from_bytes(&mut &r[..]).ok()))
+        })
+    }
+
+    pub fn snapshot_reserve(&mut self, family_: String) -> SnapshotInfo {
+        use self::schema::snapshots::dsl::*;
+
+        let family_id_ = self.get_or_create_family_id(&family_);
+        let snapshot_id_ = 1 + self.snapshot_latest_id(family_id_).unwrap_or(0);
+
+        let new = self::schema::NewSnapshot {
+            family_id: family_id_,
+            snapshot_id: snapshot_id_,
+            tag: tags::Tag::Reserved as i32,
+            msg: None,
+            hash: None,
+            hash_ref: None,
+        };
+
+        diesel::insert(&new)
+            .into(snapshots)
+            .execute(&self.conn)
+            .expect("Error inserting snapshot");
+
+        let unique_id_ = self.last_insert_rowid();
+
+        SnapshotInfo {
+            unique_id: unique_id_,
+            family_id: family_id_,
+            snapshot_id: snapshot_id_,
+        }
+    }
+
+    pub fn snapshot_update(&mut self,
+                           snapshot_: &SnapshotInfo,
+                           msg_: &str,
+                           hash_: &hash::Hash,
+                           hash_ref_: &hash::tree::HashRef) {
+        use self::schema::snapshots::dsl::*;
+
+        diesel::update(snapshots.find(snapshot_.unique_id))
+            .set((msg.eq(Some(msg_)),
+                  hash.eq(Some(&hash_.bytes)),
+                  hash_ref.eq(Some(hash_ref_.as_bytes()))))
+            .execute(&self.conn)
+            .expect("Error updating snapshot");
+    }
+
+    pub fn snapshot_set_tag(&mut self, snapshot_: &SnapshotInfo, tag_: tags::Tag) {
+        use self::schema::snapshots::dsl::*;
+
+        diesel::update(snapshots.find(snapshot_.unique_id))
+            .set(tag.eq(tag_ as i32))
+            .execute(&self.conn)
+            .expect("Error updating snapshot");
+    }
+
+    /// Extract latest snapshot data for family.
+    pub fn snapshot_latest(&mut self,
+                           family: &str)
+                           -> Option<(SnapshotInfo, hash::Hash, Option<hash::tree::HashRef>)> {
+        let family_id_opt = self.family_id_from_name(family);
+        family_id_opt.and_then(|family_id_| {
+            use self::schema::snapshots::dsl::*;
+
+            let row_opt = snapshots.filter(family_id.eq(family_id_))
+                .order(snapshot_id.desc())
+                .first::<self::schema::Snapshot>(&self.conn)
+                .optional()
+                .expect("Error reading latest snapshot");
+
+            row_opt.map(|snap| {
+                (SnapshotInfo {
+                     unique_id: snap.id,
+                     family_id: snap.family_id,
+                     snapshot_id: snap.snapshot_id,
+                 },
+                 ::hash::Hash { bytes: snap.hash.expect("Snapshot without top hash") },
+                 snap.hash_ref.and_then(|r| ::hash::tree::HashRef::from_bytes(&mut &r[..]).ok()))
+            })
+        })
+    }
+
+    pub fn snapshot_list(&mut self, skip_tag: Option<tags::Tag>) -> Vec<SnapshotStatus> {
+        use diesel::*;
+        use self::schema::snapshots::dsl::*;
+        use self::schema::family::dsl::family;
+        let rows = match skip_tag {
+                None => {
+                    snapshots.inner_join(family)
+                        .load::<(self::schema::Snapshot, self::schema::Family)>(&self.conn)
+                }
+                Some(skip) => {
+                    snapshots.inner_join(family)
+                        .filter(tag.ne(skip as i32))
+                        .load::<(self::schema::Snapshot, self::schema::Family)>(&self.conn)
+                }
+            }
+            .unwrap();
+
+        rows.into_iter()
+            .map(|(snap, fam)| {
+                let status = tags::tag_from_num(snap.tag as i64)
+                    .map_or(SnapshotWorkStatus::CommitComplete, tag_to_work_status);
+                let hash_ = snap.hash.and_then(|bytes| {
+                    if bytes.is_empty() {
+                        None
+                    } else {
+                        Some(::hash::Hash { bytes: bytes })
+                    }
+                });
+                SnapshotStatus {
+                    family_name: fam.name,
+                    msg: snap.msg,
+                    hash: hash_,
+                    hash_ref: snap.hash_ref,
+                    status: status,
+                    info: SnapshotInfo {
+                        unique_id: snap.id,
+                        snapshot_id: snap.snapshot_id,
+                        family_id: fam.id,
+                    },
+                }
+            })
+            .collect()
+    }
+
+    /// Recover snapshot information.
+    pub fn snapshot_recover(&mut self,
+                            snapshot_id_: i64,
+                            family: &str,
+                            msg_: &str,
+                            hash_ref_: &hash::tree::HashRef,
+                            work_opt_: Option<SnapshotWorkStatus>) {
+        let family_id_ = self.get_or_create_family_id(&family);
+        let insert = match self.snapshot_lookup(family, snapshot_id_) {
+            Some((_info, h, r)) => {
+                if h.bytes != hash_ref_.hash.bytes || r.is_none() || &r.unwrap() != hash_ref_ {
+                    panic!("Snapshot already exists, but with different hash");
+                }
+                false
+            }
+            None => true,
+        };
+        if insert {
+            use self::schema::snapshots::dsl::*;
+
+            let hash_ref_bytes = hash_ref_.as_bytes();
+            let new = self::schema::NewSnapshot {
+                family_id: family_id_,
+                snapshot_id: snapshot_id_,
+                msg: Some(msg_),
+                hash: Some(&hash_ref_.hash.bytes[..]),
+                hash_ref: Some(&hash_ref_bytes[..]),
+                tag: work_opt_.map_or(tags::Tag::Done, work_status_to_tag) as i32,
+            };
+
+            diesel::insert(&new)
+                .into(snapshots)
+                .execute(&self.conn)
+                .expect("Error inserting new snapshot");
+        }
     }
 }

@@ -13,8 +13,7 @@
 // limitations under the License.
 
 
-use db::{GcData, UpdateFn};
-use snapshot;
+use db::{GcData, UpdateFn, SnapshotInfo};
 #[cfg(test)]
 use std::collections::HashMap;
 #[cfg(test)]
@@ -93,20 +92,17 @@ pub trait Gc<B> {
     fn is_exact() -> bool;
 
     fn register(&mut self,
-                snapshot: &snapshot::Info,
+                snapshot: &SnapshotInfo,
                 refs: mpsc::Receiver<Id>)
                 -> Result<(), Self::Err>;
-    fn register_final(&mut self,
-                      snapshot: &snapshot::Info,
-                      final_ref: Id)
-                      -> Result<(), Self::Err>;
+    fn register_final(&mut self, snapshot: &SnapshotInfo, final_ref: Id) -> Result<(), Self::Err>;
     fn register_cleanup(&mut self,
-                        snapshot: &snapshot::Info,
+                        snapshot: &SnapshotInfo,
                         final_ref: Id)
                         -> Result<(), Self::Err>;
 
     fn deregister<F>(&mut self,
-                     snapshot: &snapshot::Info,
+                     snapshot: &SnapshotInfo,
                      final_ref: Id,
                      refs: F)
                      -> Result<(), Self::Err>
@@ -153,11 +149,11 @@ impl SafeMemoryBackend {
         SafeMemoryBackend { backend: Arc::new(Mutex::new(MemoryBackend::new())) }
     }
 
-    fn insert_snapshot(&mut self, info: &snapshot::Info, refs: Vec<Id>) {
+    fn insert_snapshot(&mut self, info: &SnapshotInfo, refs: Vec<Id>) {
         self.backend.lock().unwrap().snapshot_refs.insert(info.unique_id, refs);
     }
 
-    fn list_snapshot_refs(&self, info: snapshot::Info) -> mpsc::Receiver<Id> {
+    fn list_snapshot_refs(&self, info: SnapshotInfo) -> mpsc::Receiver<Id> {
         let (sender, receiver) = mpsc::channel();
         let refs = self.backend
             .lock()
@@ -300,7 +296,7 @@ pub fn gc_test<GC>(snapshots: Vec<Vec<u8>>)
 
     let mut infos = vec![];
     for (i, refs) in snapshots.iter().enumerate() {
-        let info = snapshot::Info {
+        let info = SnapshotInfo {
             unique_id: i as i64,
             family_id: 1,
             snapshot_id: i as i64,
@@ -360,7 +356,7 @@ pub fn resume_register_test<GC>()
     let mut gc = GC::new(backend.clone());
 
     let refs = vec![1, 2, 3, 4, 5];
-    let info = snapshot::Info {
+    let info = SnapshotInfo {
         unique_id: 1,
         family_id: 1,
         snapshot_id: 1,
@@ -413,7 +409,7 @@ pub fn resume_deregister_test<GC>()
     let mut gc = GC::new(backend.clone());
 
     let refs = vec![1, 2, 3, 4, 5];
-    let info = snapshot::Info {
+    let info = SnapshotInfo {
         unique_id: 1,
         family_id: 1,
         snapshot_id: 1,
