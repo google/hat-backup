@@ -136,6 +136,7 @@ impl InternalHashIndex {
                            id: my_id,
                            level: level.clone(),
                            childs: childs.clone(),
+                           tag: None,
                            persistent_ref: persistent_ref.clone(),
                        })
             .is_ok());
@@ -309,7 +310,13 @@ impl HashIndex {
     /// API related to tagging, which is useful to indicate state during operation stages.
     /// It operates directly on the underlying IDs.
     pub fn set_tag(&self, id: i64, tag: tags::Tag) {
-        self.0.index.lock().hash_set_tag(Some(id), tag)
+        {
+            if let Some(ref mut q) = self.0.queue_lock().find_mut_value_of_priority(&id) {
+                q.tag = Some(tag);
+                return;
+            }
+        }
+        self.0.index.lock().hash_set_tag(Some(id), tag);
     }
 
     /// API related to tagging, which is useful to indicate state during operation stages.
@@ -321,6 +328,11 @@ impl HashIndex {
     /// API related to tagging, which is useful to indicate state during operation stages.
     /// It operates directly on the underlying IDs.
     pub fn get_tag(&self, id: i64) -> Option<tags::Tag> {
+        {
+            if let Some(ref q) = self.0.queue_lock().find_mut_value_of_priority(&id) {
+                return q.tag;
+            }
+        }
         self.0.index.lock().hash_get_tag(id)
     }
 

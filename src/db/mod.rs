@@ -167,6 +167,7 @@ pub struct QueueEntry {
     pub level: i64,
     pub childs: Option<Vec<i64>>,
     pub persistent_ref: Option<blob::ChunkRef>,
+    pub tag: Option<tags::Tag>,
 }
 
 pub struct InternalIndex {
@@ -224,6 +225,7 @@ impl InternalIndex {
             QueueEntry {
                 id: result.id,
                 level: result.height,
+                tag: tags::tag_from_num(result.tag),
                 childs: childs_,
                 persistent_ref: persistent_ref,
             }
@@ -284,7 +286,7 @@ impl InternalIndex {
         let new = schema::NewHash {
             id: id_,
             hash: &hash_bytes,
-            tag: tags::Tag::Done as i64,
+            tag: entry.tag.unwrap_or(tags::Tag::Done) as i64,
             height: entry.level,
             childs: childs_.as_ref().map(|v| &v[..]),
             blob_ref: blob_ref_.as_ref().map(|v| &v[..]),

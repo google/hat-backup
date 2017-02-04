@@ -45,11 +45,27 @@ impl<B: gc::GcBackend> gc::Gc<B> for GcRc<B> {
                 _snapshot: &SnapshotInfo,
                 refs: mpsc::Receiver<gc::Id>)
                 -> Result<(), Self::Err> {
+        try!(self.backend.set_all_tags(tags::Tag::Done));
+        // Tag hashes whose counters will be incremented.
+        for r in refs.iter() {
+            println!("color: {}", r);
+            try!(self.backend.set_tag(r, tags::Tag::Reserved));
+        }
+        Ok(())
+    }
+
+    fn register_final(&mut self,
+                      _snapshot: &SnapshotInfo,
+                      ref_final: gc::Id)
+                      -> Result<(), Self::Err> {
         // Start off with a commit to disable automatic commit and run register as one transaction.
         try!(self.backend.manual_commit());
 
-        // Increment counters.
-        for r in refs.iter() {
+        // Add final reference to the set of hashes to update.
+        try!(self.backend.set_tag(ref_final, tags::Tag::Reserved));
+
+        for r in try!(self.backend.list_ids_by_tag(tags::Tag::Reserved)) {
+            println!("increment: {}", r);
             try!(self.backend.update_data(r, DATA_FAMILY, move |GcData { num, bytes }| {
                 Some(GcData {
                     num: num + 1,
@@ -58,20 +74,6 @@ impl<B: gc::GcBackend> gc::Gc<B> for GcRc<B> {
             }));
         }
 
-        Ok(())
-    }
-
-    fn register_final(&mut self,
-                      _snapshot: &SnapshotInfo,
-                      ref_final: gc::Id)
-                      -> Result<(), Self::Err> {
-        // Increment final counter and tag it as ready.
-        try!(self.backend.update_data(ref_final, DATA_FAMILY, move |GcData { num, bytes }| {
-            Some(GcData {
-                num: num + 1,
-                bytes: bytes,
-            })
-        }));
         try!(self.backend.set_tag(ref_final, tags::Tag::InProgress));
 
         Ok(())
@@ -81,8 +83,8 @@ impl<B: gc::GcBackend> gc::Gc<B> for GcRc<B> {
                         _snapshot: &SnapshotInfo,
                         ref_final: gc::Id)
                         -> Result<(), Self::Err> {
-        // Clear tag of final reference.
-        try!(self.backend.set_tag(ref_final, tags::Tag::Done));
+        // Clear all tags including final reference.
+        try!(self.backend.set_all_tags(tags::Tag::Done));
 
         Ok(())
     }
@@ -94,11 +96,17 @@ impl<B: gc::GcBackend> gc::Gc<B> for GcRc<B> {
                      -> Result<(), Self::Err>
         where F: FnOnce() -> mpsc::Receiver<gc::Id>
     {
+        try!(self.backend.set_all_tags(tags::Tag::Done));
+        // Tag hashes whose counters will be decremented.
+        for r in refs().iter() {
+            try!(self.backend.set_tag(r, tags::Tag::Reserved));
+        }
+
         // Start off with a commit to disable automatic commit.
         // This causes deregister to run as one transaction.
         try!(self.backend.manual_commit());
 
-        for r in refs().iter() {
+        for r in try!(self.backend.list_ids_by_tag(tags::Tag::Reserved)) {
             try!(self.backend.update_data(r, DATA_FAMILY, move |GcData { num, bytes }| {
                 Some(GcData {
                     num: num - 1,
