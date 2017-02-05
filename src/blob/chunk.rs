@@ -54,7 +54,8 @@ pub fn node_height(kind: &Kind) -> i64 {
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct ChunkRef {
-    pub blob_id: Vec<u8>,
+    pub blob_id: Option<i64>,
+    pub blob_name: Vec<u8>,
     pub offset: usize,
     pub length: usize,
     pub packing: Option<Packing>,
@@ -84,7 +85,7 @@ impl ChunkRef {
     }
 
     pub fn populate_msg(&self, mut msg: root_capnp::chunk_ref::Builder) {
-        msg.set_blob_id(&self.blob_id[..]);
+        msg.set_blob_name(&self.blob_name[..]);
         msg.set_offset(self.offset as i64);
         msg.set_length(self.length as i64);
 
@@ -103,7 +104,8 @@ impl ChunkRef {
 
     pub fn read_msg(msg: &root_capnp::chunk_ref::Reader) -> Result<ChunkRef, capnp::Error> {
         Ok(ChunkRef {
-            blob_id: try!(msg.get_blob_id()).to_owned(),
+            blob_id: None,
+            blob_name: try!(msg.get_blob_name()).to_owned(),
             offset: msg.get_offset() as usize,
             length: msg.get_length() as usize,
             packing: match try!(msg.get_packing().which()) {

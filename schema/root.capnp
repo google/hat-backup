@@ -30,7 +30,7 @@ struct SnapshotList {
 }
 
 struct ChunkRef {
-	blobId @0 :Data;
+	blobName @0 :Data;
 
 	offset @1: Int64;
 	length @2: Int64;

@@ -122,7 +122,8 @@ impl<B: StoreBackend> StoreInner<B> {
                 hash: hash,
                 kind: kind,
                 persistent_ref: ChunkRef {
-                    blob_id: vec![0],
+                    blob_id: None,
+                    blob_name: vec![0],
                     offset: 0,
                     length: 0,
                     packing: None,
@@ -138,7 +139,8 @@ impl<B: StoreBackend> StoreInner<B> {
             hash: hash,
             kind: kind,
             persistent_ref: ChunkRef {
-                blob_id: self.blob_desc.name.clone(),
+                blob_id: Some(self.blob_desc.id),
+                blob_name: self.blob_desc.name.clone(),
                 packing: None,
                 // updated by try_append:
                 offset: 0,
@@ -150,7 +152,7 @@ impl<B: StoreBackend> StoreInner<B> {
         if let Err(()) = self.blob.try_append(chunk, &mut href) {
             self.flush();
 
-            href.persistent_ref.blob_id = self.blob_desc.name.clone();
+            href.persistent_ref.blob_name = self.blob_desc.name.clone();
             self.blob.try_append(chunk, &mut href).unwrap();
         }
         self.blob_refs.push((href.clone(), callback));
@@ -163,7 +165,7 @@ impl<B: StoreBackend> StoreInner<B> {
         if cref.offset == 0 && cref.length == 0 {
             return Ok(Some(Vec::new()));
         }
-        match self.backend.retrieve(&cref.blob_id[..]) {
+        match self.backend.retrieve(&cref.blob_name[..]) {
             Ok(Some(blob)) => Ok(Some(try!(Blob::read_chunk(&blob, hash, cref)))),
             Ok(None) => Ok(None),
             Err(e) => Err(e.into()),
@@ -179,7 +181,8 @@ impl<B: StoreBackend> StoreInner<B> {
                             hash: hash,
                             kind: Kind::TreeLeaf,
                             persistent_ref: ChunkRef {
-                                blob_id: name.as_bytes().to_owned(),
+                                blob_id: None,
+                                blob_name: name.as_bytes().to_owned(),
                                 offset: 0,
                                 length: 0,
                                 packing: None,
@@ -201,7 +204,7 @@ impl<B: StoreBackend> StoreInner<B> {
                 let hrefs = try!(self.blob.refs_from_bytes(&ct));
                 assert_eq!(hrefs.len(), 1);
                 let href = &hrefs[0];
-                assert_eq!(name.as_bytes(), &href.persistent_ref.blob_id[..]);
+                assert_eq!(name.as_bytes(), &href.persistent_ref.blob_name[..]);
                 Ok(Some(try!(Blob::read_chunk(&ct, &href.hash, &href.persistent_ref))))
             }
         }
@@ -212,13 +215,13 @@ impl<B: StoreBackend> StoreInner<B> {
             // This chunk is empty, so there is no blob to recover.
             return;
         }
-        self.blob_index.recover(chunk.persistent_ref.blob_id);
+        self.blob_index.recover(chunk.persistent_ref.blob_name);
     }
 
     fn tag(&mut self, chunk: ChunkRef, tag: tags::Tag) {
         self.blob_index.tag(&BlobDesc {
                                 id: 0,
-                                name: chunk.blob_id,
+                                name: chunk.blob_name,
                             },
                             tag);
     }

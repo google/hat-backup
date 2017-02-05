@@ -129,7 +129,8 @@ fn hash_refs_from_bytes(bytes: &[u8]) -> Option<Vec<HashRef>> {
 fn test_hash_refs_identity() {
     fn prop(count: u8, hash: Vec<u8>, blob: Vec<u8>, n: usize) -> bool {
         let chunk_ref = ChunkRef {
-            blob_id: blob.clone(),
+            blob_id: None,
+            blob_name: blob.clone(),
             offset: n,
             length: n,
             packing: None,

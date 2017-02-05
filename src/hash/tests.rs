@@ -51,7 +51,7 @@ impl HashTreeBackend for MemoryBackend {
                    ref_opt: Option<&ChunkRef>)
                    -> Result<Option<Vec<u8>>, Self::Err> {
         let hash = match ref_opt {
-            Some(ref b) => Cow::Owned(Hash { bytes: b.blob_id.clone() }), // blob name is chunk hash
+            Some(ref b) => Cow::Owned(Hash { bytes: b.blob_name.clone() }), // blob name is chunk hash
             None => Cow::Borrowed(hash),
         };
         let guarded_chunks = self.chunks.lock().unwrap();
@@ -68,7 +68,8 @@ impl HashTreeBackend for MemoryBackend {
         match guarded_chunks.get(&hash.bytes) {
             Some(&(ref level, _, ref chunk)) => {
                 Some(ChunkRef {
-                    blob_id: hash.bytes.clone(),
+                    blob_id: None,
+                    blob_name: hash.bytes.clone(),
                     offset: 0,
                     length: chunk.len(),
                     packing: None,
@@ -95,7 +96,8 @@ impl HashTreeBackend for MemoryBackend {
 
         Ok((0,
             ChunkRef {
-                blob_id: hash.bytes.clone(),
+                blob_id: None,
+                blob_name: hash.bytes.clone(),
                 offset: 0,
                 length: len,
                 packing: None,
