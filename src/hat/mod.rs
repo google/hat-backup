@@ -419,19 +419,13 @@ impl<B: StoreBackend> HatRc<B> {
             .expect(&format!("Could not open family '{}'", family_name));
 
         // Recover hashes for tree-tops. These are also registered with the GC.
-        let (id_sender, id_receiver) = mpsc::channel();
-        let local_hash_index = self.hash_index.clone();
-        let local_final_hash = final_hash.clone();
-        thread::spawn(move || {
-            for hash in tops {
-                if hash != local_final_hash.hash {
-                    let id = local_hash_index.get_id(&hash).unwrap();
-                    id_sender.send(id).unwrap();
-                }
+        self.hash_index.set_all_tags(tags::Tag::Done);
+        for hash in tops {
+            if hash != final_hash.hash {
+                let id = self.hash_index.get_id(&hash).unwrap();
+                self.hash_index.set_tag(id, tags::Tag::Reserved);
             }
-        });
-
-        try!(self.gc.register(&info, id_receiver));
+        }
         self.flush_blob_store();
 
         let final_id = self.hash_index.get_id(&final_hash.hash).expect("final hash has no id");
@@ -574,28 +568,15 @@ impl<B: StoreBackend> HatRc<B> {
         };
         self.flush_snapshot_index();
 
-        // Prepare.
-        let (hash_sender, hash_receiver) = mpsc::channel();
-        let (hash_id_sender, hash_id_receiver) = mpsc::channel();
-
-        let local_hash_index = self.hash_index.clone();
-        thread::spawn(move || {
-            for hash in hash_receiver.iter() {
-                hash_id_sender.send(local_hash_index.get_id(&hash)
-                        .expect("Hash not found"))
-                    .expect("Channel failed");
-            }
-        });
-
         // Commit metadata while registering needed data-hashes (files and dirs).
         let top_ref = {
             let mut local_family: Family<B> = (*family).clone();
-            let (s, r) = mpsc::channel();
 
-            thread::spawn(move || s.send(local_family.commit(&hash_sender)));
-            try!(self.gc.register(&snap_info, hash_id_receiver));
-
-            try!(try!(r.recv()))
+            let local_hash_index = self.hash_index.clone();
+            try!(local_family.commit(&|hash| {
+                let id = local_hash_index.get_id(hash).expect("Top hash");
+                local_hash_index.set_tag(id, tags::Tag::Reserved);
+            }))
         };
 
         // Push any remaining data to external storage.

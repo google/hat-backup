@@ -334,20 +334,21 @@ impl<B: StoreBackend> Family<B> {
         Ok(out.into_iter().map(|f| (f.meta, f.hash_ref)).collect())
     }
 
-    pub fn commit(&mut self,
-                  hash_ch: &mpsc::Sender<hash::Hash>)
-                  -> Result<hash::tree::HashRef, HatError> {
+    pub fn commit<F>(&mut self, top_hash_fn: &F) -> Result<hash::tree::HashRef, HatError>
+        where F: Fn(&hash::Hash)
+    {
         let mut top_tree = self.key_store.hash_tree_writer();
-        try!(self.commit_to_tree(&mut top_tree, None, hash_ch));
+        try!(self.commit_to_tree(&mut top_tree, None, top_hash_fn));
 
         Ok(try!(top_tree.hash()))
     }
 
-    pub fn commit_to_tree(&mut self,
+    pub fn commit_to_tree<F>(&mut self,
                           tree: &mut hash::tree::SimpleHashTreeWriter<key::HashStoreBackend<B>>,
                           dir_id: Option<u64>,
-                          hash_ch: &mpsc::Sender<hash::Hash>)
-                          -> Result<(), HatError> {
+                          top_hash_fn: &F)
+                          -> Result<(), HatError>
+                          where F: Fn(&hash::Hash) {
 
         let files_at_a_time = 1024;
         let mut it = try!(self.list_from_key_store(dir_id)).into_iter();
@@ -400,13 +401,13 @@ impl<B: StoreBackend> Family<B> {
                         try!(file_msg.borrow()
                             .init_content()
                             .set_data(hash_ref_root.as_reader()));
-                        hash_ch.send(hash::Hash { bytes: hash_bytes }).unwrap();
+                        top_hash_fn(&hash::Hash { bytes: hash_bytes });
                     } else {
                         drop(data_ref);  // May not use data reference without hash.
 
                         // This is a directory, recurse!
                         let mut inner_tree = self.key_store.hash_tree_writer();
-                        try!(self.commit_to_tree(&mut inner_tree, entry.id, hash_ch));
+                        try!(self.commit_to_tree(&mut inner_tree, entry.id, top_hash_fn));
                         // Store a reference for the sub-tree in our tree:
                         let dir_hash_ref = try!(inner_tree.hash());
 
@@ -421,7 +422,7 @@ impl<B: StoreBackend> Family<B> {
                             .init_content()
                             .set_directory(hash_ref_root.as_reader()));
 
-                        hash_ch.send(dir_hash_ref.hash).unwrap();
+                        top_hash_fn(&dir_hash_ref.hash);
                     }
                 }
             }

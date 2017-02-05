@@ -91,10 +91,6 @@ pub trait Gc<B> {
 
     fn is_exact() -> bool;
 
-    fn register(&mut self,
-                snapshot: &SnapshotInfo,
-                refs: mpsc::Receiver<Id>)
-                -> Result<(), Self::Err>;
     fn register_final(&mut self, snapshot: &SnapshotInfo, final_ref: Id) -> Result<(), Self::Err>;
     fn register_cleanup(&mut self,
                         snapshot: &SnapshotInfo,
@@ -306,11 +302,12 @@ pub fn gc_test<GC>(snapshots: Vec<Vec<u8>>)
     }
 
     for (i, refs) in snapshots.iter().enumerate() {
-        let (sender, receiver) = mpsc::channel();
-        refs[..refs.len() - 1].iter().map(|id| sender.send(*id as Id)).last();
-        drop(sender);
+        backend.set_all_tags(tags::Tag::Done);
+        refs[..refs.len() - 1]
+            .iter()
+            .map(|id| backend.set_tag(*id as Id, tags::Tag::Reserved))
+            .last();
 
-        gc.register(&infos[i], receiver).unwrap();
         let last_ref = *refs.iter().last().expect("len() >= 0") as i64;
         gc.register_final(&infos[i], last_ref).unwrap();
         gc.register_cleanup(&infos[i], last_ref).unwrap();
@@ -363,21 +360,9 @@ pub fn resume_register_test<GC>()
     };
     backend.insert_snapshot(&info, refs.iter().map(|i| *i as Id).collect());
 
-    let receiver = |n| {
-        let (sender, receiver) = mpsc::channel();
-        refs[..n].iter().map(|id| sender.send(*id as Id)).last();
-        drop(sender);
+    backend.set_all_tags(tags::Tag::Done);
+    refs[..refs.len() - 1].iter().map(|id| backend.set_tag(*id as Id, tags::Tag::Reserved)).last();
 
-        receiver
-    };
-
-    for n in 1..refs.len() {
-        gc.register(&info, receiver(n)).unwrap();
-        assert_eq!(gc.status(*refs.last().expect("nonempty")).ok(), Some(None));
-        backend.rollback();
-    }
-
-    gc.register(&info, receiver(refs.len() - 1)).unwrap();
     let final_ref = *refs.last().expect("nonempty");
     gc.register_final(&info, final_ref).unwrap();
     assert_eq!(gc.status(final_ref).ok(), Some(Some(Status::InProgress)));
@@ -385,6 +370,13 @@ pub fn resume_register_test<GC>()
     assert_eq!(gc.status(final_ref).ok(), Some(None));
 
 
+    let receiver = |n| {
+        let (sender, receiver) = mpsc::channel();
+        refs[..n].iter().map(|id| sender.send(*id as Id)).last();
+        drop(sender);
+
+        receiver
+    };
     let last = receiver(refs.len()).iter().last().unwrap();
     let receive = receiver(refs.len());
     gc.deregister(&info, last, move || receive).unwrap();
@@ -416,6 +408,13 @@ pub fn resume_deregister_test<GC>()
     };
     backend.insert_snapshot(&info, refs.iter().map(|i| *i as Id).collect());
 
+    backend.set_all_tags(tags::Tag::Done);
+    refs[..refs.len() - 1].iter().map(|id| backend.set_tag(*id as Id, tags::Tag::Reserved)).last();
+
+    let final_ref = *refs.last().expect("nonempty");
+    gc.register_final(&info, final_ref).unwrap();
+    gc.register_cleanup(&info, final_ref).unwrap();
+
     let receiver = |n| {
         let (sender, receiver) = mpsc::channel();
         refs[..n].iter().map(|id| sender.send(*id as Id)).last();
@@ -423,10 +422,6 @@ pub fn resume_deregister_test<GC>()
 
         receiver
     };
-    gc.register(&info, receiver(refs.len() - 1)).unwrap();
-    let final_ref = *refs.last().expect("nonempty");
-    gc.register_final(&info, final_ref).unwrap();
-    gc.register_cleanup(&info, final_ref).unwrap();
 
     backend.manual_commit().unwrap();
     for _ in 1..10 {

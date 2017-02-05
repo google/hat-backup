@@ -41,19 +41,6 @@ impl<B: gc::GcBackend> gc::Gc<B> for GcRc<B> {
         true
     }
 
-    fn register(&mut self,
-                _snapshot: &SnapshotInfo,
-                refs: mpsc::Receiver<gc::Id>)
-                -> Result<(), Self::Err> {
-        try!(self.backend.set_all_tags(tags::Tag::Done));
-        // Tag hashes whose counters will be incremented.
-        for r in refs.iter() {
-            println!("color: {}", r);
-            try!(self.backend.set_tag(r, tags::Tag::Reserved));
-        }
-        Ok(())
-    }
-
     fn register_final(&mut self,
                       _snapshot: &SnapshotInfo,
                       ref_final: gc::Id)

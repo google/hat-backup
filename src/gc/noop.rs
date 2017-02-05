@@ -32,15 +32,6 @@ impl<B: gc::GcBackend> gc::Gc<B> for GcNoop {
         false
     }
 
-    fn register(&mut self,
-                _snapshot: &SnapshotInfo,
-                refs: mpsc::Receiver<gc::Id>)
-                -> Result<(), Self::Err> {
-        // It is an error to ignore the provided refereces, so we consume them here.
-        refs.iter().last();
-        Ok(())
-    }
-
     fn register_final(&mut self,
                       _snapshot: &SnapshotInfo,
                       _ref_final: gc::Id)
