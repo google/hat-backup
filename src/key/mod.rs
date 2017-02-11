@@ -129,6 +129,7 @@ impl<B: StoreBackend> Store<B> {
 
     #[cfg(test)]
     pub fn new_for_testing(backend: Arc<B>, max_blob_size: usize) -> Result<Store<B>, DieselError> {
+        use db;
         let db_p = Arc::new(db::Index::new_for_testing());
         let ki_p = Arc::new(try!(index::KeyIndex::new_for_testing()));
         let hi_p = Arc::new(try!(hash::HashIndex::new(db_p.clone())));

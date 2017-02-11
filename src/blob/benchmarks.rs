@@ -29,7 +29,8 @@ fn dummy_hashref() -> HashRef {
         hash: Hash::new(&[]),
         kind: Kind::TreeLeaf,
         persistent_ref: ChunkRef {
-            blob_id: vec![],
+            blob_id: None,
+            blob_name: vec![],
             offset: 0,
             length: 0,
             packing: None,
