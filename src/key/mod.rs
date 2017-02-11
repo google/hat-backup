@@ -17,7 +17,6 @@
 
 use backend::StoreBackend;
 use blob;
-use db;
 use errors::{DieselError, RetryError};
 use hash;
 use hash::tree::{LeafIterator, SimpleHashTreeWriter};

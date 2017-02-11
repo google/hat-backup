@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use diesel::prelude::*;
+
 // Table schemas.
 
 table! {
@@ -21,6 +23,7 @@ table! {
         tag -> BigInt,
         height -> BigInt,
         childs -> Nullable<Binary>,
+        blob_id -> BigInt,
         blob_ref -> Nullable<Binary>,
     }
 }
@@ -43,6 +46,34 @@ table! {
     }
 }
 
+table! {
+    family {
+        id -> BigInt,
+        name -> VarChar,
+    }
+}
+
+table! {
+    snapshots {
+        id -> BigInt,
+        tag -> Integer,
+        family_id -> BigInt,
+        snapshot_id -> BigInt,
+        msg -> Nullable<VarChar>,
+        hash -> Nullable<Binary>,
+        hash_ref -> Nullable<Binary>,
+    }
+}
+
+joinable!(snapshots -> family (family_id));
+select_column_workaround!(snapshots -> family (id, tag, family_id, snapshot_id, msg,
+                                               hash, hash_ref));
+select_column_workaround!(family -> snapshots (id, name));
+
+joinable!(hashes -> blobs (blob_id));
+select_column_workaround!(blobs -> hashes (id, name, tag));
+select_column_workaround!(hashes -> blobs (id, hash, tag, height, childs, blob_id, blob_ref));
+
 
 // Rust models.
 
@@ -53,6 +84,7 @@ pub struct Hash {
     pub tag: i64,
     pub height: i64,
     pub childs: Option<Vec<u8>>,
+    pub blob_id: i64,
     pub blob_ref: Option<Vec<u8>>,
 }
 
@@ -64,6 +96,7 @@ pub struct NewHash<'a> {
     pub tag: i64,
     pub height: i64,
     pub childs: Option<&'a [u8]>,
+    pub blob_id: i64,
     pub blob_ref: Option<&'a [u8]>,
 }
 
@@ -99,51 +132,6 @@ pub struct NewBlob<'a> {
     pub name: &'a [u8],
     pub tag: i32,
 }
-// Copyright 2014 Google Inc. All rights reserved.
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
-
-use diesel::prelude::*;
-
-
-// Table schemas.
-
-table! {
-    family {
-        id -> BigInt,
-        name -> VarChar,
-    }
-}
-
-table! {
-    snapshots {
-        id -> BigInt,
-        tag -> Integer,
-        family_id -> BigInt,
-        snapshot_id -> BigInt,
-        msg -> Nullable<VarChar>,
-        hash -> Nullable<Binary>,
-        hash_ref -> Nullable<Binary>,
-    }
-}
-
-joinable!(snapshots -> family (family_id));
-select_column_workaround!(snapshots -> family (id, tag, family_id, snapshot_id, msg,
-                                               hash, hash_ref));
-select_column_workaround!(family -> snapshots (id, name));
-
-
-// Rust models.
 
 #[derive(Queryable)]
 pub struct Family {

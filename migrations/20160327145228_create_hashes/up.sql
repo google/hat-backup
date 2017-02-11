@@ -4,6 +4,7 @@ CREATE TABLE IF NOT EXISTS hashes (
         tag		INTEGER,
 	height		INTEGER,
 	childs		BLOB,
+	blob_id		INTEGER,
 	blob_ref	BLOB
 );
 

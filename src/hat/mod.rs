@@ -348,14 +348,15 @@ impl<B: StoreBackend> HatRc<B> {
         fn recover_entry<B: StoreBackend>(hashes: &hash::HashIndex,
                                           blobs: &blob::BlobStore<B>,
                                           node: family::recover::Node) {
-            let pref = node.href.persistent_ref.clone();
+            let mut pref = node.href.persistent_ref.clone();
 
             // Make sure we have the blob described.
-            blobs.recover(hash::tree::HashRef {
-                hash: node.href.hash.clone(),
-                kind: node.href.kind.clone(),
-                persistent_ref: pref.clone(),
-            });
+            pref.blob_id = blobs.recover(hash::tree::HashRef {
+                    hash: node.href.hash.clone(),
+                    kind: node.href.kind.clone(),
+                    persistent_ref: pref.clone(),
+                })
+                .map(|b| b.id);
 
             fn entry(href: hash::tree::HashRef, childs: Option<Vec<i64>>) -> hash::Entry {
                 hash::Entry {

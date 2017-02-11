@@ -77,15 +77,32 @@ impl ChunkRef {
             let mut root = message.init_root::<root_capnp::chunk_ref::Builder>();
             self.populate_msg(root.borrow());
         }
-
         let mut out = Vec::new();
         capnp::serialize_packed::write_message(&mut out, &message).unwrap();
+        out
+    }
 
+    pub fn as_bytes_no_name(&self) -> Vec<u8> {
+        let mut message = ::capnp::message::Builder::new_default();
+        {
+            let mut root = message.init_root::<root_capnp::chunk_ref::Builder>();
+            self.populate_msg_no_name(root.borrow());
+        }
+        let mut out = Vec::new();
+        capnp::serialize_packed::write_message(&mut out, &message).unwrap();
         out
     }
 
     pub fn populate_msg(&self, mut msg: root_capnp::chunk_ref::Builder) {
+        self.populate_msg_name(msg.borrow());
+        self.populate_msg_no_name(msg);
+    }
+
+    pub fn populate_msg_name(&self, mut msg: root_capnp::chunk_ref::Builder) {
         msg.set_blob_name(&self.blob_name[..]);
+    }
+
+    pub fn populate_msg_no_name(&self, mut msg: root_capnp::chunk_ref::Builder) {
         msg.set_offset(self.offset as i64);
         msg.set_length(self.length as i64);
 

@@ -210,17 +210,18 @@ impl<B: StoreBackend> StoreInner<B> {
         }
     }
 
-    fn recover(&mut self, chunk: HashRef) {
+    fn recover(&mut self, chunk: HashRef) -> Option<BlobDesc> {
         if chunk.persistent_ref.offset == 0 && chunk.persistent_ref.length == 0 {
             // This chunk is empty, so there is no blob to recover.
-            return;
+            None
+        } else {
+            Some(self.blob_index.recover(chunk.persistent_ref.blob_name))
         }
-        self.blob_index.recover(chunk.persistent_ref.blob_name);
     }
 
     fn tag(&mut self, chunk: ChunkRef, tag: tags::Tag) {
         self.blob_index.tag(&BlobDesc {
-                                id: 0,
+                                id: chunk.blob_id.unwrap_or(0),
                                 name: chunk.blob_name,
                             },
                             tag);
@@ -278,7 +279,7 @@ impl<B: StoreBackend> BlobStore<B> {
     }
 
     /// Reinstall a blob recovered from external storage.
-    pub fn recover(&self, chunk: HashRef) {
+    pub fn recover(&self, chunk: HashRef) -> Option<BlobDesc> {
         self.lock().recover(chunk)
     }
 

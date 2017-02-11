@@ -81,6 +81,22 @@ fn decode_childs(bytes: &[u8]) -> Result<Vec<i64>, capnp::Error> {
     Ok(out)
 }
 
+fn decode_chunk_ref(cref: Option<&Vec<u8>>,
+                    blob: Option<self::schema::Blob>)
+                    -> Option<blob::ChunkRef> {
+    cref.and_then(|c| {
+        let mut r = blob::ChunkRef::from_bytes(&mut &c[..]).expect("Failed to decode chunk");
+        if r.length > 0 {
+            blob.map(|b| {
+                r.blob_name = b.name;
+                r
+            })
+        } else {
+            r.blob_name = vec![0];
+            Some(r)
+        }
+    })
+}
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct GcData {
@@ -177,6 +193,7 @@ pub struct InternalIndex {
     flush_periodically: bool,
 }
 
+
 impl InternalIndex {
     fn new(path: &str) -> Result<InternalIndex, DieselError> {
         let conn = try!(SqliteConnection::establish(path));
@@ -202,30 +219,26 @@ impl InternalIndex {
     pub fn hash_locate(&mut self, hash_: &hash::Hash) -> Option<QueueEntry> {
         assert!(!hash_.bytes.is_empty());
         use self::schema::hashes::dsl::*;
+        use self::schema::blobs::dsl::blobs;
 
-        let result_opt = hashes.filter(hash.eq(&hash_.bytes))
-            .first::<schema::Hash>(&self.conn)
+        let result_opt = hashes.left_outer_join(blobs)
+            .filter(hash.eq(&hash_.bytes))
+            .first::<(self::schema::Hash, Option<self::schema::Blob>)>(&self.conn)
             .optional()
             .expect("Error querying hashes");
-        result_opt.map(|result| {
-            let childs_ = result.childs.and_then(|b| {
+        result_opt.map(|(hash_, blob_)| {
+            let childs_ = hash_.childs.and_then(|b| {
                 if b.is_empty() {
                     None
                 } else {
                     Some(decode_childs(&b).unwrap())
                 }
             });
-            let persistent_ref = result.blob_ref.and_then(|b| {
-                if b.is_empty() {
-                    None
-                } else {
-                    Some(blob::ChunkRef::from_bytes(&mut &b[..]).unwrap())
-                }
-            });
+            let persistent_ref = decode_chunk_ref(hash_.blob_ref.as_ref(), blob_);
             QueueEntry {
-                id: result.id,
-                level: result.height,
-                tag: tags::tag_from_num(result.tag),
+                id: hash_.id,
+                level: hash_.height,
+                tag: tags::tag_from_num(hash_.tag),
                 childs: childs_,
                 persistent_ref: persistent_ref,
             }
@@ -234,30 +247,26 @@ impl InternalIndex {
 
     pub fn hash_locate_by_id(&mut self, id_: i64) -> Option<Entry> {
         use self::schema::hashes::dsl::*;
+        use self::schema::blobs::dsl::blobs;
 
-        let result_opt = hashes.find(id_)
-            .first::<schema::Hash>(&self.conn)
+        let result_opt = hashes.left_outer_join(blobs)
+            .filter(id.eq(id_))
+            .first::<(self::schema::Hash, Option<self::schema::Blob>)>(&self.conn)
             .optional()
             .expect("Error querying hashes");
 
-        result_opt.map(|result| {
+        result_opt.map(|(hash_, blob_)| {
             Entry {
-                hash: self::hash::Hash { bytes: result.hash },
-                level: result.height,
-                childs: result.childs.and_then(|p| {
+                hash: self::hash::Hash { bytes: hash_.hash },
+                level: hash_.height,
+                childs: hash_.childs.and_then(|p| {
                     if p.is_empty() {
                         None
                     } else {
                         Some(decode_childs(&p).unwrap())
                     }
                 }),
-                persistent_ref: result.blob_ref.and_then(|b| {
-                    if b.is_empty() {
-                        None
-                    } else {
-                        Some(blob::ChunkRef::from_bytes(&mut &b[..]).unwrap())
-                    }
-                }),
+                persistent_ref: decode_chunk_ref(hash_.blob_ref.as_ref(), blob_),
             }
         })
     }
@@ -280,7 +289,7 @@ impl InternalIndex {
     pub fn hash_insert_new(&mut self, id_: i64, hash_bytes: Vec<u8>, entry: QueueEntry) {
         use self::schema::hashes::dsl::*;
 
-        let blob_ref_ = entry.persistent_ref.map(|c| c.as_bytes());
+        let blob_ref_ = entry.persistent_ref.as_ref().map(|c| c.as_bytes_no_name());
         let childs_ = entry.childs.as_ref().map(|v| encode_childs(&v[..]));
 
         let new = schema::NewHash {
@@ -289,6 +298,7 @@ impl InternalIndex {
             tag: entry.tag.unwrap_or(tags::Tag::Done) as i64,
             height: entry.level,
             childs: childs_.as_ref().map(|v| &v[..]),
+            blob_id: entry.persistent_ref.and_then(|r| r.blob_id).unwrap_or(0),
             blob_ref: blob_ref_.as_ref().map(|v| &v[..]),
         };
 
@@ -436,27 +446,18 @@ impl InternalIndex {
 
     pub fn hash_list(&mut self) -> Vec<Entry> {
         use self::schema::hashes::dsl::*;
-        hashes.load::<schema::Hash>(&self.conn)
+        use self::schema::blobs::dsl::blobs;
+
+        hashes.left_outer_join(blobs)
+            .load::<(self::schema::Hash, Option<self::schema::Blob>)>(&self.conn)
             .expect("Error listing hashes")
             .into_iter()
-            .map(|hash_| {
+            .map(|(hash_, blob_)| {
                 Entry {
                     hash: self::hash::Hash { bytes: hash_.hash },
                     level: hash_.height,
-                    childs: hash_.childs.as_ref().and_then(|p| {
-                        if p.is_empty() {
-                            None
-                        } else {
-                            Some(decode_childs(p).unwrap())
-                        }
-                    }),
-                    persistent_ref: hash_.blob_ref.and_then(|b| {
-                        if b.is_empty() {
-                            None
-                        } else {
-                            Some(blob::ChunkRef::from_bytes(&mut &b[..]).unwrap())
-                        }
-                    }),
+                    childs: hash_.childs.as_ref().map(|p| decode_childs(p).unwrap()),
+                    persistent_ref: decode_chunk_ref(hash_.blob_ref.as_ref(), blob_),
                 }
             })
             .collect()
@@ -564,7 +565,9 @@ impl InternalIndex {
                     .execute(&self.conn)
                     .expect("Error updating blob tags")
             }
-            _ => unreachable!(),
+            Some(t) => {
+                unreachable!("blob with neither id nor name: id={}, name={}", t.id, t.name.len())
+            }
         };
     }
 
