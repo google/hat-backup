@@ -52,7 +52,6 @@ impl<B: gc::GcBackend> gc::Gc<B> for GcRc<B> {
         try!(self.backend.set_tag(ref_final, tags::Tag::Reserved));
 
         for r in try!(self.backend.list_ids_by_tag(tags::Tag::Reserved)) {
-            println!("increment: {}", r);
             try!(self.backend.update_data(r, DATA_FAMILY, move |GcData { num, bytes }| {
                 Some(GcData {
                     num: num + 1,
