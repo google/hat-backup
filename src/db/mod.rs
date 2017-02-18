@@ -566,7 +566,9 @@ impl InternalIndex {
                     .expect("Error updating blob tags")
             }
             Some(t) => {
-                unreachable!("blob with neither id nor name: id={}, name={}", t.id, t.name.len())
+                unreachable!("blob with neither id nor name: id={}, name={}",
+                             t.id,
+                             t.name.len())
             }
         };
     }
