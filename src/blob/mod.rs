@@ -39,7 +39,7 @@ mod benchmarks;
 
 
 pub use self::blob::Blob;
-pub use self::chunk::{ChunkRef, Key, NodeType, Packing, node_from_height, node_height};
+pub use self::chunk::{ChunkRef, Key, NodeType, LeafType, Packing};
 pub use self::index::{BlobDesc, BlobIndex};
 
 
@@ -115,12 +115,14 @@ impl<B: StoreBackend> StoreInner<B> {
              chunk: &[u8],
              hash: Hash,
              node: NodeType,
+             leaf: LeafType,
              callback: Box<FnBox<HashRef, ()>>)
              -> HashRef {
         if chunk.is_empty() {
             let href = HashRef {
                 hash: hash,
                 node: node,
+                leaf: leaf,
                 persistent_ref: ChunkRef {
                     blob_id: None,
                     blob_name: vec![0],
@@ -138,6 +140,7 @@ impl<B: StoreBackend> StoreInner<B> {
         let mut href = HashRef {
             hash: hash,
             node: node,
+            leaf: leaf,
             persistent_ref: ChunkRef {
                 blob_id: Some(self.blob_desc.id),
                 blob_name: self.blob_desc.name.clone(),
@@ -180,6 +183,7 @@ impl<B: StoreBackend> StoreInner<B> {
                         &mut HashRef {
                             hash: hash,
                             node: NodeType::Leaf,
+                            leaf: LeafType::SnapshotList,
                             persistent_ref: ChunkRef {
                                 blob_id: None,
                                 blob_name: name.as_bytes().to_owned(),
@@ -257,10 +261,11 @@ impl<B: StoreBackend> BlobStore<B> {
                  chunk: &[u8],
                  hash: Hash,
                  node: NodeType,
+                 leaf: LeafType,
                  callback: Box<FnBox<HashRef, ()>>)
                  -> HashRef {
         let mut guard = self.lock();
-        guard.store(chunk, hash, node, callback)
+        guard.store(chunk, hash, node, leaf, callback)
     }
 
     /// Retrieve the data chunk identified by `ChunkRef`.

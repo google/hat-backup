@@ -13,7 +13,7 @@
 // limitations under the License.
 
 
-use blob::ChunkRef;
+use blob::{ChunkRef, NodeType, LeafType};
 use hash::Hash;
 use hash::tree::*;
 use key;
@@ -26,7 +26,7 @@ use std::sync::{Arc, Mutex};
 
 #[derive(Clone)]
 pub struct MemoryBackend {
-    chunks: Arc<Mutex<BTreeMap<Vec<u8>, (i64, Option<Vec<i64>>, Vec<u8>)>>>,
+    chunks: Arc<Mutex<BTreeMap<Vec<u8>, (NodeType, LeafType, Option<Vec<i64>>, Vec<u8>)>>>,
     seen_chunks: Arc<Mutex<BTreeSet<Vec<u8>>>>,
 }
 
@@ -55,18 +55,18 @@ impl HashTreeBackend for MemoryBackend {
             None => Cow::Borrowed(hash),
         };
         let guarded_chunks = self.chunks.lock().unwrap();
-        Ok(guarded_chunks.get(&hash.bytes).map(|&(_, _, ref chunk)| chunk.clone()))
+        Ok(guarded_chunks.get(&hash.bytes).map(|&(_, _, _, ref chunk)| chunk.clone()))
     }
 
     fn fetch_childs(&self, hash: &Hash) -> Option<Vec<i64>> {
         let guarded_chunks = self.chunks.lock().unwrap();
-        guarded_chunks.get(&hash.bytes).and_then(|&(_, ref childs, _)| childs.clone())
+        guarded_chunks.get(&hash.bytes).and_then(|&(_, _, ref childs, _)| childs.clone())
     }
 
     fn fetch_persistent_ref(&self, hash: &Hash) -> Option<ChunkRef> {
         let guarded_chunks = self.chunks.lock().unwrap();
         match guarded_chunks.get(&hash.bytes) {
-            Some(&(ref level, _, ref chunk)) => {
+            Some(&(_, _, _, ref chunk)) => {
                 Some(ChunkRef {
                     blob_id: None,
                     blob_name: hash.bytes.clone(),
@@ -82,7 +82,8 @@ impl HashTreeBackend for MemoryBackend {
 
     fn insert_chunk(&self,
                     hash: &Hash,
-                    level: i64,
+                    node: NodeType,
+                    leaf: LeafType,
                     childs: Option<Vec<i64>>,
                     chunk: &[u8])
                     -> Result<(i64, ChunkRef), Self::Err> {
@@ -91,7 +92,7 @@ impl HashTreeBackend for MemoryBackend {
         guarded_seen.insert(chunk.to_vec());
 
         let mut guarded_chunks = self.chunks.lock().unwrap();
-        guarded_chunks.insert(hash.bytes.clone(), (level, childs, chunk.to_vec()));
+        guarded_chunks.insert(hash.bytes.clone(), (node, leaf, childs, chunk.to_vec()));
 
 
         Ok((0,

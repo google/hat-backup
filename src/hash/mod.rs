@@ -70,7 +70,8 @@ pub struct Entry {
     /// The level in a hash tree that this entry is from. Level `0` represents `leaf`s, i.e. entries
     /// that represent user-data, where levels `1` and up represents `branches` of the tree,
     /// i.e. internal meta-data.
-    pub level: i64,
+    pub node: blob::NodeType,
+    pub leaf: blob::LeafType,
 
     /// An optional list of child hash ids.
     pub childs: Option<Vec<i64>>,
@@ -126,7 +127,7 @@ impl InternalHashIndex {
                -> i64 {
         index.maybe_flush();
 
-        let Entry { ref hash, ref level, ref childs, ref persistent_ref } = *hash_entry;
+        let Entry { ref hash, node, leaf, ref childs, ref persistent_ref } = *hash_entry;
         assert!(!hash.bytes.is_empty());
 
         let my_id = index.hash_next_id();
@@ -134,7 +135,8 @@ impl InternalHashIndex {
                        hash.bytes.clone(),
                        db::QueueEntry {
                            id: my_id,
-                           level: level.clone(),
+                           node: node,
+                           leaf: leaf,
                            childs: childs.clone(),
                            tag: None,
                            persistent_ref: persistent_ref.clone(),
@@ -152,7 +154,7 @@ impl InternalHashIndex {
                        mut queue: &mut MutexGuard<Queue>,
                        mut index: &mut db::IndexGuard) {
         let id_opt = self.reserved_id(&hash_entry, queue);
-        let Entry { hash, level, childs, persistent_ref } = hash_entry;
+        let Entry { hash, node, leaf, childs, persistent_ref } = hash_entry;
         assert!(!hash.bytes.is_empty());
         let old_entry = self.locate(&hash, queue, index).expect("hash was reserved");
 
@@ -160,7 +162,8 @@ impl InternalHashIndex {
         if id_opt.is_some() {
             assert_eq!(id_opt, Some(old_entry.id));
             queue.update_value(&hash.bytes, |qe| {
-                qe.level = level;
+                qe.node = node;
+                qe.leaf = leaf;
                 qe.childs = childs;
                 qe.persistent_ref = persistent_ref;
             });
@@ -244,7 +247,8 @@ impl HashIndex {
             Some(queue_entry) => {
                 Ok(Some(tree::HashRef {
                     hash: hash.clone(),
-                    node: blob::node_from_height(queue_entry.level),
+                    node: queue_entry.node,
+                    leaf: queue_entry.leaf,
                     persistent_ref: queue_entry.persistent_ref.expect("persistent_ref"),
                 }))
             }

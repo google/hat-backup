@@ -159,10 +159,9 @@ pub struct Entry {
     /// The hash of this entry (unique among all entries in the index).
     pub hash: hash::Hash,
 
-    /// The level in a hash tree that this entry is from. Level `0` represents `leaf`s, i.e. entries
-    /// that represent user-data, where levels `1` and up represents `branches` of the tree,
-    /// i.e. internal meta-data.
-    pub level: i64,
+    /// Metadata on what sort of content we are referencing.
+    pub node: blob::NodeType,
+    pub leaf: blob::LeafType,
 
     /// An optional list of child hash ids.
     pub childs: Option<Vec<i64>>,
@@ -180,7 +179,8 @@ pub enum ReserveResult {
 #[derive(Clone)]
 pub struct QueueEntry {
     pub id: i64,
-    pub level: i64,
+    pub node: blob::NodeType,
+    pub leaf: blob::LeafType,
     pub childs: Option<Vec<i64>>,
     pub persistent_ref: Option<blob::ChunkRef>,
     pub tag: Option<tags::Tag>,
@@ -237,7 +237,8 @@ impl InternalIndex {
             let persistent_ref = decode_chunk_ref(hash_.blob_ref.as_ref(), blob_);
             QueueEntry {
                 id: hash_.id,
-                level: hash_.height,
+                node: From::from(hash_.height),
+                leaf: From::from(1), // TODO(jos): Store leaf data in DB
                 tag: tags::tag_from_num(hash_.tag),
                 childs: childs_,
                 persistent_ref: persistent_ref,
@@ -258,7 +259,8 @@ impl InternalIndex {
         result_opt.map(|(hash_, blob_)| {
             Entry {
                 hash: self::hash::Hash { bytes: hash_.hash },
-                level: hash_.height,
+                node: From::from(hash_.height),
+                leaf: From::from(1), // TODO(jos): Store leaf data in DB
                 childs: hash_.childs.and_then(|p| {
                     if p.is_empty() {
                         None
@@ -296,7 +298,7 @@ impl InternalIndex {
             id: id_,
             hash: &hash_bytes,
             tag: entry.tag.unwrap_or(tags::Tag::Done) as i64,
-            height: entry.level,
+            height: From::from(entry.node),
             childs: childs_.as_ref().map(|v| &v[..]),
             blob_id: entry.persistent_ref.and_then(|r| r.blob_id).unwrap_or(0),
             blob_ref: blob_ref_.as_ref().map(|v| &v[..]),
@@ -455,7 +457,8 @@ impl InternalIndex {
             .map(|(hash_, blob_)| {
                 Entry {
                     hash: self::hash::Hash { bytes: hash_.hash },
-                    level: hash_.height,
+                    node: From::from(hash_.height),
+                    leaf: From::from(1), // TODO(jos): Store leaf data in DB
                     childs: hash_.childs.as_ref().map(|p| decode_childs(p).unwrap()),
                     persistent_ref: decode_chunk_ref(hash_.blob_ref.as_ref(), blob_),
                 }

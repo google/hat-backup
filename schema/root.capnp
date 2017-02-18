@@ -50,7 +50,8 @@ struct ChunkRef {
 struct HashRef {
 	hash @0 :Data;
 	height @1 :Int64;
-	chunkRef @2 :ChunkRef;
+	leafType @2 :Int64;
+	chunkRef @3 :ChunkRef;
 }
 
 struct HashRefList {

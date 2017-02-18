@@ -18,7 +18,7 @@
 //! a streaming hash-tree reader.
 
 
-use blob::{ChunkRef, NodeType, node_height, node_from_height};
+use blob::{ChunkRef, NodeType, LeafType};
 
 use capnp;
 use hash::Hash;
@@ -34,6 +34,7 @@ use std::fmt;
 pub struct HashRef {
     pub hash: Hash,
     pub node: NodeType, // Where in the tree this reference points.
+    pub leaf: LeafType, // What kind of data the tree leafs contain.
     pub persistent_ref: ChunkRef,
 }
 
@@ -41,7 +42,8 @@ impl HashRef {
     pub fn populate_msg(&self, msg: root_capnp::hash_ref::Builder) {
         let mut msg = msg;
         msg.set_hash(&self.hash.bytes[..]);
-        msg.set_height(node_height(&self.node));
+        msg.set_height(From::from(self.node));
+        msg.set_leaf_type(self.leaf as i64);
         {
             let mut chunk_ref = msg.init_chunk_ref();
             self.persistent_ref.populate_msg(chunk_ref.borrow());
@@ -51,7 +53,8 @@ impl HashRef {
     pub fn read_msg(msg: &root_capnp::hash_ref::Reader) -> Result<HashRef, capnp::Error> {
         Ok(HashRef {
             hash: Hash { bytes: try!(msg.get_hash()).to_owned() },
-            node: node_from_height(msg.get_height()),
+            node: From::from(msg.get_height()),
+            leaf: From::from(msg.get_leaf_type()),
             persistent_ref: try!(ChunkRef::read_msg(&try!(msg.get_chunk_ref()))),
         })
     }
@@ -86,7 +89,8 @@ pub trait HashTreeBackend: Clone {
     fn fetch_persistent_ref(&self, &Hash) -> Option<ChunkRef>;
     fn insert_chunk(&self,
                     &Hash,
-                    i64,
+                    NodeType,
+                    LeafType,
                     Option<Vec<i64>>,
                     &[u8])
                     -> Result<(i64, ChunkRef), Self::Err>;
@@ -141,6 +145,7 @@ fn test_hash_refs_identity() {
             v.push(HashRef {
                 hash: Hash { bytes: hash.clone() },
                 node: NodeType::Branch(i as i64),
+                leaf: LeafType::FileChunk,
                 persistent_ref: chunk_ref.clone(),
             });
         }
@@ -168,6 +173,7 @@ fn test_hash_refs_identity() {
 pub struct SimpleHashTreeWriter<B> {
     backend: B,
     order: usize,
+    leaf: LeafType,
     levels: Vec<Vec<(i64, HashRef)>>, // Representation of rightmost path to root
 }
 
@@ -178,6 +184,7 @@ impl<B: HashTreeBackend> SimpleHashTreeWriter<B> {
         SimpleHashTreeWriter {
             backend: backend,
             order: order,
+            leaf: LeafType::FileChunk,
             levels: Vec::new(),
         }
     }
@@ -208,10 +215,12 @@ impl<B: HashTreeBackend> SimpleHashTreeWriter<B> {
                  childs: Option<Vec<i64>>)
                  -> Result<(), B::Err> {
         let hash = Hash::new(&data[..]);
-        let (id, chunk_ref) = try!(self.backend.insert_chunk(&hash, level as i64, childs, &data));
+        let (id, chunk_ref) = try!(self.backend.insert_chunk(
+            &hash, From::from(level as i64), self.leaf, childs, &data));
         let hash_ref = HashRef {
             hash: hash,
-            node: node_from_height(level as i64),
+            node: From::from(level as i64),
+            leaf: self.leaf,
             persistent_ref: chunk_ref,
         };
         self.append_hashref_at(level, id, hash_ref)

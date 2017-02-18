@@ -28,27 +28,46 @@ pub enum Key {
     XSalsa20Poly1305(xsalsa20poly1305::Key),
 }
 
-#[derive(Debug, Clone, Eq, PartialEq)]
+#[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub enum NodeType {
     Branch(i64),
     Leaf,
 }
 
-pub fn node_from_height(height: i64) -> NodeType {
-    assert!(height >= 0);
-    match height {
-        0 => NodeType::Leaf,
-        h => NodeType::Branch(h),
+impl From<i64> for NodeType {
+    fn from(n: i64) -> NodeType {
+        match n {
+            0 => NodeType::Leaf,
+            _ if n > 0 => NodeType::Branch(n),
+            _ => unreachable!("Negative node height: {}", n),
+        }
     }
 }
 
-pub fn node_height(node: &NodeType) -> i64 {
-    match node {
-        &NodeType::Branch(height) => {
-            assert!(height >= 1);
-            height
+impl From<NodeType> for i64 {
+    fn from(t: NodeType) -> i64 {
+        match t {
+            NodeType::Branch(height) => height,
+            NodeType::Leaf => 0,
         }
-        &NodeType::Leaf => 0,
+    }
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub enum LeafType {
+    SnapshotList = 3,
+    FileList = 2,
+    FileChunk = 1,
+}
+
+impl From<i64> for LeafType {
+    fn from(n: i64) -> LeafType {
+        match n {
+            3 => LeafType::SnapshotList,
+            2 => LeafType::FileList,
+            1 => LeafType::FileChunk,
+            _ => unreachable!("Corrupt LeafType tag: {}", n),
+        }
     }
 }
 

@@ -13,7 +13,7 @@
 // limitations under the License
 
 use backend::{MemoryBackend, StoreBackend};
-use blob::{Blob, BlobError, BlobIndex, BlobStore, ChunkRef, Key, NodeType};
+use blob::{Blob, BlobError, BlobIndex, BlobStore, ChunkRef, Key, NodeType, LeafType};
 use db;
 use hash;
 use quickcheck;
@@ -35,6 +35,7 @@ fn identity() {
             ids.push((bs_p.store(&chunk[..],
                                  hash::Hash::new(chunk),
                                  NodeType::Leaf,
+                                 LeafType::FileChunk,
                                  Box::new(move |_| {})),
                       chunk));
         }
@@ -78,6 +79,7 @@ fn identity_with_excessive_flushing() {
             ids.push((bs_p.store(&chunk[..],
                                  hash::Hash::new(chunk),
                                  NodeType::Leaf,
+                                 LeafType::FileChunk,
                                  Box::new(move |_| {})),
                       chunk));
             bs_p.flush();
@@ -133,6 +135,7 @@ fn blob_reuse() {
     let mut c1 = hash::tree::HashRef {
         hash: hash::Hash::new(&[]),
         node: NodeType::Leaf,
+        leaf: LeafType::FileChunk,
         persistent_ref: ChunkRef {
             blob_id: None,
             blob_name: Vec::new(),
@@ -180,6 +183,7 @@ fn blob_identity() {
             let mut cref = hash::tree::HashRef {
                 hash: hash::Hash::new(&[]),
                 node: NodeType::Leaf,
+                leaf: LeafType::FileChunk,
                 persistent_ref: ChunkRef {
                     blob_id: None,
                     blob_name: Vec::new(),
@@ -261,6 +265,7 @@ fn empty_blocks_blob_ciphertext(blob: &mut Blob, blocksize: usize) -> Vec<u8> {
         let mut cref = hash::tree::HashRef {
             hash: hash::Hash::new(&block[..]),
             node: NodeType::Leaf,
+            leaf: LeafType::FileChunk,
             persistent_ref: ChunkRef {
                 blob_id: None,
                 blob_name: Vec::new(),

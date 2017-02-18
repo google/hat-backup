@@ -109,7 +109,8 @@ impl<B: StoreBackend> HashTreeBackend for HashStoreBackend<B> {
 
     fn insert_chunk(&self,
                     hash: &hash::Hash,
-                    height: i64,
+                    node: blob::NodeType,
+                    leaf: blob::LeafType,
                     childs: Option<Vec<i64>>,
                     chunk: &[u8])
                     -> Result<(i64, blob::ChunkRef), MsgError> {
@@ -117,7 +118,8 @@ impl<B: StoreBackend> HashTreeBackend for HashStoreBackend<B> {
 
         let mut hash_entry = hash::Entry {
             hash: hash.clone(),
-            level: height,
+            node: node,
+            leaf: leaf,
             childs: childs,
             persistent_ref: None,
         };
@@ -136,8 +138,7 @@ impl<B: StoreBackend> HashTreeBackend for HashStoreBackend<B> {
                 let callback = Box::new(move |href: hash::tree::HashRef| {
                     local_hash_index.commit(&href.hash, href.persistent_ref);
                 });
-                let kind = blob::node_from_height(height);
-                let href = self.blob_store.store(chunk, hash.clone(), kind, callback);
+                let href = self.blob_store.store(chunk, hash.clone(), node, leaf, callback);
                 hash_entry.persistent_ref = Some(href.persistent_ref.clone());
                 self.hash_index.update_reserved(hash_entry);
                 Ok((id, href.persistent_ref))

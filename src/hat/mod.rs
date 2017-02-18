@@ -354,6 +354,7 @@ impl<B: StoreBackend> HatRc<B> {
             pref.blob_id = blobs.recover(hash::tree::HashRef {
                     hash: node.href.hash.clone(),
                     node: node.href.node.clone(),
+                    leaf: node.href.leaf.clone(),
                     persistent_ref: pref.clone(),
                 })
                 .map(|b| b.id);
@@ -362,7 +363,8 @@ impl<B: StoreBackend> HatRc<B> {
                 hash::Entry {
                     hash: href.hash,
                     persistent_ref: Some(href.persistent_ref),
-                    level: blob::node_height(&href.node),
+                    node: href.node,
+                    leaf: href.leaf,
                     childs: childs,
                 }
             }
@@ -384,7 +386,8 @@ impl<B: StoreBackend> HatRc<B> {
             let entry = hash::Entry {
                 hash: node.href.hash,
                 persistent_ref: Some(pref.clone()),
-                level: blob::node_height(&node.href.node),
+                node: node.href.node,
+                leaf: node.href.leaf,
                 childs: child_ids,
             };
 
