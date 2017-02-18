@@ -29,26 +29,26 @@ pub enum Key {
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
-pub enum Kind {
-    TreeBranch(i64),
-    TreeLeaf,
+pub enum NodeType {
+    Branch(i64),
+    Leaf,
 }
 
-pub fn node_from_height(height: i64) -> Kind {
+pub fn node_from_height(height: i64) -> NodeType {
     assert!(height >= 0);
     match height {
-        0 => Kind::TreeLeaf,
-        h => Kind::TreeBranch(h),
+        0 => NodeType::Leaf,
+        h => NodeType::Branch(h),
     }
 }
 
-pub fn node_height(kind: &Kind) -> i64 {
-    match kind {
-        &Kind::TreeBranch(height) => {
+pub fn node_height(node: &NodeType) -> i64 {
+    match node {
+        &NodeType::Branch(height) => {
             assert!(height >= 1);
             height
         }
-        &Kind::TreeLeaf => 0,
+        &NodeType::Leaf => 0,
     }
 }
 

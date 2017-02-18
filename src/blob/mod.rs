@@ -39,7 +39,7 @@ mod benchmarks;
 
 
 pub use self::blob::Blob;
-pub use self::chunk::{ChunkRef, Key, Kind, Packing, node_from_height, node_height};
+pub use self::chunk::{ChunkRef, Key, NodeType, Packing, node_from_height, node_height};
 pub use self::index::{BlobDesc, BlobIndex};
 
 
@@ -114,13 +114,13 @@ impl<B: StoreBackend> StoreInner<B> {
     fn store(&mut self,
              chunk: &[u8],
              hash: Hash,
-             kind: Kind,
+             node: NodeType,
              callback: Box<FnBox<HashRef, ()>>)
              -> HashRef {
         if chunk.is_empty() {
             let href = HashRef {
                 hash: hash,
-                kind: kind,
+                node: node,
                 persistent_ref: ChunkRef {
                     blob_id: None,
                     blob_name: vec![0],
@@ -137,7 +137,7 @@ impl<B: StoreBackend> StoreInner<B> {
 
         let mut href = HashRef {
             hash: hash,
-            kind: kind,
+            node: node,
             persistent_ref: ChunkRef {
                 blob_id: Some(self.blob_desc.id),
                 blob_name: self.blob_desc.name.clone(),
@@ -179,7 +179,7 @@ impl<B: StoreBackend> StoreInner<B> {
         blob.try_append(data,
                         &mut HashRef {
                             hash: hash,
-                            kind: Kind::TreeLeaf,
+                            node: NodeType::Leaf,
                             persistent_ref: ChunkRef {
                                 blob_id: None,
                                 blob_name: name.as_bytes().to_owned(),
@@ -256,11 +256,11 @@ impl<B: StoreBackend> BlobStore<B> {
     pub fn store(&self,
                  chunk: &[u8],
                  hash: Hash,
-                 kind: Kind,
+                 node: NodeType,
                  callback: Box<FnBox<HashRef, ()>>)
                  -> HashRef {
         let mut guard = self.lock();
-        guard.store(chunk, hash, kind, callback)
+        guard.store(chunk, hash, node, callback)
     }
 
     /// Retrieve the data chunk identified by `ChunkRef`.

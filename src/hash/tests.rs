@@ -13,7 +13,7 @@
 // limitations under the License.
 
 
-use blob::{ChunkRef, Kind};
+use blob::ChunkRef;
 use hash::Hash;
 use hash::tree::*;
 use key;

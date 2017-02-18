@@ -18,7 +18,7 @@
 //! a streaming hash-tree reader.
 
 
-use blob::{ChunkRef, Kind, node_height, node_from_height};
+use blob::{ChunkRef, NodeType, node_height, node_from_height};
 
 use capnp;
 use hash::Hash;
@@ -33,7 +33,7 @@ use std::fmt;
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct HashRef {
     pub hash: Hash,
-    pub kind: Kind,
+    pub node: NodeType, // Where in the tree this reference points.
     pub persistent_ref: ChunkRef,
 }
 
@@ -41,7 +41,7 @@ impl HashRef {
     pub fn populate_msg(&self, msg: root_capnp::hash_ref::Builder) {
         let mut msg = msg;
         msg.set_hash(&self.hash.bytes[..]);
-        msg.set_height(node_height(&self.kind));
+        msg.set_height(node_height(&self.node));
         {
             let mut chunk_ref = msg.init_chunk_ref();
             self.persistent_ref.populate_msg(chunk_ref.borrow());
@@ -51,7 +51,7 @@ impl HashRef {
     pub fn read_msg(msg: &root_capnp::hash_ref::Reader) -> Result<HashRef, capnp::Error> {
         Ok(HashRef {
             hash: Hash { bytes: try!(msg.get_hash()).to_owned() },
-            kind: node_from_height(msg.get_height()),
+            node: node_from_height(msg.get_height()),
             persistent_ref: try!(ChunkRef::read_msg(&try!(msg.get_chunk_ref()))),
         })
     }
@@ -140,7 +140,7 @@ fn test_hash_refs_identity() {
         for i in 1..count + 1 {
             v.push(HashRef {
                 hash: Hash { bytes: hash.clone() },
-                kind: Kind::TreeBranch(i as i64),
+                node: NodeType::Branch(i as i64),
                 persistent_ref: chunk_ref.clone(),
             });
         }
@@ -211,7 +211,7 @@ impl<B: HashTreeBackend> SimpleHashTreeWriter<B> {
         let (id, chunk_ref) = try!(self.backend.insert_chunk(&hash, level as i64, childs, &data));
         let hash_ref = HashRef {
             hash: hash,
-            kind: node_from_height(level as i64),
+            node: node_from_height(level as i64),
             persistent_ref: chunk_ref,
         };
         self.append_hashref_at(level, id, hash_ref)
@@ -353,8 +353,8 @@ impl<B> Walker<B>
                     .map(|opt| opt.expect("Invalid hash ref"))
             };
 
-            match node.kind {
-                Kind::TreeLeaf => {
+            match node.node {
+                NodeType::Leaf => {
                     if visitor.leaf_enter(&node) {
                         let data = try!(fetch_chunk(&self.backend, &node));
                         if visitor.leaf_leave(data, &node) {
@@ -362,7 +362,7 @@ impl<B> Walker<B>
                         }
                     }
                 }
-                Kind::TreeBranch(..) => {
+                NodeType::Branch(..) => {
                     let data = try!(fetch_chunk(&self.backend, &node));
                     let mut new_childs = hash_refs_from_bytes(&data[..]).unwrap();
                     if visitor.branch_enter(&node, &new_childs) {

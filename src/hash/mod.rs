@@ -244,7 +244,7 @@ impl HashIndex {
             Some(queue_entry) => {
                 Ok(Some(tree::HashRef {
                     hash: hash.clone(),
-                    kind: blob::node_from_height(queue_entry.level),
+                    node: blob::node_from_height(queue_entry.level),
                     persistent_ref: queue_entry.persistent_ref.expect("persistent_ref"),
                 }))
             }

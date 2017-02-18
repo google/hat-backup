@@ -13,7 +13,7 @@
 // limitations under the License
 
 use backend::{MemoryBackend, StoreBackend};
-use blob::{Blob, BlobError, BlobIndex, BlobStore, ChunkRef, Key, Kind};
+use blob::{Blob, BlobError, BlobIndex, BlobStore, ChunkRef, Key, NodeType};
 use db;
 use hash;
 use quickcheck;
@@ -34,7 +34,7 @@ fn identity() {
         for chunk in chunks.iter() {
             ids.push((bs_p.store(&chunk[..],
                                  hash::Hash::new(chunk),
-                                 Kind::TreeLeaf,
+                                 NodeType::Leaf,
                                  Box::new(move |_| {})),
                       chunk));
         }
@@ -77,7 +77,7 @@ fn identity_with_excessive_flushing() {
         for chunk in chunks.iter() {
             ids.push((bs_p.store(&chunk[..],
                                  hash::Hash::new(chunk),
-                                 Kind::TreeLeaf,
+                                 NodeType::Leaf,
                                  Box::new(move |_| {})),
                       chunk));
             bs_p.flush();
@@ -132,7 +132,7 @@ fn blobid_identity() {
 fn blob_reuse() {
     let mut c1 = hash::tree::HashRef {
         hash: hash::Hash::new(&[]),
-        kind: Kind::TreeLeaf,
+        node: NodeType::Leaf,
         persistent_ref: ChunkRef {
             blob_id: None,
             blob_name: Vec::new(),
@@ -179,7 +179,7 @@ fn blob_identity() {
         for chunk in chunks.iter() {
             let mut cref = hash::tree::HashRef {
                 hash: hash::Hash::new(&[]),
-                kind: Kind::TreeLeaf,
+                node: NodeType::Leaf,
                 persistent_ref: ChunkRef {
                     blob_id: None,
                     blob_name: Vec::new(),
@@ -260,7 +260,7 @@ fn empty_blocks_blob_ciphertext(blob: &mut Blob, blocksize: usize) -> Vec<u8> {
     loop {
         let mut cref = hash::tree::HashRef {
             hash: hash::Hash::new(&block[..]),
-            kind: Kind::TreeLeaf,
+            node: NodeType::Leaf,
             persistent_ref: ChunkRef {
                 blob_id: None,
                 blob_name: Vec::new(),
