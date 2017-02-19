@@ -68,7 +68,7 @@ impl<B: gc::GcBackend> gc::Gc<B> for GcRc<B> {
 
     fn register_cleanup(&mut self,
                         _snapshot: &SnapshotInfo,
-                        ref_final: gc::Id)
+                        _ref_final: gc::Id)
                         -> Result<(), Self::Err> {
         // Clear all tags including final reference.
         self.backend.set_all_tags(tags::Tag::Done)?;

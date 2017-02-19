@@ -22,15 +22,14 @@ use capnp;
 use diesel;
 use diesel::prelude::*;
 use diesel::sqlite::SqliteConnection;
-use errors::{DieselError, RetryError};
+use errors::{DieselError};
 
 use hash;
-use libsodium_sys;
 use root_capnp;
 use std::sync::{Mutex, MutexGuard};
 use tags;
 use time::Duration;
-use util::{Counter, InfoWriter, PeriodicTimer, UniquePriorityQueue};
+use util::{Counter, InfoWriter, PeriodicTimer};
 
 mod schema;
 
@@ -169,11 +168,6 @@ pub struct Entry {
     /// A reference to a location in the external persistent storage (a chunk reference) that
     /// contains the data for this entry (e.g. an object-name and a byte range).
     pub persistent_ref: Option<blob::ChunkRef>,
-}
-
-pub enum ReserveResult {
-    HashKnown(i64),
-    ReserveOk(i64),
 }
 
 #[derive(Clone)]

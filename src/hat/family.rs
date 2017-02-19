@@ -25,7 +25,6 @@ use std::fs;
 use std::io::Write;
 use std::path::PathBuf;
 use std::str;
-use std::sync::mpsc;
 use util::{FileIterator, FnBox, PathHandler};
 
 fn try_a_few_times_then_panic<F>(mut f: F, msg: &str)

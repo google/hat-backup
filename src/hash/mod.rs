@@ -114,7 +114,7 @@ impl InternalHashIndex {
     fn locate(&self,
               hash: &Hash,
               queue: &MutexGuard<Queue>,
-              mut index: &mut db::IndexGuard)
+              index: &mut db::IndexGuard)
               -> Option<db::QueueEntry> {
         let result_opt = queue.find_value_of_key(&hash.bytes).cloned();
         result_opt.or_else(|| index.hash_locate(hash))

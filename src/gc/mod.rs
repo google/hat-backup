@@ -302,7 +302,7 @@ pub fn gc_test<GC>(snapshots: Vec<Vec<u8>>)
     }
 
     for (i, refs) in snapshots.iter().enumerate() {
-        backend.set_all_tags(tags::Tag::Done);
+        backend.set_all_tags(tags::Tag::Done).unwrap();
         refs[..refs.len() - 1]
             .iter()
             .map(|id| backend.set_tag(*id as Id, tags::Tag::Reserved))
@@ -360,7 +360,7 @@ pub fn resume_register_test<GC>()
     };
     backend.insert_snapshot(&info, refs.iter().map(|i| *i as Id).collect());
 
-    backend.set_all_tags(tags::Tag::Done);
+    backend.set_all_tags(tags::Tag::Done).unwrap();
     refs[..refs.len() - 1].iter().map(|id| backend.set_tag(*id as Id, tags::Tag::Reserved)).last();
 
     let final_ref = *refs.last().expect("nonempty");
@@ -408,7 +408,7 @@ pub fn resume_deregister_test<GC>()
     };
     backend.insert_snapshot(&info, refs.iter().map(|i| *i as Id).collect());
 
-    backend.set_all_tags(tags::Tag::Done);
+    backend.set_all_tags(tags::Tag::Done).unwrap();
     refs[..refs.len() - 1].iter().map(|id| backend.set_tag(*id as Id, tags::Tag::Reserved)).last();
 
     let final_ref = *refs.last().expect("nonempty");

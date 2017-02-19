@@ -105,7 +105,7 @@ mod diesel_error {
 }
 
 mod crypto_error {
-    use std::{io, str};
+    use std::{str};
     use std::borrow::Cow;
 
     error_type! {

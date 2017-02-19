@@ -27,7 +27,6 @@ use std::fs;
 use std::path::PathBuf;
 use std::str;
 use std::sync::{Arc, mpsc};
-use std::thread;
 use tags;
 use util::Process;
 use void::Void;
@@ -127,14 +126,6 @@ fn concat_filename(mut a: PathBuf, b: &str) -> String {
     a.into_os_string().into_string().unwrap()
 }
 
-fn snapshot_index_name(root: PathBuf) -> String {
-    concat_filename(root, "snapshot_index.sqlite3")
-}
-
-fn blob_index_name(root: PathBuf) -> String {
-    concat_filename(root, "blob_index.sqlite3")
-}
-
 fn hash_index_name(root: PathBuf) -> String {
     concat_filename(root, "hash_index.sqlite3")
 }
@@ -192,8 +183,6 @@ impl<B: StoreBackend> HatRc<B> {
                            backend: Arc<B>,
                            max_blob_size: usize)
                            -> Result<HatRc<B>, HatError> {
-        let snapshot_index_path = snapshot_index_name(repository_root.clone());
-        let blob_index_path = blob_index_name(repository_root.clone());
         let hash_index_path = hash_index_name(repository_root.clone());
         let db_p = Arc::new(db::Index::new(&hash_index_path)?);
         let si_p = snapshot::SnapshotIndex::new(db_p.clone());

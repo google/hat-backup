@@ -20,11 +20,9 @@ use db;
 
 use errors::DieselError;
 
-use sodiumoxide::randombytes::randombytes;
-use std::sync::{Arc, Mutex, MutexGuard};
+use std::sync::{Arc, Mutex};
 
 use tags;
-use util;
 
 
 #[derive(Clone, Debug, Default)]
@@ -60,7 +58,7 @@ impl InternalBlobIndex {
         let name_key = crypto::FixedKey::new(pubkey, Some(seckey));
 
 
-        let mut bi = InternalBlobIndex {
+        let bi = InternalBlobIndex {
             index: index,
             next_id: Arc::new(Mutex::new(0)),
             name_key: Arc::new(name_key),
