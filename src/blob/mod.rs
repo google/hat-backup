@@ -169,7 +169,7 @@ impl<B: StoreBackend> StoreInner<B> {
             return Ok(Some(Vec::new()));
         }
         match self.backend.retrieve(&cref.blob_name[..]) {
-            Ok(Some(blob)) => Ok(Some(try!(Blob::read_chunk(&blob, hash, cref)))),
+            Ok(Some(blob)) => Ok(Some(Blob::read_chunk(&blob, hash, cref)?)),
             Ok(None) => Ok(None),
             Err(e) => Err(e.into()),
         }
@@ -197,19 +197,19 @@ impl<B: StoreBackend> StoreInner<B> {
 
         let ct = blob.to_ciphertext().unwrap();
 
-        try!(self.backend.store(name.as_bytes(), &ct));
+        self.backend.store(name.as_bytes(), &ct)?;
         Ok(())
     }
 
     fn retrieve_named(&mut self, name: &str) -> Result<Option<Vec<u8>>, BlobError> {
-        match try!(self.backend.retrieve(name.as_bytes())) {
+        match self.backend.retrieve(name.as_bytes())? {
             None => Ok(None),
             Some(ct) => {
-                let hrefs = try!(self.blob.refs_from_bytes(&ct));
+                let hrefs = self.blob.refs_from_bytes(&ct)?;
                 assert_eq!(hrefs.len(), 1);
                 let href = &hrefs[0];
                 assert_eq!(name.as_bytes(), &href.persistent_ref.blob_name[..]);
-                Ok(Some(try!(Blob::read_chunk(&ct, &href.hash, &href.persistent_ref))))
+                Ok(Some(Blob::read_chunk(&ct, &href.hash, &href.persistent_ref)?))
             }
         }
     }
@@ -238,7 +238,7 @@ impl<B: StoreBackend> StoreInner<B> {
     fn delete_by_tag(&mut self, tag: tags::Tag) -> Result<(), String> {
         let blobs = self.blob_index.list_by_tag(tag);
         for b in &blobs {
-            try!(self.backend.delete(&b.name));
+            self.backend.delete(&b.name)?;
         }
         self.blob_index.delete_by_tag(tag);
         Ok(())

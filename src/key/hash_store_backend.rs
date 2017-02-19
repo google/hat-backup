@@ -46,7 +46,7 @@ impl<B: StoreBackend> HashStoreBackend<B> {
 
     fn fetch_chunk_from_hash(&self, hash: &hash::Hash) -> Result<Option<Vec<u8>>, MsgError> {
         assert!(!hash.bytes.is_empty());
-        match try!(self.hash_index.fetch_persistent_ref(hash)) {
+        match self.hash_index.fetch_persistent_ref(hash)? {
             None => Ok(None),
             Some(chunk_ref) => self.fetch_chunk_from_persistent_ref(hash, &chunk_ref),
         }
@@ -56,7 +56,7 @@ impl<B: StoreBackend> HashStoreBackend<B> {
                                        hash: &hash::Hash,
                                        cref: &blob::ChunkRef)
                                        -> Result<Option<Vec<u8>>, MsgError> {
-        let res = try!(self.blob_store.retrieve(&hash, &cref));
+        let res = self.blob_store.retrieve(&hash, &cref)?;
         Ok(res)
     }
 }
@@ -71,9 +71,9 @@ impl<B: StoreBackend> HashTreeBackend for HashStoreBackend<B> {
         assert!(!hash.bytes.is_empty());
 
         let data_opt = if let Some(r) = persistent_ref {
-            try!(self.fetch_chunk_from_persistent_ref(&hash, &r))
+            self.fetch_chunk_from_persistent_ref(&hash, &r)?
         } else {
-            try!(self.fetch_chunk_from_hash(&hash))
+            self.fetch_chunk_from_hash(&hash)?
         };
 
         Ok(data_opt.and_then(|data| {

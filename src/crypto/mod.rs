@@ -227,7 +227,7 @@ impl RefKey {
                                                     authed::desc::NONCEBYTES => {
                 match authed::desc::Nonce::from_slice(&hash.bytes[..authed::desc::NONCEBYTES]) {
                     None => Err("crypto read failed".into()),
-                    Some(nonce) => Ok(try!(ct.to_plaintext(&nonce, &key))),
+                    Some(nonce) => Ok(ct.to_plaintext(&nonce, &key)?),
                 }
             }
             _ => Err("crypto read failed".into()),
@@ -271,17 +271,17 @@ impl FixedKey {
         let seckey = self.seckey.as_ref().expect("unseal requires access to read-key");
 
         // Read sealed ciphertext length and unseal it.
-        let (rest, foot_ct) = try!(ct.split_from_right(sealed::desc::footer_cipher_bytes()));
-        let foot_pt = try!(foot_ct.to_sealed_plaintext(&self.pubkey, &seckey));
+        let (rest, foot_ct) = ct.split_from_right(sealed::desc::footer_cipher_bytes())?;
+        let foot_pt = foot_ct.to_sealed_plaintext(&self.pubkey, &seckey)?;
         assert_eq!(foot_pt.len(), sealed::desc::footer_plain_bytes());
 
         // Parse back from encoded LittleEndian.
-        let ct_len = try!(foot_pt.as_ref()
+        let ct_len = foot_pt.as_ref()
             .read_i64()
-            .map_err(|_| "crypto read failed"));
+            .map_err(|_| "crypto read failed")?;
 
         // Read and unseal original ciphertext.
-        let (rest, ct) = try!(rest.split_from_right(ct_len as usize));
-        Ok((rest, try!(ct.to_sealed_plaintext(&self.pubkey, &seckey))))
+        let (rest, ct) = rest.split_from_right(ct_len as usize)?;
+        Ok((rest, ct.to_sealed_plaintext(&self.pubkey, &seckey)?))
     }
 }

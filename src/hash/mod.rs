@@ -198,7 +198,7 @@ impl InternalHashIndex {
 
 impl HashIndex {
     pub fn new(index: Arc<db::Index>) -> Result<HashIndex, DieselError> {
-        Ok(HashIndex(try!(InternalHashIndex::new(index))))
+        Ok(HashIndex(InternalHashIndex::new(index)?))
     }
 
     /// Locate the local ID of this hash.

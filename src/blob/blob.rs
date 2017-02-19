@@ -60,7 +60,7 @@ impl Blob {
 
     pub fn read_chunk(blob: &[u8], hash: &Hash, cref: &ChunkRef) -> Result<Vec<u8>, BlobError> {
         let ct = crypto::CipherTextRef::new(blob);
-        Ok(try!(crypto::RefKey::unseal(hash, cref, ct)).into_vec())
+        Ok(crypto::RefKey::unseal(hash, cref, ct)?.into_vec())
     }
 
     pub fn upperbound_len(&self) -> usize {
@@ -117,7 +117,7 @@ impl Blob {
     }
 
     pub fn refs_from_bytes(&self, bytes: &[u8]) -> Result<Vec<HashRef>, BlobError> {
-        let (_rest, footer_vec) = try!(self.master_key.unseal(CipherTextRef::new(bytes)));
+        let (_rest, footer_vec) = self.master_key.unseal(CipherTextRef::new(bytes))?;
         let mut footer_pos = footer_vec.as_bytes();
 
         let mut hrefs = Vec::new();
@@ -125,7 +125,7 @@ impl Blob {
             let len = footer_pos[0] as usize;
             assert!(footer_pos.len() > len);
 
-            hrefs.push(try!(HashRef::from_bytes(&mut &footer_pos[1..1 + len])));
+            hrefs.push(HashRef::from_bytes(&mut &footer_pos[1..1 + len])?);
             footer_pos = &footer_pos[len + 1..];
         }
 

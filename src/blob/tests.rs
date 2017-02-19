@@ -306,8 +306,8 @@ fn blob_ciphertext_authed_allbytes() {
 
     fn verify(blob: &Blob, bs: &[u8]) -> Result<Vec<Vec<u8>>, BlobError> {
         let mut vs = vec![];
-        for r in try!(blob.refs_from_bytes(bs)) {
-            vs.push(try!(Blob::read_chunk(&bs, &r.hash, &r.persistent_ref)));
+        for r in blob.refs_from_bytes(bs)? {
+            vs.push(Blob::read_chunk(&bs, &r.hash, &r.persistent_ref)?);
         }
         Ok(vs)
     };

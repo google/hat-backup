@@ -82,7 +82,7 @@ fn snapshot_files<B: StoreBackend>(family: &Family<B>,
             // We have a file to insert.
             let mut e = entry(current.bytes().collect());
             e.parent_id = parent.clone();
-            try!(family.snapshot_direct(e, false, Some(FileIterator::from_bytes(contents))));
+            family.snapshot_direct(e, false, Some(FileIterator::from_bytes(contents)))?;
         }
     }
     Ok(())

@@ -56,18 +56,16 @@ pub struct InternalKeyIndex {
 
 impl InternalKeyIndex {
     fn new(path: &str) -> Result<InternalKeyIndex, DieselError> {
-        let conn = try!(SqliteConnection::establish(path));
+        let conn = SqliteConnection::establish(path)?;
 
         let ki = InternalKeyIndex {
             conn: conn,
             flush_timer: PeriodicTimer::new(Duration::seconds(5)),
         };
 
-        let dir = try!(diesel::migrations::find_migrations_directory());
-        try!(diesel::migrations::run_pending_migrations_in_directory(&ki.conn,
-                                                                     &dir,
-                                                                     &mut InfoWriter));
-        try!(ki.conn.begin_transaction());
+        let dir = diesel::migrations::find_migrations_directory()?;
+        diesel::migrations::run_pending_migrations_in_directory(&ki.conn, &dir, &mut InfoWriter)?;
+        ki.conn.begin_transaction()?;
 
         Ok(ki)
     }
@@ -80,15 +78,15 @@ impl InternalKeyIndex {
 
     fn maybe_flush(&mut self) -> Result<(), DieselError> {
         if self.flush_timer.did_fire() {
-            try!(self.flush());
+            self.flush()?;
         }
 
         Ok(())
     }
 
     fn flush(&mut self) -> Result<(), DieselError> {
-        try!(self.conn.commit_transaction());
-        try!(self.conn.begin_transaction());
+        self.conn.commit_transaction()?;
+        self.conn.begin_transaction()?;
 
         Ok(())
     }
@@ -126,12 +124,11 @@ impl InternalKeyIndex {
                         hash_ref: None,
                     };
 
-                    try!(diesel::insert(&new)
-                        .into(keys)
-                        .execute(&self.conn));
+                    diesel::insert(&new).into(keys)
+                        .execute(&self.conn)?;
                 }
                 let mut entry = entry;
-                entry.id = Some(try!(self.last_insert_rowid()) as u64);
+                entry.id = Some(self.last_insert_rowid()? as u64);
                 entry
             }
         };
@@ -149,16 +146,16 @@ impl InternalKeyIndex {
 
         let row_opt = match parent_ {
             Some(p) => {
-                try!(keys.filter(parent.eq(p as i64))
+                keys.filter(parent.eq(p as i64))
                     .filter(name.eq(&name_[..]))
                     .first::<schema::Key>(&self.conn)
-                    .optional())
+                    .optional()?
             }
             None => {
-                try!(keys.filter(parent.is_null())
+                keys.filter(parent.is_null())
                     .filter(name.eq(&name_[..]))
                     .first::<schema::Key>(&self.conn)
-                    .optional())
+                    .optional()?
             }
         };
 
@@ -205,9 +202,8 @@ impl InternalKeyIndex {
                 .set((hash.eq(hash_bytes), hash_ref.eq(hash_ref_bytes)))
                 .execute(&self.conn));
         } else {
-            try!(diesel::update(keys.find(id_))
-                .set((hash.eq(hash_bytes), hash_ref.eq(hash_ref_bytes)))
-                .execute(&self.conn));
+            diesel::update(keys.find(id_)).set((hash.eq(hash_bytes), hash_ref.eq(hash_ref_bytes)))
+                .execute(&self.conn)?;
         }
 
         self.maybe_flush()
@@ -222,12 +218,12 @@ impl InternalKeyIndex {
 
         let rows = match parent_opt {
             Some(p) => {
-                try!(keys.filter(parent.eq(p as i64))
-                    .load::<schema::Key>(&self.conn))
+                keys.filter(parent.eq(p as i64))
+                    .load::<schema::Key>(&self.conn)?
             }
             None => {
-                try!(keys.filter(parent.is_null())
-                    .load::<schema::Key>(&self.conn))
+                keys.filter(parent.is_null())
+                    .load::<schema::Key>(&self.conn)?
             }
         };
 

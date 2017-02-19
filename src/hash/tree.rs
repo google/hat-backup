@@ -52,18 +52,18 @@ impl HashRef {
 
     pub fn read_msg(msg: &root_capnp::hash_ref::Reader) -> Result<HashRef, capnp::Error> {
         Ok(HashRef {
-            hash: Hash { bytes: try!(msg.get_hash()).to_owned() },
+            hash: Hash { bytes: msg.get_hash()?.to_owned() },
             node: From::from(msg.get_height()),
             leaf: From::from(msg.get_leaf_type()),
-            persistent_ref: try!(ChunkRef::read_msg(&try!(msg.get_chunk_ref()))),
+            persistent_ref: ChunkRef::read_msg(&msg.get_chunk_ref()?)?,
         })
     }
 
     pub fn from_bytes(bytes: &mut &[u8]) -> Result<HashRef, capnp::Error> {
-        let reader = try!(
-            capnp::serialize_packed::read_message(bytes, capnp::message::ReaderOptions::new()));
-        let root = try!(reader.get_root::<root_capnp::hash_ref::Reader>());
-        Ok(try!(HashRef::read_msg(&root)))
+        let reader = capnp::serialize_packed::read_message(bytes,
+                                                           capnp::message::ReaderOptions::new())?;
+        let root = reader.get_root::<root_capnp::hash_ref::Reader>()?;
+        Ok(HashRef::read_msg(&root)?)
     }
 
     pub fn as_bytes(&self) -> Vec<u8> {
@@ -215,8 +215,8 @@ impl<B: HashTreeBackend> SimpleHashTreeWriter<B> {
                  childs: Option<Vec<i64>>)
                  -> Result<(), B::Err> {
         let hash = Hash::new(&data[..]);
-        let (id, chunk_ref) = try!(self.backend.insert_chunk(
-            &hash, From::from(level as i64), self.leaf, childs, &data));
+        let (id, chunk_ref) = self.backend
+            .insert_chunk(&hash, From::from(level as i64), self.leaf, childs, &data)?;
         let hash_ref = HashRef {
             hash: hash,
             node: From::from(level as i64),
@@ -238,7 +238,7 @@ impl<B: HashTreeBackend> SimpleHashTreeWriter<B> {
         };
 
         if new_level_len == self.order {
-            try!(self.collapse_level(level));
+            self.collapse_level(level)?;
         }
 
         Ok(())
@@ -265,7 +265,7 @@ impl<B: HashTreeBackend> SimpleHashTreeWriter<B> {
     pub fn hash(&mut self) -> Result<HashRef, B::Err> {
         // Empty hash tree is equivalent to hash tree of one empty block:
         if self.levels.is_empty() {
-            try!(self.append(&[]));
+            self.append(&[])?;
         }
 
         // Locate first level that isn't empty (has data to collapse)
@@ -281,7 +281,7 @@ impl<B: HashTreeBackend> SimpleHashTreeWriter<B> {
         // Collapse top level if possible
         let top_level = self.top_level().expect("levels.len() > 0");
         if self.levels.get(top_level).expect("top level").len() > 1 {
-            try!(self.collapse_level(top_level));
+            self.collapse_level(top_level)?;
         }
 
         // After this point, only root exists and root has exactly one entry:
@@ -365,14 +365,14 @@ impl<B> Walker<B>
             match node.node {
                 NodeType::Leaf => {
                     if visitor.leaf_enter(&node) {
-                        let data = try!(fetch_chunk(&self.backend, &node));
+                        let data = fetch_chunk(&self.backend, &node)?;
                         if visitor.leaf_leave(data, &node) {
                             break;
                         }
                     }
                 }
                 NodeType::Branch(..) => {
-                    let data = try!(fetch_chunk(&self.backend, &node));
+                    let data = fetch_chunk(&self.backend, &node)?;
                     let mut new_childs = hash_refs_from_bytes(&data[..]).unwrap();
                     if visitor.branch_enter(&node, &new_childs) {
                         self.stack.push(StackItem::LeaveBranch(node));
@@ -397,7 +397,7 @@ impl<B> LeafIterator<B>
     where B: HashTreeBackend
 {
     pub fn new(backend: B, root_ref: HashRef) -> Result<Option<LeafIterator<B>>, B::Err> {
-        Ok(try!(Walker::new(backend, root_ref)).map(|w| {
+        Ok(Walker::new(backend, root_ref)?.map(|w| {
             LeafIterator {
                 walker: w,
                 visitor: LeafVisitor { leafs: VecDeque::new() },

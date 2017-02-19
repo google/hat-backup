@@ -70,15 +70,15 @@ pub trait GcBackend {
 pub fn mark_tree<B>(backend: &mut B, root: Id, tag: tags::Tag) -> Result<(), B::Err>
     where B: GcBackend
 {
-    try!(backend.set_tag(root, tag));
-    for r in try!(backend.reverse_refs(root)) {
-        if let Some(current) = try!(backend.get_tag(r)) {
+    backend.set_tag(root, tag)?;
+    for r in backend.reverse_refs(root)? {
+        if let Some(current) = backend.get_tag(r)? {
             if current == tag {
                 continue;
             }
         }
-        try!(backend.set_tag(r, tag));
-        try!(mark_tree(backend, r, tag));
+        backend.set_tag(r, tag)?;
+        mark_tree(backend, r, tag)?;
     }
 
     Ok(())
@@ -206,7 +206,7 @@ impl GcBackend for SafeMemoryBackend {
                                 family_id: Id,
                                 f: F)
                                 -> Result<GcData, Self::Err> {
-        let new = match f(try!(self.get_data(hash_id, family_id))) {
+        let new = match f(self.get_data(hash_id, family_id)?) {
             Some(d) => d,
             None => {
                 GcData {

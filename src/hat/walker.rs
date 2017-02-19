@@ -60,7 +60,7 @@ impl<B> Walker<B>
     where B: hash::tree::HashTreeBackend
 {
     pub fn new(backend: B, root_hash: hash::tree::HashRef) -> Result<Walker<B>, B::Err> {
-        let tree = try!(hash::tree::Walker::new(backend.clone(), root_hash)).unwrap();
+        let tree = hash::tree::Walker::new(backend.clone(), root_hash)?.unwrap();
         Ok(Walker {
             backend: backend,
             tree: tree,
@@ -79,8 +79,8 @@ impl<B> Walker<B>
               DV: hash::tree::Visitor
     {
         Ok(match self.child.as_mut() {
-            Some(&mut Child::File(ref mut tree)) => try!(tree.resume(file_v)),
-            Some(&mut Child::Dir(ref mut walker)) => try!(walker.resume(file_v, dir_v)),
+            Some(&mut Child::File(ref mut tree)) => tree.resume(file_v)?,
+            Some(&mut Child::Dir(ref mut walker)) => walker.resume(file_v, dir_v)?,
             None => false,
         })
     }
@@ -95,13 +95,14 @@ impl<B> Walker<B>
               FV: hash::tree::Visitor,
               DV: hash::tree::Visitor
     {
-        if try!(self.resume_child(file_v, dir_v)) {
+        if self.resume_child(file_v, dir_v)? {
             return Ok(true);
         }
 
         self.child = match self.stack.pop_front() {
             Some(StackItem::File(f)) => {
-                Some(Child::File(try!(hash::tree::Walker::new(self.backend.clone(), f.hash_ref))
+                Some(Child::File(hash::tree::Walker::new(self.backend.clone(), f.hash_ref)
+                    ?
                     .unwrap()))
             }
             Some(StackItem::Dir(f)) => {
@@ -111,7 +112,7 @@ impl<B> Walker<B>
         };
 
         if self.child.is_none() {
-            if !try!(self.tree.resume(dir_v)) {
+            if !self.tree.resume(dir_v)? {
                 return Ok(false);
             }
             for file in dir_v.files() {

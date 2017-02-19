@@ -40,7 +40,7 @@ pub type IndexGuard<'a> = MutexGuard<'a, InternalIndex>;
 
 impl Index {
     pub fn new(path: &str) -> Result<Index, DieselError> {
-        Ok(Index(Mutex::new(try!(InternalIndex::new(path)))))
+        Ok(Index(Mutex::new(InternalIndex::new(path)?)))
     }
     pub fn lock(&self) -> MutexGuard<InternalIndex> {
         self.0.lock().expect("Database mutex is poisoned")
@@ -72,7 +72,7 @@ fn decode_childs(bytes: &[u8]) -> Result<Vec<i64>, capnp::Error> {
         .unwrap();
     let msg = reader.get_root::<root_capnp::hash_ids::Reader>().unwrap();
 
-    let ids = try!(msg.get_hash_ids());
+    let ids = msg.get_hash_ids()?;
     let mut out = Vec::new();
     for i in 0..ids.len() {
         assert!(ids.get(i) as i64 > 0);
@@ -196,7 +196,7 @@ pub struct InternalIndex {
 
 impl InternalIndex {
     fn new(path: &str) -> Result<InternalIndex, DieselError> {
-        let conn = try!(SqliteConnection::establish(path));
+        let conn = SqliteConnection::establish(path)?;
 
         let mut idx = InternalIndex {
             conn: conn,
@@ -205,12 +205,10 @@ impl InternalIndex {
             flush_periodically: true,
         };
 
-        let dir = try!(diesel::migrations::find_migrations_directory());
-        try!(diesel::migrations::run_pending_migrations_in_directory(&idx.conn,
-                                                                     &dir,
-                                                                     &mut InfoWriter));
+        let dir = diesel::migrations::find_migrations_directory()?;
+        diesel::migrations::run_pending_migrations_in_directory(&idx.conn, &dir, &mut InfoWriter)?;
 
-        try!(idx.conn.begin_transaction());
+        idx.conn.begin_transaction()?;
 
         idx.hash_refresh_id_counter();
         Ok(idx)

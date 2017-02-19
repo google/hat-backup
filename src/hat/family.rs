@@ -250,7 +250,7 @@ impl<B: StoreBackend> Family<B> {
         } else {
             Some(Box::new(move |()| contents) as Box<FnBox<(), _>>)
         };
-        match try!(self.key_store_process[0].send_reply(key::Msg::Insert(file, f))) {
+        match self.key_store_process[0].send_reply(key::Msg::Insert(file, f))? {
             key::Reply::Id(id) => Ok(id),
             _ => Err(From::from("Unexpected reply from key store")),
         }
@@ -258,7 +258,7 @@ impl<B: StoreBackend> Family<B> {
 
     pub fn flush(&self) -> Result<(), HatError> {
         for ks in &self.key_store_process {
-            if let key::Reply::FlushOk = try!(ks.send_reply(key::Msg::Flush)) {
+            if let key::Reply::FlushOk = ks.send_reply(key::Msg::Flush)? {
                 continue;
             }
             return Err(From::from("Unexpected reply from key store"));
@@ -281,7 +281,7 @@ impl<B: StoreBackend> Family<B> {
                            dir_id: Option<u64>)
                            -> Result<(), HatError> {
         let mut path = output_dir;
-        for (entry, _ref, read_fn_opt) in try!(self.list_from_key_store(dir_id)) {
+        for (entry, _ref, read_fn_opt) in self.list_from_key_store(dir_id)? {
             // Extend directory with filename:
             path.push(str::from_utf8(&entry.name[..]).unwrap());
 
@@ -289,12 +289,12 @@ impl<B: StoreBackend> Family<B> {
                 None => {
                     // This is a directory, recurse!
                     fs::create_dir_all(&path).unwrap();
-                    try!(self.checkout_in_dir(path.clone(), entry.id));
+                    self.checkout_in_dir(path.clone(), entry.id)?;
                 }
                 Some(read_fn) => {
                     // This is a file, write it
                     let mut fd = fs::File::create(&path).unwrap();
-                    if let Some(tree) = try!(read_fn.init()) {
+                    if let Some(tree) = read_fn.init()? {
                         self.write_file_chunks(&mut fd, tree);
                     }
                 }
@@ -310,7 +310,7 @@ impl<B: StoreBackend> Family<B> {
     pub fn list_from_key_store(&self,
                                dir_id: Option<u64>)
                                -> Result<Vec<key::DirElem<B>>, HatError> {
-        match try!(self.key_store_process[0].send_reply(key::Msg::ListDir(dir_id))) {
+        match self.key_store_process[0].send_reply(key::Msg::ListDir(dir_id))? {
             key::Reply::ListResult(ls) => Ok(ls),
             _ => Err(From::from("Unexpected result from key store")),
         }
@@ -321,13 +321,14 @@ impl<B: StoreBackend> Family<B> {
          dir_hash: hash::tree::HashRef,
          backend: HTB)
          -> Result<Vec<(key::Entry, hash::tree::HashRef)>, HatError> {
-        let it = try!(hash::tree::LeafIterator::new(backend, dir_hash))
+        let it = hash::tree::LeafIterator::new(backend, dir_hash)
+            ?
             .expect("unable to open dir");
 
         let mut out = Vec::new();
         for chunk in it {
             if !chunk.is_empty() {
-                try!(parse_dir_data(&chunk[..], &mut out));
+                parse_dir_data(&chunk[..], &mut out)?;
             }
         }
 
@@ -338,9 +339,9 @@ impl<B: StoreBackend> Family<B> {
         where F: Fn(&hash::Hash)
     {
         let mut top_tree = self.key_store.hash_tree_writer();
-        try!(self.commit_to_tree(&mut top_tree, None, top_hash_fn));
+        self.commit_to_tree(&mut top_tree, None, top_hash_fn)?;
 
-        Ok(try!(top_tree.hash()))
+        Ok(top_tree.hash()?)
     }
 
     pub fn commit_to_tree<F>(&mut self,
@@ -351,7 +352,7 @@ impl<B: StoreBackend> Family<B> {
                           where F: Fn(&hash::Hash) {
 
         let files_at_a_time = 1024;
-        let mut it = try!(self.list_from_key_store(dir_id)).into_iter();
+        let mut it = self.list_from_key_store(dir_id)?.into_iter();
 
         loop {
             let mut current_msg_is_empty = true;
@@ -398,18 +399,18 @@ impl<B: StoreBackend> Family<B> {
                         data_ref.expect("has data")
                             .populate_msg(hash_ref_root.borrow());
                         // Set as file content.
-                        try!(file_msg.borrow()
+                        file_msg.borrow()
                             .init_content()
-                            .set_data(hash_ref_root.as_reader()));
+                            .set_data(hash_ref_root.as_reader())?;
                         top_hash_fn(&hash::Hash { bytes: hash_bytes });
                     } else {
                         drop(data_ref);  // May not use data reference without hash.
 
                         // This is a directory, recurse!
                         let mut inner_tree = self.key_store.hash_tree_writer();
-                        try!(self.commit_to_tree(&mut inner_tree, entry.id, top_hash_fn));
+                        self.commit_to_tree(&mut inner_tree, entry.id, top_hash_fn)?;
                         // Store a reference for the sub-tree in our tree:
-                        let dir_hash_ref = try!(inner_tree.hash());
+                        let dir_hash_ref = inner_tree.hash()?;
 
                         let mut hash_ref_msg = capnp::message::Builder::new_default();
                         let mut hash_ref_root =
@@ -418,9 +419,9 @@ impl<B: StoreBackend> Family<B> {
                         // Populate directory hash and ChunkRef.
                         dir_hash_ref.populate_msg(hash_ref_root.borrow());
                         // Set as directory content.
-                        try!(file_msg.borrow()
+                        file_msg.borrow()
                             .init_content()
-                            .set_directory(hash_ref_root.as_reader()));
+                            .set_directory(hash_ref_root.as_reader())?;
 
                         top_hash_fn(&dir_hash_ref.hash);
                     }
@@ -433,8 +434,8 @@ impl<B: StoreBackend> Family<B> {
                 break;
             } else {
                 let mut buf = vec![];
-                try!(capnp::serialize_packed::write_message(&mut buf, &file_block_msg));
-                try!(tree.append(&buf[..]));
+                capnp::serialize_packed::write_message(&mut buf, &file_block_msg)?;
+                tree.append(&buf[..])?;
             }
         }
 

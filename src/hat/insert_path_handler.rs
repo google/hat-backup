@@ -40,7 +40,7 @@ impl FileEntry {
             full_path.file_name().and_then(|n| n.to_str()).map(|n| n.bytes().collect());
 
         if filename_opt.is_some() {
-            let md = try!(fs::symlink_metadata(&full_path));
+            let md = fs::symlink_metadata(&full_path)?;
             let link_path = fs::read_link(&full_path).ok();
             Ok(FileEntry {
                 key_entry: key::Entry {

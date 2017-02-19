@@ -93,11 +93,11 @@ pub struct ChunkRef {
 
 impl ChunkRef {
     pub fn from_bytes(bytes: &mut &[u8]) -> Result<ChunkRef, capnp::Error> {
-        let reader = try!(capnp::serialize_packed::read_message(bytes,
-                                                       capnp::message::ReaderOptions::new()));
-        let root = try!(reader.get_root::<root_capnp::chunk_ref::Reader>());
+        let reader = capnp::serialize_packed::read_message(bytes,
+                                                           capnp::message::ReaderOptions::new())?;
+        let root = reader.get_root::<root_capnp::chunk_ref::Reader>()?;
 
-        Ok(try!(ChunkRef::read_msg(&root)))
+        Ok(ChunkRef::read_msg(&root)?)
     }
 
     pub fn as_bytes(&self) -> Vec<u8> {
@@ -151,18 +151,18 @@ impl ChunkRef {
     pub fn read_msg(msg: &root_capnp::chunk_ref::Reader) -> Result<ChunkRef, capnp::Error> {
         Ok(ChunkRef {
             blob_id: None,
-            blob_name: try!(msg.get_blob_name()).to_owned(),
+            blob_name: msg.get_blob_name()?.to_owned(),
             offset: msg.get_offset() as usize,
             length: msg.get_length() as usize,
-            packing: match try!(msg.get_packing().which()) {
+            packing: match msg.get_packing().which()? {
                 root_capnp::chunk_ref::packing::None(()) => None,
                 root_capnp::chunk_ref::packing::Gzip(()) => Some(Packing::GZip),
                 root_capnp::chunk_ref::packing::Snappy(()) => Some(Packing::Snappy),
             },
-            key: match try!(msg.get_key().which()) {
+            key: match msg.get_key().which()? {
                 root_capnp::chunk_ref::key::None(()) => None,
                 root_capnp::chunk_ref::key::Xsalsa20Poly1305(res) => {
-                    Some(Key::XSalsa20Poly1305(xsalsa20poly1305::Key::from_slice(try!(res))
+                    Some(Key::XSalsa20Poly1305(xsalsa20poly1305::Key::from_slice(res?)
                         .expect("Incorrect key-size")))
                 }
             },
