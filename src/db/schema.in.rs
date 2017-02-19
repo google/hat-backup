@@ -22,6 +22,7 @@ table! {
         hash -> Binary,
         tag -> BigInt,
         height -> BigInt,
+        leaf_type -> BigInt,
         childs -> Nullable<Binary>,
         blob_id -> BigInt,
         blob_ref -> Nullable<Binary>,
@@ -72,7 +73,8 @@ select_column_workaround!(family -> snapshots (id, name));
 
 joinable!(hashes -> blobs (blob_id));
 select_column_workaround!(blobs -> hashes (id, name, tag));
-select_column_workaround!(hashes -> blobs (id, hash, tag, height, childs, blob_id, blob_ref));
+select_column_workaround!(
+    hashes -> blobs (id, hash, tag, height, leaf_type, childs, blob_id, blob_ref));
 
 
 // Rust models.
@@ -83,6 +85,7 @@ pub struct Hash {
     pub hash: Vec<u8>,
     pub tag: i64,
     pub height: i64,
+    pub leaf_type: i64,
     pub childs: Option<Vec<u8>>,
     pub blob_id: i64,
     pub blob_ref: Option<Vec<u8>>,
@@ -95,6 +98,7 @@ pub struct NewHash<'a> {
     pub hash: &'a [u8],
     pub tag: i64,
     pub height: i64,
+    pub leaf_type: i64,
     pub childs: Option<&'a [u8]>,
     pub blob_id: i64,
     pub blob_ref: Option<&'a [u8]>,

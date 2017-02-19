@@ -71,6 +71,16 @@ impl From<i64> for LeafType {
     }
 }
 
+impl From<LeafType> for i64 {
+    fn from(t: LeafType) -> i64 {
+        match t {
+            LeafType::SnapshotList => 3,
+            LeafType::FileList => 2,
+            LeafType::FileChunk => 1,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct ChunkRef {
     pub blob_id: Option<i64>,

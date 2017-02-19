@@ -238,7 +238,7 @@ impl InternalIndex {
             QueueEntry {
                 id: hash_.id,
                 node: From::from(hash_.height),
-                leaf: From::from(1), // TODO(jos): Store leaf data in DB
+                leaf: From::from(hash_.leaf_type),
                 tag: tags::tag_from_num(hash_.tag),
                 childs: childs_,
                 persistent_ref: persistent_ref,
@@ -260,7 +260,7 @@ impl InternalIndex {
             Entry {
                 hash: self::hash::Hash { bytes: hash_.hash },
                 node: From::from(hash_.height),
-                leaf: From::from(1), // TODO(jos): Store leaf data in DB
+                leaf: From::from(hash_.leaf_type),
                 childs: hash_.childs.and_then(|p| {
                     if p.is_empty() {
                         None
@@ -299,6 +299,7 @@ impl InternalIndex {
             hash: &hash_bytes,
             tag: entry.tag.unwrap_or(tags::Tag::Done) as i64,
             height: From::from(entry.node),
+            leaf_type: From::from(entry.leaf),
             childs: childs_.as_ref().map(|v| &v[..]),
             blob_id: entry.persistent_ref.and_then(|r| r.blob_id).unwrap_or(0),
             blob_ref: blob_ref_.as_ref().map(|v| &v[..]),
@@ -458,7 +459,7 @@ impl InternalIndex {
                 Entry {
                     hash: self::hash::Hash { bytes: hash_.hash },
                     node: From::from(hash_.height),
-                    leaf: From::from(1), // TODO(jos): Store leaf data in DB
+                    leaf: From::from(hash_.leaf_type),
                     childs: hash_.childs.as_ref().map(|p| decode_childs(p).unwrap()),
                     persistent_ref: decode_chunk_ref(hash_.blob_ref.as_ref(), blob_),
                 }
