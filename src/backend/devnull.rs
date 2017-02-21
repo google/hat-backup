@@ -30,6 +30,10 @@ impl StoreBackend for DevNullBackend {
         Ok(())
     }
 
+    fn list(&self) -> Result<Vec<Box<[u8]>>, String> {
+        Ok(vec![])
+    }
+
     fn flush(&self) -> Result<(), String> {
         Ok(())
     }

@@ -214,13 +214,11 @@ impl<B: StoreBackend> StoreInner<B> {
         }
     }
 
-    fn recover(&mut self, chunk: HashRef) -> Option<BlobDesc> {
-        if chunk.persistent_ref.offset == 0 && chunk.persistent_ref.length == 0 {
-            // This chunk is empty, so there is no blob to recover.
-            None
-        } else {
-            Some(self.blob_index.recover(chunk.persistent_ref.blob_name))
-        }
+    fn recover(&mut self) -> Result<(), String> {
+        self.backend.list()?.into_iter()
+            .filter(|b| b.len() > 4)  // FIXME(jos): Remove when "root" is gone.
+            .map(|b| self.blob_index.recover(b.into_vec())).last();
+        Ok(())
     }
 
     fn tag(&mut self, chunk: ChunkRef, tag: tags::Tag) {
@@ -284,8 +282,8 @@ impl<B: StoreBackend> BlobStore<B> {
     }
 
     /// Reinstall a blob recovered from external storage.
-    pub fn recover(&self, chunk: HashRef) -> Option<BlobDesc> {
-        self.lock().recover(chunk)
+    pub fn recover(&self) -> Result<(), String> {
+        self.lock().recover()
     }
 
     pub fn tag(&self, chunk: ChunkRef, tag: tags::Tag) {
@@ -298,6 +296,10 @@ impl<B: StoreBackend> BlobStore<B> {
 
     pub fn delete_by_tag(&self, tag: tags::Tag) -> Result<(), String> {
         self.lock().delete_by_tag(tag)
+    }
+
+    pub fn find(&self, name: &[u8]) -> Option<BlobDesc> {
+        self.lock().blob_index.find(name)
     }
 
     /// Flush the current blob, independent of its size.

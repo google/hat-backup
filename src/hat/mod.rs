@@ -303,6 +303,8 @@ impl<B: StoreBackend> HatRc<B> {
     }
 
     pub fn recover(&mut self) -> Result<(), HatError> {
+        self.blob_store.recover()?;
+
         let root = match self.blob_store.retrieve_named("root")? {
             Some(r) => r,
             _ => return Err(From::from("Could not read root file")),
@@ -338,15 +340,7 @@ impl<B: StoreBackend> HatRc<B> {
                                           blobs: &blob::BlobStore<B>,
                                           node: family::recover::Node) {
             let mut pref = node.href.persistent_ref.clone();
-
-            // Make sure we have the blob described.
-            pref.blob_id = blobs.recover(hash::tree::HashRef {
-                    hash: node.href.hash.clone(),
-                    node: node.href.node.clone(),
-                    leaf: node.href.leaf.clone(),
-                    persistent_ref: pref.clone(),
-                })
-                .map(|b| b.id);
+            pref.blob_id = blobs.find(&pref.blob_name).map(|b| b.id);
 
             fn entry(href: hash::tree::HashRef, childs: Option<Vec<i64>>) -> hash::Entry {
                 hash::Entry {

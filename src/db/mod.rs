@@ -22,7 +22,7 @@ use capnp;
 use diesel;
 use diesel::prelude::*;
 use diesel::sqlite::SqliteConnection;
-use errors::{DieselError};
+use errors::DieselError;
 
 use hash;
 use root_capnp;

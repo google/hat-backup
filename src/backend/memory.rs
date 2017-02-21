@@ -48,6 +48,11 @@ impl MemoryBackend {
         guarded_files.remove(key);
         Ok(())
     }
+
+    fn guarded_list(&self) -> Result<Vec<Box<[u8]>>, String> {
+        let guarded_files = self.files.lock().unwrap();
+        Ok(guarded_files.keys().cloned().map(|x| x.into_boxed_slice()).collect())
+    }
 }
 
 impl StoreBackend for MemoryBackend {
@@ -61,6 +66,10 @@ impl StoreBackend for MemoryBackend {
 
     fn delete(&self, name: &[u8]) -> Result<(), String> {
         self.guarded_delete(name)
+    }
+
+    fn list(&self) -> Result<Vec<Box<[u8]>>, String> {
+        self.guarded_list()
     }
 
     fn flush(&self) -> Result<(), String> {

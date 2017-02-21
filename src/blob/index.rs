@@ -68,7 +68,18 @@ impl InternalBlobIndex {
     }
 
     fn name_of_id(&self, id: i64) -> Vec<u8> {
-        return self.name_key.seal(crypto::PlainText::from_i64(id).as_ref()).to_vec();
+        return self.name_key
+            .light_seal(crypto::PlainText::from_i64(id).as_ref())
+            .to_vec();
+    }
+
+    fn id_of_name(&self, name: &[u8]) -> Result<i64, String> {
+        return Ok(self.name_key
+            .light_unseal(crypto::CipherTextRef::new(name))
+            .unwrap()
+            .as_ref()
+            .read_i64()
+            .unwrap());
     }
 
     fn new_blob_desc(&self) -> BlobDesc {
@@ -94,9 +105,12 @@ impl InternalBlobIndex {
     }
 
     fn recover(&self, name: Vec<u8>) -> BlobDesc {
+        let wanted_id = self.id_of_name(&name).unwrap();
         if let Some(id) = {
             self.index.lock().blob_id_from_name(&name[..])
         } {
+            assert_eq!(id, wanted_id);
+
             // Blob exists.
             return BlobDesc {
                 name: name,
@@ -106,7 +120,7 @@ impl InternalBlobIndex {
 
         let blob = BlobDesc {
             name: name,
-            id: self.next_id(),
+            id: wanted_id,
         };
         self.index.lock().blob_in_air(&blob);
         self.index.lock().blob_commit(&blob);
@@ -146,6 +160,17 @@ impl BlobIndex {
     /// Creates a new blob by a known external name.
     pub fn recover(&self, name: Vec<u8>) -> BlobDesc {
         self.0.recover(name)
+    }
+
+    pub fn find(&self, name: &[u8]) -> Option<BlobDesc> {
+        if let Some(id) = self.0.index.lock().blob_id_from_name(&name) {
+            Some(BlobDesc {
+                name: name.to_vec(),
+                id: id,
+            })
+        } else {
+            None
+        }
     }
 
     pub fn tag(&self, blob: &BlobDesc, tag: tags::Tag) {
