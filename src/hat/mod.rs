@@ -30,6 +30,7 @@ use std::sync::{Arc, mpsc};
 use tags;
 use util::Process;
 use void::Void;
+use rustc_serialize::hex::ToHex;
 
 mod family;
 mod insert_path_handler;
@@ -240,8 +241,10 @@ impl<B: StoreBackend> HatRc<B> {
         Ok(hat)
     }
 
-    pub fn hash_tree_writer(&self) -> hash::tree::SimpleHashTreeWriter<key::HashStoreBackend<B>> {
-        hash::tree::SimpleHashTreeWriter::new(8, self.hash_backend())
+    pub fn hash_tree_writer(&self,
+                            leaf: blob::LeafType)
+                            -> hash::tree::SimpleHashTreeWriter<key::HashStoreBackend<B>> {
+        hash::tree::SimpleHashTreeWriter::new(leaf, 8, self.hash_backend())
     }
 
     pub fn open_family(&self, name: String) -> Result<Family<B>, HatError> {
@@ -280,6 +283,7 @@ impl<B: StoreBackend> HatRc<B> {
         let all_snapshots = self.snapshot_index.list_all();
 
         // TODO(jos): use a hash tree for this listing.
+        let mut tree = self.hash_tree_writer(blob::LeafType::SnapshotList);
         let mut message = capnp::message::Builder::new_default();
 
         {
@@ -296,19 +300,48 @@ impl<B: StoreBackend> HatRc<B> {
         }
         let mut listing = Vec::new();
         capnp::serialize_packed::write_message(&mut listing, &message).unwrap();
-
-        // TODO(jos): make sure this operation is atomic or resumable.
-        self.blob_store.store_named("root", &listing[..])?;
+        tree.append(&listing[..])?;
+        tree.hash()?;
+        self.blob_store.flush();
         Ok(())
+    }
+
+    fn recover_root(&mut self) -> Result<Option<hash::tree::HashRef>, HatError> {
+        let blobs = self.blob_store.list_by_tag(tags::Tag::Done);
+        info!("{} blobs to investigate", blobs.len());
+        for b in blobs.into_iter() {
+            info!("Inspecting blob: {}", b.name.to_hex());
+            for r in self.blob_store.retrieve_refs(b)?.unwrap_or(vec![]) {
+                match r.leaf {
+                    blob::LeafType::SnapshotList => {
+                        // FIXME(jos): Allow skipping first root in case it is not working.
+                        return Ok(Some(r));
+                    }
+                    // FIXME(jos): Recover file-listings stored after commit
+                    blob::LeafType::TreeList => {
+                        warn!("Skipping directory listing: {}", r.hash.bytes.to_hex())
+                    }
+                    blob::LeafType::FileChunk => {
+                        warn!("Skipping file contents: {}", r.hash.bytes.to_hex())
+                    }
+                }
+            }
+        }
+        Ok(None)
     }
 
     pub fn recover(&mut self) -> Result<(), HatError> {
         self.blob_store.recover()?;
+        let root_href = self.recover_root()?.expect("Failed to find a commit-ed root.");
 
-        let root = match self.blob_store.retrieve_named("root")? {
-            Some(r) => r,
-            _ => return Err(From::from("Could not read root file")),
-        };
+        info!("Recovering using root: {}", root_href.hash.bytes.to_hex());
+        info!(".. from blob: {}",
+              root_href.persistent_ref.blob_name.to_hex());
+
+        let root = self.blob_store
+            .retrieve(&root_href.hash, &root_href.persistent_ref)?
+            .expect("Root file disappeared while trying to read it");
+
         let message_reader =
             capnp::serialize_packed::read_message(&mut &root[..],
                                                   capnp::message::ReaderOptions::new())

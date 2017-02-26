@@ -14,6 +14,7 @@
 
 
 use backend::StoreBackend;
+use blob;
 use capnp;
 use errors::HatError;
 use hash;
@@ -337,9 +338,8 @@ impl<B: StoreBackend> Family<B> {
     pub fn commit<F>(&mut self, top_hash_fn: &F) -> Result<hash::tree::HashRef, HatError>
         where F: Fn(&hash::Hash)
     {
-        let mut top_tree = self.key_store.hash_tree_writer();
+        let mut top_tree = self.key_store.hash_tree_writer(blob::LeafType::TreeList);
         self.commit_to_tree(&mut top_tree, None, top_hash_fn)?;
-
         Ok(top_tree.hash()?)
     }
 
@@ -406,7 +406,8 @@ impl<B: StoreBackend> Family<B> {
                         drop(data_ref);  // May not use data reference without hash.
 
                         // This is a directory, recurse!
-                        let mut inner_tree = self.key_store.hash_tree_writer();
+                        let mut inner_tree = self.key_store
+                            .hash_tree_writer(blob::LeafType::TreeList);
                         self.commit_to_tree(&mut inner_tree, entry.id, top_hash_fn)?;
                         // Store a reference for the sub-tree in our tree:
                         let dir_hash_ref = inner_tree.hash()?;

@@ -180,11 +180,11 @@ pub struct SimpleHashTreeWriter<B> {
 
 impl<B: HashTreeBackend> SimpleHashTreeWriter<B> {
     /// Create a new hash-tree to be stored through 'backend' with node order 'order'.
-    pub fn new(order: usize, backend: B) -> SimpleHashTreeWriter<B> {
+    pub fn new(leaf_type: LeafType, order: usize, backend: B) -> SimpleHashTreeWriter<B> {
         SimpleHashTreeWriter {
             backend: backend,
             order: order,
-            leaf: LeafType::FileChunk,
+            leaf: leaf_type,
             levels: Vec::new(),
         }
     }

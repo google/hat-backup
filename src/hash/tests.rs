@@ -111,13 +111,14 @@ impl HashTreeBackend for MemoryBackend {
 fn identity_many_small_blocks() {
     fn prop(chunks_count: u8) -> bool {
         let backend = MemoryBackend::new();
-        let mut ht = SimpleHashTreeWriter::new(4, backend.clone());
+        let mut ht = SimpleHashTreeWriter::new(LeafType::FileChunk, 4, backend.clone());
 
         for _ in 0..chunks_count {
             ht.append(b"a").unwrap();
         }
 
         let hash_ref = ht.hash().unwrap();
+        assert_eq!(hash_ref.leaf, LeafType::FileChunk);
 
         let mut tree_it = LeafIterator::new(backend, hash_ref)
             .unwrap()
@@ -148,7 +149,7 @@ fn identity_empty() {
     let block = Vec::new();
 
     let backend = MemoryBackend::new();
-    let mut ht = SimpleHashTreeWriter::new(4, backend.clone());
+    let mut ht = SimpleHashTreeWriter::new(LeafType::FileChunk, 4, backend.clone());
 
     ht.append(&block[..]).unwrap();
 
@@ -167,7 +168,7 @@ fn identity_append1() {
     let block: Vec<u8> = b"foobar".to_vec();
 
     let backend = MemoryBackend::new();
-    let mut ht = SimpleHashTreeWriter::new(4, backend.clone());
+    let mut ht = SimpleHashTreeWriter::new(LeafType::FileChunk, 4, backend.clone());
 
     ht.append(&block[..]).unwrap();
 
@@ -186,7 +187,7 @@ fn identity_append5() {
         vec![b"foo".to_vec(), b"bar".to_vec(), b"baz".to_vec(), b"qux".to_vec(), b"norf".to_vec()];
 
     let backend = MemoryBackend::new();
-    let mut ht = SimpleHashTreeWriter::new(4, backend.clone());
+    let mut ht = SimpleHashTreeWriter::new(LeafType::FileChunk, 4, backend.clone());
 
     for block in blocks.iter() {
         ht.append(&block[..]).unwrap();
@@ -209,7 +210,7 @@ fn identity_append5() {
 fn identity_implicit_flush() {
     let order = 8;
     let backend = MemoryBackend::new();
-    let mut ht = SimpleHashTreeWriter::new(order, backend.clone());
+    let mut ht = SimpleHashTreeWriter::new(LeafType::FileChunk, order, backend.clone());
 
     let mut bytes = vec![0u8];
     {
@@ -239,7 +240,7 @@ fn identity_implicit_flush() {
 fn identity_1_short_of_flush() {
     let order = 8;
     let backend = MemoryBackend::new();
-    let mut ht = SimpleHashTreeWriter::new(order, backend.clone());
+    let mut ht = SimpleHashTreeWriter::new(LeafType::FileChunk, order, backend.clone());
     let mut bytes = vec![0u8];
 
     for i in 1u8..order as u8 {

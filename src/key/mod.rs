@@ -150,9 +150,11 @@ impl<B: StoreBackend> Store<B> {
         Ok(())
     }
 
-    pub fn hash_tree_writer(&mut self) -> SimpleHashTreeWriter<HashStoreBackend<B>> {
+    pub fn hash_tree_writer(&mut self,
+                            leaf: blob::LeafType)
+                            -> SimpleHashTreeWriter<HashStoreBackend<B>> {
         let backend = HashStoreBackend::new(self.hash_index.clone(), self.blob_store.clone());
-        SimpleHashTreeWriter::new(8, backend)
+        SimpleHashTreeWriter::new(leaf, 8, backend)
     }
 }
 
@@ -252,7 +254,7 @@ impl<IT: io::Read, B: StoreBackend> MsgHandler<Msg<IT>, Reply<B>> for Store<B> {
 
 
                 // Setup hash tree structure
-                let mut tree = self.hash_tree_writer();
+                let mut tree = self.hash_tree_writer(blob::LeafType::FileChunk);
 
                 // Check if we have an data source:
                 let it_opt = chunk_it_opt.and_then(|open| open.call(()));

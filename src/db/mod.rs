@@ -579,6 +579,7 @@ impl InternalIndex {
     pub fn blob_list_by_tag(&self, tag_: tags::Tag) -> Vec<blob::BlobDesc> {
         use self::schema::blobs::dsl::*;
         blobs.filter(tag.eq(tag_ as i32))
+            .order(id.desc())
             .load::<schema::Blob>(&self.conn)
             .expect("Error listing blobs")
             .into_iter()

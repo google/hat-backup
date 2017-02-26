@@ -56,7 +56,7 @@ impl From<NodeType> for i64 {
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub enum LeafType {
     SnapshotList = 3,
-    FileList = 2,
+    TreeList = 2,
     FileChunk = 1,
 }
 
@@ -64,7 +64,7 @@ impl From<i64> for LeafType {
     fn from(n: i64) -> LeafType {
         match n {
             3 => LeafType::SnapshotList,
-            2 => LeafType::FileList,
+            2 => LeafType::TreeList,
             1 => LeafType::FileChunk,
             _ => unreachable!("Corrupt LeafType tag: {}", n),
         }
@@ -75,7 +75,7 @@ impl From<LeafType> for i64 {
     fn from(t: LeafType) -> i64 {
         match t {
             LeafType::SnapshotList => 3,
-            LeafType::FileList => 2,
+            LeafType::TreeList => 2,
             LeafType::FileChunk => 1,
         }
     }
