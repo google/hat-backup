@@ -85,7 +85,6 @@ impl<B> Walker<B>
         })
     }
 
-
     pub fn resume<FV, DV>(&mut self,
                           mut file_v: &mut FV,
                           mut dir_v: &mut DV)
@@ -111,8 +110,11 @@ impl<B> Walker<B>
             None => None,
         };
 
-        if self.child.is_none() {
+        if self.child.is_some() {
+            return self.resume(file_v, dir_v);
+        } else {
             if !self.tree.resume(dir_v)? {
+                // No child and no tree. We can never do more work.
                 return Ok(false);
             }
             for file in dir_v.files() {
@@ -123,6 +125,7 @@ impl<B> Walker<B>
                 }
             }
         }
-        self.resume(file_v, dir_v)
+
+        return Ok(true);
     }
 }
