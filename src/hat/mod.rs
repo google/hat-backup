@@ -321,22 +321,23 @@ impl<B: StoreBackend> HatRc<B> {
         capnp::serialize_packed::write_message(&mut listing, &message).unwrap();
 
         let family = self.open_family(synthetic_roots_family()).unwrap();
-        family.snapshot_direct(
-            key::Entry{
-                id: None,
-                parent_id: None,
-                info: key::Info{
-                    name: From::from("root"),
-                    created: None,
-                    modified: None,
-                    accessed: None,
-                    permissions: None,
-                    user_id: None,
-                    group_id: None,
-                    byte_length: Some(listing.len() as u64),
-                },
-                data_hash: None,
-            }, false, Some(FileIterator::from_bytes(listing)))?;
+        family.snapshot_direct(key::Entry {
+                                 id: None,
+                                 parent_id: None,
+                                 info: key::Info {
+                                     name: From::from("root"),
+                                     created: None,
+                                     modified: None,
+                                     accessed: None,
+                                     permissions: None,
+                                     user_id: None,
+                                     group_id: None,
+                                     byte_length: Some(listing.len() as u64),
+                                 },
+                                 data_hash: None,
+                             },
+                             false,
+                             Some(FileIterator::from_bytes(listing)))?;
 
         family.flush()?;
         self.commit(&family, None)?;
@@ -394,10 +395,12 @@ impl<B: StoreBackend> HatRc<B> {
                 capnp::serialize_packed::read_message(&mut &msg[..],
                                                       capnp::message::ReaderOptions::new())
                     .unwrap();
-            let snapshot_list = message_reader.get_root::<root_capnp::snapshot_list::Reader>().unwrap();
+            let snapshot_list = message_reader.get_root::<root_capnp::snapshot_list::Reader>()
+                .unwrap();
 
             for s in snapshot_list.get_snapshots().unwrap().iter() {
-                let hash_ref = hash::tree::HashRef::from_bytes(&mut s.get_hash_ref().unwrap()).unwrap();
+                let hash_ref = hash::tree::HashRef::from_bytes(&mut s.get_hash_ref().unwrap())
+                    .unwrap();
                 self.snapshot_index
                     .recover(s.get_id(),
                              s.get_family_name()

@@ -80,7 +80,8 @@ fn identity_with_excessive_flushing() {
             ids.push((bs_p.store(&chunk[..],
                                  hash::Hash::new(chunk),
                                  NodeType::Leaf,
-                                 LeafType::FileChunk, None,
+                                 LeafType::FileChunk,
+                                 None,
                                  Box::new(move |_| {})),
                       chunk));
             bs_p.flush();

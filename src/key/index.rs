@@ -55,7 +55,7 @@ pub struct Info {
 
 impl Info {
     pub fn read(msg: root_capnp::stat::Reader) -> Result<Info, capnp::Error> {
-        Ok(Info{
+        Ok(Info {
             name: msg.get_name()?.to_vec(),
             created: None,
             modified: None,
@@ -213,7 +213,7 @@ impl InternalKeyIndex {
                     user_id: row.user_id.map(|x| x as u64),
                     group_id: row.group_id.map(|x| x as u64),
                     byte_length: None,
-                }
+                },
             }))
         } else {
             Ok(None)
@@ -275,16 +275,16 @@ impl InternalKeyIndex {
                      id: Some(r.id as u64),
                      parent_id: r.parent.map(|x| x as u64),
                      data_hash: r.hash,
-                     info: Info{
-                        name: r.name,
-                        created: r.created,
-                        modified: r.modified,
-                        accessed: r.accessed,
-                        permissions: r.permissions
+                     info: Info {
+                         name: r.name,
+                         created: r.created,
+                         modified: r.modified,
+                         accessed: r.accessed,
+                         permissions: r.permissions
                              .map(|x| x as u64),
-                        user_id: r.user_id.map(|x| x as u64),
-                        group_id: r.group_id.map(|x| x as u64),
-                        byte_length: None,
+                         user_id: r.user_id.map(|x| x as u64),
+                         group_id: r.group_id.map(|x| x as u64),
+                         byte_length: None,
                      },
                  },
                  r.hash_ref

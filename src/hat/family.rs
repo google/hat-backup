@@ -237,9 +237,7 @@ impl<B: StoreBackend> Family<B> {
             Some(Box::new(move |()| contents) as Box<FnBox<(), _>>)
         };
         match self.key_store_process[0].send_reply(key::Msg::Insert(file, f))? {
-            key::Reply::Id(id) => {
-                Ok(id)
-            },
+            key::Reply::Id(id) => Ok(id),
             _ => Err(From::from("Unexpected reply from key store")),
         }
     }
@@ -329,7 +327,7 @@ impl<B: StoreBackend> Family<B> {
         let mut top_tree = self.key_store.hash_tree_writer(blob::LeafType::TreeList);
         self.commit_to_tree(&mut top_tree, None, top_hash_fn)?;
 
-        let info = key::Info{
+        let info = key::Info {
             name: self.name.clone().into_bytes(),
             accessed: None,
             modified: None,

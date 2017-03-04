@@ -68,7 +68,7 @@ impl HashRef {
             info: match msg.get_info().which()? {
                 root_capnp::hash_ref::info::None(()) => None,
                 root_capnp::hash_ref::info::Stat(st) => Some(key::Info::read(st?)?),
-            }
+            },
         })
     }
 
@@ -234,7 +234,12 @@ impl<B: HashTreeBackend> SimpleHashTreeWriter<B> {
         self.append_hashref_at(level, id, hash_ref, info)
     }
 
-    fn append_hashref_at(&mut self, level: usize, id: i64, hashref: HashRef, info: Option<&key::Info>) -> Result<(), B::Err> {
+    fn append_hashref_at(&mut self,
+                         level: usize,
+                         id: i64,
+                         hashref: HashRef,
+                         info: Option<&key::Info>)
+                         -> Result<(), B::Err> {
         assert!(self.levels.len() >= level);
         self.grow_to(level);
 

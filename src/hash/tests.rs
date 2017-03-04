@@ -103,13 +103,13 @@ impl HashTreeBackend for MemoryBackend {
                 leaf: leaf,
                 info: None,
                 persistent_ref: ChunkRef {
-                blob_id: None,
-                blob_name: hash.bytes.clone(),
-                offset: 0,
-                length: len,
-                packing: None,
-                key: None,
-                }
+                    blob_id: None,
+                    blob_name: hash.bytes.clone(),
+                    offset: 0,
+                    length: len,
+                    packing: None,
+                    key: None,
+                },
             }))
     }
 }
