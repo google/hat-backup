@@ -40,17 +40,19 @@ fn setup_family() -> (Arc<MemoryBackend>, HatRc<MemoryBackend>, Family<MemoryBac
 
 pub fn entry(name: Vec<u8>) -> key::Entry {
     key::Entry {
-        name: name,
         id: None,
         parent_id: None,
-        created: None,
-        modified: None,
-        accessed: None,
-        permissions: None,
-        user_id: None,
-        group_id: None,
         data_hash: None,
-        data_length: None,
+        info: key::Info {
+            name: name,
+            created: None,
+            modified: None,
+            accessed: None,
+            permissions: None,
+            user_id: None,
+            group_id: None,
+            byte_length: None,
+        },
     }
 }
 

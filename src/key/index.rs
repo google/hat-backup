@@ -20,18 +20,26 @@ use diesel::prelude::*;
 use diesel::sqlite::SqliteConnection;
 use errors::DieselError;
 use hash;
+use capnp;
 
 use std::sync::{Mutex, MutexGuard};
 
 use super::schema;
 use time::Duration;
 use util::{InfoWriter, PeriodicTimer};
+use root_capnp;
 
 #[derive(Clone, Debug)]
 pub struct Entry {
     pub id: Option<u64>,
     pub parent_id: Option<u64>,
 
+    pub data_hash: Option<Vec<u8>>,
+    pub info: Info,
+}
+
+#[derive(Clone, Debug)]
+pub struct Info {
     pub name: Vec<u8>,
 
     pub created: Option<i64>,
@@ -42,8 +50,40 @@ pub struct Entry {
     pub user_id: Option<u64>,
     pub group_id: Option<u64>,
 
-    pub data_hash: Option<Vec<u8>>,
-    pub data_length: Option<u64>,
+    pub byte_length: Option<u64>,
+}
+
+impl Info {
+    pub fn read(msg: root_capnp::stat::Reader) -> Result<Info, capnp::Error> {
+        Ok(Info{
+            name: msg.get_name()?.to_vec(),
+            created: None,
+            modified: None,
+            accessed: None,
+            permissions: None,
+            user_id: None,
+            group_id: None,
+            byte_length: None,
+        })
+    }
+    pub fn populate_msg(&self, mut msg: root_capnp::stat::Builder) {
+        msg.borrow().set_name(&self.name);
+
+        match self.created {
+            None => msg.borrow().init_created().set_unknown(()),
+            Some(ts) => msg.borrow().init_created().set_timestamp(ts),
+        }
+
+        match self.modified {
+            None => msg.borrow().init_modified().set_unknown(()),
+            Some(ts) => msg.borrow().init_modified().set_timestamp(ts),
+        }
+
+        match self.accessed {
+            None => msg.borrow().init_accessed().set_unknown(()),
+            Some(ts) => msg.borrow().init_accessed().set_timestamp(ts),
+        }
+    }
 }
 
 pub struct KeyIndex(Mutex<InternalKeyIndex>);
@@ -101,10 +141,10 @@ impl InternalKeyIndex {
                 // Replace existing entry.
                 try!(diesel::update(keys.find(id_ as i64))
                     .set((parent.eq(entry.parent_id.map(|x| x as i64)),
-                          name.eq(&entry.name[..]),
-                          created.eq(entry.created),
-                          modified.eq(entry.modified),
-                          accessed.eq(entry.accessed)))
+                          name.eq(&entry.info.name[..]),
+                          created.eq(entry.info.created),
+                          modified.eq(entry.info.modified),
+                          accessed.eq(entry.info.accessed)))
                     .execute(&self.conn));
                 entry
             }
@@ -113,13 +153,13 @@ impl InternalKeyIndex {
                 {
                     let new = schema::NewKey {
                         parent: entry.parent_id.map(|x| x as i64),
-                        name: &entry.name[..],
-                        created: entry.created,
-                        modified: entry.modified,
-                        accessed: entry.accessed,
-                        permissions: entry.permissions.map(|x| x as i64),
-                        group_id: entry.group_id.map(|x| x as i64),
-                        user_id: entry.user_id.map(|x| x as i64),
+                        name: &entry.info.name[..],
+                        created: entry.info.created,
+                        modified: entry.info.modified,
+                        accessed: entry.info.accessed,
+                        permissions: entry.info.permissions.map(|x| x as i64),
+                        group_id: entry.info.group_id.map(|x| x as i64),
+                        user_id: entry.info.user_id.map(|x| x as i64),
                         hash: None,
                         hash_ref: None,
                     };
@@ -163,15 +203,17 @@ impl InternalKeyIndex {
             Ok(Some(Entry {
                 id: Some(row.id as u64),
                 parent_id: parent_,
-                name: name_,
-                created: row.created,
-                modified: row.modified,
-                accessed: row.accessed,
-                permissions: row.permissions.map(|x| x as u64),
-                user_id: row.user_id.map(|x| x as u64),
-                group_id: row.group_id.map(|x| x as u64),
                 data_hash: row.hash,
-                data_length: None,
+                info: Info {
+                    name: name_,
+                    created: row.created,
+                    modified: row.modified,
+                    accessed: row.accessed,
+                    permissions: row.permissions.map(|x| x as u64),
+                    user_id: row.user_id.map(|x| x as u64),
+                    group_id: row.group_id.map(|x| x as u64),
+                    byte_length: None,
+                }
             }))
         } else {
             Ok(None)
@@ -232,16 +274,18 @@ impl InternalKeyIndex {
                 (Entry {
                      id: Some(r.id as u64),
                      parent_id: r.parent.map(|x| x as u64),
-                     name: r.name,
-                     created: r.created,
-                     modified: r.modified,
-                     accessed: r.accessed,
-                     permissions: r.permissions
-                         .map(|x| x as u64),
-                     user_id: r.user_id.map(|x| x as u64),
-                     group_id: r.group_id.map(|x| x as u64),
                      data_hash: r.hash,
-                     data_length: None,
+                     info: Info{
+                        name: r.name,
+                        created: r.created,
+                        modified: r.modified,
+                        accessed: r.accessed,
+                        permissions: r.permissions
+                             .map(|x| x as u64),
+                        user_id: r.user_id.map(|x| x as u64),
+                        group_id: r.group_id.map(|x| x as u64),
+                        byte_length: None,
+                     },
                  },
                  r.hash_ref
                      .as_mut()

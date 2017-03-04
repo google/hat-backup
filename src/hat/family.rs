@@ -175,30 +175,13 @@ fn parse_dir_data(chunk: &[u8], mut out: &mut Vec<walker::FileEntry>) -> Result<
         }
         let entry = key::Entry {
             id: Some(f.get_id()),
-            name: f.get_stat()?.get_name().unwrap().to_owned(),
-            created: match f.get_stat()?.get_created().which().unwrap() {
-                root_capnp::stat::created::Unknown(()) => None,
-                root_capnp::stat::created::Timestamp(ts) => Some(ts),
-            },
-            modified: match f.get_stat()?.get_modified().which().unwrap() {
-                root_capnp::stat::modified::Unknown(()) => None,
-                root_capnp::stat::modified::Timestamp(ts) => Some(ts),
-            },
-            accessed: match f.get_stat()?.get_accessed().which().unwrap() {
-                root_capnp::stat::accessed::Unknown(()) => None,
-                root_capnp::stat::accessed::Timestamp(ts) => Some(ts),
-            },
+            info: key::Info::read(f.get_stat()?.borrow())?,
             data_hash: match f.get_content().which().unwrap() {
                 root_capnp::file::content::Data(r) => {
                     Some(r.unwrap().get_hash().unwrap().to_owned())
                 }
                 root_capnp::file::content::Directory(_) => None,
             },
-            // TODO(jos): Implement support for these remaining fields.
-            user_id: None,
-            group_id: None,
-            permissions: None,
-            data_length: None,
             parent_id: None,
         };
         let hash_ref = match f.get_content().which().unwrap() {
@@ -283,7 +266,7 @@ impl<B: StoreBackend> Family<B> {
         let mut path = output_dir;
         for (entry, _ref, read_fn_opt) in self.list_from_key_store(dir_id)? {
             // Extend directory with filename:
-            path.push(str::from_utf8(&entry.name[..]).unwrap());
+            path.push(str::from_utf8(&entry.info.name[..]).unwrap());
 
             match read_fn_opt {
                 None => {
@@ -373,23 +356,7 @@ impl<B: StoreBackend> Family<B> {
                     file_msg.set_id(entry.id.unwrap_or(0));
 
                     {
-                        let mut stat = file_msg.borrow().init_stat();
-                        stat.borrow().set_name(&entry.name);
-
-                        match entry.created {
-                            None => stat.borrow().init_created().set_unknown(()),
-                            Some(ts) => stat.borrow().init_created().set_timestamp(ts),
-                        }
-
-                        match entry.modified {
-                            None => stat.borrow().init_modified().set_unknown(()),
-                            Some(ts) => stat.borrow().init_modified().set_timestamp(ts),
-                        }
-
-                        match entry.accessed {
-                            None => stat.borrow().init_accessed().set_unknown(()),
-                            Some(ts) => stat.borrow().init_accessed().set_timestamp(ts),
-                        }
+                        entry.info.populate_msg(file_msg.borrow().init_stat().borrow());
                     }
 
                     if let Some(hash_bytes) = entry.data_hash {

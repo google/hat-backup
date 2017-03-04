@@ -36,7 +36,7 @@ mod tests;
 mod benchmarks;
 
 pub use self::hash_store_backend::HashStoreBackend;
-pub use self::index::{Entry, KeyIndex};
+pub use self::index::{Entry, Info, KeyIndex};
 
 
 error_type! {
@@ -224,10 +224,10 @@ impl<IT: io::Read, B: StoreBackend> MsgHandler<Msg<IT>, Reply<B>> for Store<B> {
 
             Msg::Insert(org_entry, chunk_it_opt) => {
                 let entry = match self.index
-                    .lookup(org_entry.parent_id, org_entry.name.clone())? {
-                    Some(ref entry) if org_entry.accessed == entry.accessed &&
-                                       org_entry.modified == entry.modified &&
-                                       org_entry.created == entry.created => {
+                    .lookup(org_entry.parent_id, org_entry.info.name.clone())? {
+                    Some(ref entry) if org_entry.info.accessed == entry.info.accessed &&
+                                       org_entry.info.modified == entry.info.modified &&
+                                       org_entry.info.created == entry.info.created => {
                         if chunk_it_opt.is_some() && entry.data_hash.is_some() {
                             let hash = hash::Hash { bytes: entry.data_hash.clone().unwrap() };
                             if self.hash_index.hash_exists(&hash) {
@@ -261,7 +261,7 @@ impl<IT: io::Read, B: StoreBackend> MsgHandler<Msg<IT>, Reply<B>> for Store<B> {
                 if it_opt.is_none() {
                     // No data is associated with this entry.
                     self.index
-                        .update_data_hash(entry.id.unwrap(), entry.modified, None, None)?;
+                        .update_data_hash(entry.id.unwrap(), entry.info.modified, None, None)?;
                     // Bail out before storing data that does not exist:
                     return Ok(());
                 }
@@ -289,18 +289,18 @@ impl<IT: io::Read, B: StoreBackend> MsgHandler<Msg<IT>, Reply<B>> for Store<B> {
                 }
 
                 // Warn the user if we did not read the expected size:
-                entry.data_length.map(|s| {
-                    file_size_warning(&entry.name, s, file_len);
+                entry.info.byte_length.map(|s| {
+                    file_size_warning(&entry.info.name, s, file_len);
                 });
 
                 // Get top tree hash:
-                let hash_ref = tree.hash()?;
+                let hash_ref = tree.hash(Some(&entry.info.name))?;
 
                 // Update hash in key index.
                 // It is OK that this has is not yet valid, as we check hashes at snapshot time.
                 self.index
                     .update_data_hash(entry.id.unwrap(),
-                                      entry.modified,
+                                      entry.info.modified,
                                       Some(hash_ref.hash.clone()),
                                       Some(hash_ref))?;
 

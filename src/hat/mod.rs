@@ -679,9 +679,9 @@ impl<B: StoreBackend> HatRc<B> {
                         -> Result<(), HatError> {
         fs::create_dir_all(&output).unwrap();
         for (entry, hash_ref) in family.fetch_dir_data(dir_hash, self.hash_backend())? {
-            assert!(entry.name.len() > 0);
+            assert!(entry.info.name.len() > 0);
 
-            output.push(str::from_utf8(&entry.name[..]).unwrap());
+            output.push(str::from_utf8(&entry.info.name[..]).unwrap());
             println!("{}", output.display());
 
             if entry.data_hash.is_some() {
