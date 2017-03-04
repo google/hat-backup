@@ -28,7 +28,7 @@ use std::path::PathBuf;
 use std::str;
 use std::sync::{Arc, mpsc};
 use tags;
-use util::Process;
+use util::{Process, FileIterator};
 use void::Void;
 use rustc_serialize::hex::ToHex;
 
@@ -129,6 +129,10 @@ fn concat_filename(mut a: PathBuf, b: &str) -> String {
 
 fn hash_index_name(root: PathBuf) -> String {
     concat_filename(root, "hash_index.sqlite3")
+}
+
+fn synthetic_roots_family() -> String {
+    From::from("__hat__roots__")
 }
 
 struct SnapshotLister<'a, B: StoreBackend> {
@@ -279,12 +283,22 @@ impl<B: StoreBackend> HatRc<B> {
         })
     }
 
+    pub fn delete_all_snapshots(&mut self) -> Result<(), HatError> {
+        // This function deletes ALL snapshots from ALL families, including meta snapshots used
+        // for recovery. After calling this function and running the GC, all blobs should be gone.
+        for snapshot in self.snapshot_index.list_all() {
+            let id = snapshot.info.snapshot_id;
+            self.deregister_by_name(snapshot.family_name, id)?;
+        }
+        Ok(())
+    }
+
     pub fn meta_commit(&mut self) -> Result<(), HatError> {
         let all_snapshots = self.snapshot_index.list_all();
 
-        // TODO(jos): use a hash tree for this listing.
-        let mut tree = self.hash_tree_writer(blob::LeafType::SnapshotList);
+        // FIXME(jos): Split into N-entries per append().
         let mut message = capnp::message::Builder::new_default();
+        let mut all_root_ids = vec![];
 
         {
             let root = message.init_root::<root_capnp::snapshot_list::Builder>();
@@ -296,13 +310,43 @@ impl<B: StoreBackend> HatRc<B> {
                 s.set_family_name(&snapshot.family_name);
                 s.set_msg(&snapshot.msg.unwrap_or("".to_owned()));
                 s.set_hash_ref(&snapshot.hash_ref.unwrap());
+
+                if snapshot.family_name == synthetic_roots_family() {
+                    all_root_ids.push(snapshot.info.snapshot_id);
+                }
             }
         }
+
         let mut listing = Vec::new();
         capnp::serialize_packed::write_message(&mut listing, &message).unwrap();
-        tree.append(&listing[..])?;
-        tree.hash()?;
-        self.blob_store.flush();
+
+        let family = self.open_family(synthetic_roots_family()).unwrap();
+        family.snapshot_direct(
+            key::Entry{
+                id: None,
+                parent_id: None,
+                info: key::Info{
+                    name: From::from("root"),
+                    created: None,
+                    modified: None,
+                    accessed: None,
+                    permissions: None,
+                    user_id: None,
+                    group_id: None,
+                    byte_length: Some(listing.len() as u64),
+                },
+                data_hash: None,
+            }, false, Some(FileIterator::from_bytes(listing)))?;
+
+        family.flush()?;
+        self.commit(&family, None)?;
+
+        // Delete old root snapshots, but always keep the past 10.
+        all_root_ids.sort();
+        for id in all_root_ids.iter().rev().skip(10) {
+            self.deregister_by_name(synthetic_roots_family(), *id)?;
+        }
+
         Ok(())
     }
 
@@ -312,16 +356,16 @@ impl<B: StoreBackend> HatRc<B> {
         for b in blobs.into_iter() {
             info!("Inspecting blob: {}", b.name.to_hex());
             for r in self.blob_store.retrieve_refs(b)?.unwrap_or(vec![]) {
-                match r.leaf {
-                    blob::LeafType::SnapshotList => {
+                match (r.leaf, r.info.as_ref()) {
+                    (blob::LeafType::TreeList, Some(ref i)) if i.name == b"__hat__roots__" => {
                         // FIXME(jos): Allow skipping first root in case it is not working.
-                        return Ok(Some(r));
+                        return Ok(Some(r.clone()));
                     }
                     // FIXME(jos): Recover file-listings stored after commit
-                    blob::LeafType::TreeList => {
+                    (blob::LeafType::TreeList, _) => {
                         warn!("Skipping directory listing: {}", r.hash.bytes.to_hex())
                     }
-                    blob::LeafType::FileChunk => {
+                    (blob::LeafType::FileChunk, _) => {
                         warn!("Skipping file contents: {}", r.hash.bytes.to_hex())
                     }
                 }
@@ -338,26 +382,48 @@ impl<B: StoreBackend> HatRc<B> {
         info!(".. from blob: {}",
               root_href.persistent_ref.blob_name.to_hex());
 
-        let root = self.blob_store
-            .retrieve(&root_href.hash, &root_href.persistent_ref)?
-            .expect("Root file disappeared while trying to read it");
+        let family = self.open_family(synthetic_roots_family()).unwrap();
+        let list = family.fetch_dir_data(root_href.clone(), self.hash_backend())?;
+        assert_eq!(list.len(), 1);
 
-        let message_reader =
-            capnp::serialize_packed::read_message(&mut &root[..],
-                                                  capnp::message::ReaderOptions::new())
-                .unwrap();
-        let snapshot_list = message_reader.get_root::<root_capnp::snapshot_list::Reader>().unwrap();
+        let (entry, list_ref) = list.into_iter().next().unwrap();
+        assert_eq!(entry.info.name, b"root");
 
-        for s in snapshot_list.get_snapshots().unwrap().iter() {
-            let hash_ref = hash::tree::HashRef::from_bytes(&mut s.get_hash_ref().unwrap()).unwrap();
-            self.snapshot_index
-                .recover(s.get_id(),
-                         s.get_family_name()
-                             .unwrap(),
-                         s.get_msg().unwrap(),
-                         &hash_ref,
-                         Some(db::SnapshotWorkStatus::RecoverInProgress));
+        for msg in hash::tree::LeafIterator::new(self.hash_backend(), list_ref)?.unwrap() {
+            let message_reader =
+                capnp::serialize_packed::read_message(&mut &msg[..],
+                                                      capnp::message::ReaderOptions::new())
+                    .unwrap();
+            let snapshot_list = message_reader.get_root::<root_capnp::snapshot_list::Reader>().unwrap();
+
+            for s in snapshot_list.get_snapshots().unwrap().iter() {
+                let hash_ref = hash::tree::HashRef::from_bytes(&mut s.get_hash_ref().unwrap()).unwrap();
+                self.snapshot_index
+                    .recover(s.get_id(),
+                             s.get_family_name()
+                                 .unwrap(),
+                             s.get_msg().unwrap(),
+                             &hash_ref,
+                             Some(db::SnapshotWorkStatus::RecoverInProgress));
+            }
         }
+
+        self.flush_snapshot_index();
+        self.resume()?;
+
+        // Register the newly found root. This is needed because root cannot contain itself.
+        let latest = self.snapshot_index.latest(&synthetic_roots_family());
+        let next_id = match latest {
+            Some((_, _, Some(ref href))) if href.hash == root_href.hash => return Ok(()),  // already have it.
+            Some((info, _, _)) => info.snapshot_id + 1,
+            None => 1,
+        };
+
+        self.snapshot_index.recover(next_id,
+                                    &synthetic_roots_family(),
+                                    "",
+                                    &root_href,
+                                    Some(db::SnapshotWorkStatus::RecoverInProgress));
         self.flush_snapshot_index();
         self.resume()?;
 

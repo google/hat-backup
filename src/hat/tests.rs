@@ -150,6 +150,12 @@ fn snapshot_commit_many_empty_files() {
     hat.deregister(&fam, 1).unwrap();
     let (deleted, live) = hat.gc().unwrap();
     assert!(deleted > 0);
+    assert!(live > 0);
+
+    // Delete everything including root.
+    hat.delete_all_snapshots().unwrap();
+    let (deleted, live) = hat.gc().unwrap();
+    assert!(deleted > 0);
     assert_eq!(live, 0);
 }
 
@@ -171,6 +177,12 @@ fn snapshot_commit_many_empty_directories() {
     assert!(live > 0);
 
     hat.deregister(&fam, 1).unwrap();
+    let (deleted, live) = hat.gc().unwrap();
+    assert!(deleted > 0);
+    assert!(live > 0);
+
+    // Delete everything including root.
+    hat.delete_all_snapshots().unwrap();
     let (deleted, live) = hat.gc().unwrap();
     assert!(deleted > 0);
     assert_eq!(live, 0);
@@ -261,5 +273,11 @@ fn recover() {
 
     let (deleted, live3) = hat2.gc().unwrap();
     assert!(deleted > 0);
-    assert_eq!(live3, 0);
+    assert!(live3 > 0);
+
+    // Delete everything including root.
+    hat2.delete_all_snapshots().unwrap();
+    let (deleted, live4) = hat2.gc().unwrap();
+    assert!(deleted > 0);
+    assert_eq!(live4, 0);
 }

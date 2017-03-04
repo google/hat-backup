@@ -146,11 +146,14 @@ pub mod recover {
             });
             true
         }
-        fn leaf_leave(&mut self, chunk: Vec<u8>, href: &tree::HashRef) -> bool {
+        fn leaf_enter(&mut self, href: &tree::HashRef) -> bool {
             self.nodes.push_back(Node {
                 href: href.clone(),
                 childs: None,
             });
+            true
+        }
+        fn leaf_leave(&mut self, chunk: Vec<u8>, _href: &tree::HashRef) -> bool {
             parse_dir_data(&chunk[..], &mut self.files).unwrap();
             true
         }
@@ -234,7 +237,9 @@ impl<B: StoreBackend> Family<B> {
             Some(Box::new(move |()| contents) as Box<FnBox<(), _>>)
         };
         match self.key_store_process[0].send_reply(key::Msg::Insert(file, f))? {
-            key::Reply::Id(id) => Ok(id),
+            key::Reply::Id(id) => {
+                Ok(id)
+            },
             _ => Err(From::from("Unexpected reply from key store")),
         }
     }
@@ -323,7 +328,18 @@ impl<B: StoreBackend> Family<B> {
     {
         let mut top_tree = self.key_store.hash_tree_writer(blob::LeafType::TreeList);
         self.commit_to_tree(&mut top_tree, None, top_hash_fn)?;
-        Ok(top_tree.hash()?)
+
+        let info = key::Info{
+            name: self.name.clone().into_bytes(),
+            accessed: None,
+            modified: None,
+            created: None,
+            permissions: None,
+            group_id: None,
+            user_id: None,
+            byte_length: None,
+        };
+        Ok(top_tree.hash(Some(&info))?)
     }
 
     pub fn commit_to_tree<F>(&mut self,
@@ -381,7 +397,7 @@ impl<B: StoreBackend> Family<B> {
                             .hash_tree_writer(blob::LeafType::TreeList);
                         self.commit_to_tree(&mut inner_tree, entry.id, top_hash_fn)?;
                         // Store a reference for the sub-tree in our tree:
-                        let dir_hash_ref = inner_tree.hash()?;
+                        let dir_hash_ref = inner_tree.hash(Some(&entry.info))?;
 
                         let mut hash_ref_msg = capnp::message::Builder::new_default();
                         let mut hash_ref_root =
