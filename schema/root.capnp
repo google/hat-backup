@@ -51,6 +51,7 @@ struct HashRef {
 	hash @0 :Data;
 	height @1 :Int64;
 	leafType @2 :Int64;
+
 	chunkRef @3 :ChunkRef;
 }
 
@@ -62,26 +63,29 @@ struct HashIds {
 	hashIds @0 :List(UInt64);
 }
 
-struct File {
-	id @0 :UInt64;
-	name @1 :Data;
-
+struct Stat {
+    name @0 :Data;
 	created :union {
-		unknown @2 :Void;
-		timestamp @3 :Int64;
+		unknown @1 :Void;
+		timestamp @2 :Int64;
 	}
 	modified :union {
-		unknown @4 :Void;
-		timestamp @5 :Int64;
+		unknown @3 :Void;
+		timestamp @4 :Int64;
 	}
 	accessed :union {
-		unknown @6 :Void;
-		timestamp @7 :Int64;
+		unknown @5 :Void;
+		timestamp @6 :Int64;
 	}
+}
+
+struct File {
+	id @0 :UInt64;
+    stat @1 :Stat;
 
 	content :union {
-		data @8 :HashRef;
-		directory @9 :HashRef;
+		data @2 :HashRef;
+		directory @3 :HashRef;
 	}
 }
 

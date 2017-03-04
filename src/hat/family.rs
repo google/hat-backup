@@ -168,25 +168,25 @@ fn parse_dir_data(chunk: &[u8], mut out: &mut Vec<walker::FileEntry>) -> Result<
 
     let list = reader.get_root::<root_capnp::file_list::Reader>().unwrap();
     for f in list.get_files().unwrap().iter() {
-        if f.get_name().unwrap().len() == 0 {
+        if f.get_stat()?.get_name().unwrap().len() == 0 {
             // Empty entry at end.
             // TODO(jos): Can we get rid of these?
             break;
         }
         let entry = key::Entry {
             id: Some(f.get_id()),
-            name: f.get_name().unwrap().to_owned(),
-            created: match f.get_created().which().unwrap() {
-                root_capnp::file::created::Unknown(()) => None,
-                root_capnp::file::created::Timestamp(ts) => Some(ts),
+            name: f.get_stat()?.get_name().unwrap().to_owned(),
+            created: match f.get_stat()?.get_created().which().unwrap() {
+                root_capnp::stat::created::Unknown(()) => None,
+                root_capnp::stat::created::Timestamp(ts) => Some(ts),
             },
-            modified: match f.get_modified().which().unwrap() {
-                root_capnp::file::modified::Unknown(()) => None,
-                root_capnp::file::modified::Timestamp(ts) => Some(ts),
+            modified: match f.get_stat()?.get_modified().which().unwrap() {
+                root_capnp::stat::modified::Unknown(()) => None,
+                root_capnp::stat::modified::Timestamp(ts) => Some(ts),
             },
-            accessed: match f.get_accessed().which().unwrap() {
-                root_capnp::file::accessed::Unknown(()) => None,
-                root_capnp::file::accessed::Timestamp(ts) => Some(ts),
+            accessed: match f.get_stat()?.get_accessed().which().unwrap() {
+                root_capnp::stat::accessed::Unknown(()) => None,
+                root_capnp::stat::accessed::Timestamp(ts) => Some(ts),
             },
             data_hash: match f.get_content().which().unwrap() {
                 root_capnp::file::content::Data(r) => {
@@ -371,21 +371,25 @@ impl<B: StoreBackend> Family<B> {
                     let mut file_msg = files.borrow().get(idx as u32);
 
                     file_msg.set_id(entry.id.unwrap_or(0));
-                    file_msg.set_name(&entry.name);
 
-                    match entry.created {
-                        None => file_msg.borrow().init_created().set_unknown(()),
-                        Some(ts) => file_msg.borrow().init_created().set_timestamp(ts),
-                    }
+                    {
+                        let mut stat = file_msg.borrow().init_stat();
+                        stat.borrow().set_name(&entry.name);
 
-                    match entry.modified {
-                        None => file_msg.borrow().init_modified().set_unknown(()),
-                        Some(ts) => file_msg.borrow().init_modified().set_timestamp(ts),
-                    }
+                        match entry.created {
+                            None => stat.borrow().init_created().set_unknown(()),
+                            Some(ts) => stat.borrow().init_created().set_timestamp(ts),
+                        }
 
-                    match entry.accessed {
-                        None => file_msg.borrow().init_accessed().set_unknown(()),
-                        Some(ts) => file_msg.borrow().init_accessed().set_timestamp(ts),
+                        match entry.modified {
+                            None => stat.borrow().init_modified().set_unknown(()),
+                            Some(ts) => stat.borrow().init_modified().set_timestamp(ts),
+                        }
+
+                        match entry.accessed {
+                            None => stat.borrow().init_accessed().set_unknown(()),
+                            Some(ts) => stat.borrow().init_accessed().set_timestamp(ts),
+                        }
                     }
 
                     if let Some(hash_bytes) = entry.data_hash {
