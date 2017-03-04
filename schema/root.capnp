@@ -53,6 +53,11 @@ struct HashRef {
 	leafType @2 :Int64;
 
 	chunkRef @3 :ChunkRef;
+
+	info :union {
+	    none @4 :Void;
+	    stat @5 :Stat;
+	}
 }
 
 struct HashRefList {
