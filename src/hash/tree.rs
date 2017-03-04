@@ -18,6 +18,7 @@
 //! a streaming hash-tree reader.
 
 
+use key;
 use blob::{ChunkRef, NodeType, LeafType};
 
 use capnp;
@@ -36,17 +37,25 @@ pub struct HashRef {
     pub node: NodeType, // Where in the tree this reference points.
     pub leaf: LeafType, // What kind of data the tree leafs contain.
     pub persistent_ref: ChunkRef,
+    pub info: Option<key::Info>,
 }
 
 impl HashRef {
-    pub fn populate_msg(&self, msg: root_capnp::hash_ref::Builder) {
-        let mut msg = msg;
+    pub fn populate_msg(&self, mut msg: root_capnp::hash_ref::Builder) {
         msg.set_hash(&self.hash.bytes[..]);
         msg.set_height(From::from(self.node));
         msg.set_leaf_type(self.leaf as i64);
         {
-            let mut chunk_ref = msg.init_chunk_ref();
+            let mut chunk_ref = msg.borrow().init_chunk_ref();
             self.persistent_ref.populate_msg(chunk_ref.borrow());
+        }
+        {
+            let mut info = msg.borrow().init_info();
+            if let Some(ref i) = self.info {
+                i.populate_msg(info.init_stat().borrow());
+            } else {
+                info.set_none(());
+            }
         }
     }
 
@@ -56,6 +65,10 @@ impl HashRef {
             node: From::from(msg.get_height()),
             leaf: From::from(msg.get_leaf_type()),
             persistent_ref: ChunkRef::read_msg(&msg.get_chunk_ref()?)?,
+            info: match msg.get_info().which()? {
+                root_capnp::hash_ref::info::None(()) => None,
+                root_capnp::hash_ref::info::Stat(st) => Some(key::Info::read(st?)?),
+            }
         })
     }
 
@@ -88,12 +101,12 @@ pub trait HashTreeBackend: Clone {
     fn fetch_childs(&self, &Hash) -> Option<Vec<i64>>;
     fn fetch_persistent_ref(&self, &Hash) -> Option<ChunkRef>;
     fn insert_chunk(&self,
-                    &Hash,
+                    &[u8],
                     NodeType,
                     LeafType,
                     Option<Vec<i64>>,
-                    &[u8])
-                    -> Result<(i64, ChunkRef), Self::Err>;
+                    Option<&key::Info>)
+                    -> Result<(i64, HashRef), Self::Err>;
 }
 
 
@@ -146,6 +159,7 @@ fn test_hash_refs_identity() {
                 hash: Hash { bytes: hash.clone() },
                 node: NodeType::Branch(i as i64),
                 leaf: LeafType::FileChunk,
+                info: None,
                 persistent_ref: chunk_ref.clone(),
             });
         }
@@ -206,27 +220,21 @@ impl<B: HashTreeBackend> SimpleHashTreeWriter<B> {
     /// 1-byte blocks when reading; if needed, accummulation of data must be handled by the
     /// `backend`).
     pub fn append(&mut self, chunk: &[u8]) -> Result<(), B::Err> {
-        self.append_at(0, chunk, None)
+        self.append_at(0, chunk, None, None)
     }
 
     fn append_at(&mut self,
                  level: usize,
                  data: &[u8],
-                 childs: Option<Vec<i64>>)
+                 childs: Option<Vec<i64>>,
+                 info: Option<&key::Info>)
                  -> Result<(), B::Err> {
-        let hash = Hash::new(&data[..]);
-        let (id, chunk_ref) = self.backend
-            .insert_chunk(&hash, From::from(level as i64), self.leaf, childs, &data)?;
-        let hash_ref = HashRef {
-            hash: hash,
-            node: From::from(level as i64),
-            leaf: self.leaf,
-            persistent_ref: chunk_ref,
-        };
-        self.append_hashref_at(level, id, hash_ref)
+        let (id, hash_ref) = self.backend
+            .insert_chunk(&data, From::from(level as i64), self.leaf, childs, info)?;
+        self.append_hashref_at(level, id, hash_ref, info)
     }
 
-    fn append_hashref_at(&mut self, level: usize, id: i64, hashref: HashRef) -> Result<(), B::Err> {
+    fn append_hashref_at(&mut self, level: usize, id: i64, hashref: HashRef, info: Option<&key::Info>) -> Result<(), B::Err> {
         assert!(self.levels.len() >= level);
         self.grow_to(level);
 
@@ -238,13 +246,13 @@ impl<B: HashTreeBackend> SimpleHashTreeWriter<B> {
         };
 
         if new_level_len == self.order {
-            self.collapse_level(level)?;
+            self.collapse_level(level, info)?;
         }
 
         Ok(())
     }
 
-    fn collapse_level(&mut self, level: usize) -> Result<(), B::Err> {
+    fn collapse_level(&mut self, level: usize, info: Option<&key::Info>) -> Result<(), B::Err> {
         // Extract-replace level with a new empty level
         assert!(self.levels.len() > level);
         self.levels.push(Vec::new());
@@ -254,7 +262,7 @@ impl<B: HashTreeBackend> SimpleHashTreeWriter<B> {
         let ids: Vec<i64> = level_v.iter().map(|&(id, _)| id).collect();
         let data = hash_refs_to_bytes(&level_v.into_iter().map(|(_, hr)| hr).collect());
 
-        self.append_at(level + 1, &data[..], Some(ids))
+        self.append_at(level + 1, &data[..], Some(ids), info)
     }
 
     /// Retrieve the hash and backend persistent reference that identified this tree.
@@ -262,7 +270,7 @@ impl<B: HashTreeBackend> SimpleHashTreeWriter<B> {
     /// This also flushes and finalizes the tree. It should be considered frozen after calling
     /// `hash()`, i.e. it's Ok to call `hash()` multiple times, but it's **not Ok** to call
     /// `append()` after `hash()`.
-    pub fn hash(&mut self) -> Result<HashRef, B::Err> {
+    pub fn hash(&mut self, info: Option<&key::Info>) -> Result<HashRef, B::Err> {
         // Empty hash tree is equivalent to hash tree of one empty block:
         if self.levels.is_empty() {
             self.append(&[])?;
@@ -276,12 +284,12 @@ impl<B: HashTreeBackend> SimpleHashTreeWriter<B> {
 
         // Unless only root has data, collapse all levels up to top level (which is handled next)
         let top_level = self.top_level().expect("levels.len() > 0");
-        (first_non_empty_level_idx..top_level).map(|l| self.collapse_level(l)).last();
+        (first_non_empty_level_idx..top_level).map(|l| self.collapse_level(l, None)).last();
 
         // Collapse top level if possible
         let top_level = self.top_level().expect("levels.len() > 0");
-        if self.levels.get(top_level).expect("top level").len() > 1 {
-            self.collapse_level(top_level)?;
+        if info.is_some() || self.levels.get(top_level).expect("top level").len() > 1 {
+            self.collapse_level(top_level, info)?;
         }
 
         // After this point, only root exists and root has exactly one entry:

@@ -38,7 +38,7 @@ pub struct Entry {
     pub info: Info,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Info {
     pub name: Vec<u8>,
 

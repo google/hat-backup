@@ -36,6 +36,7 @@ fn identity() {
                                  hash::Hash::new(chunk),
                                  NodeType::Leaf,
                                  LeafType::FileChunk,
+                                 None,
                                  Box::new(move |_| {})),
                       chunk));
         }
@@ -79,7 +80,7 @@ fn identity_with_excessive_flushing() {
             ids.push((bs_p.store(&chunk[..],
                                  hash::Hash::new(chunk),
                                  NodeType::Leaf,
-                                 LeafType::FileChunk,
+                                 LeafType::FileChunk, None,
                                  Box::new(move |_| {})),
                       chunk));
             bs_p.flush();
@@ -136,6 +137,7 @@ fn blob_reuse() {
         hash: hash::Hash::new(&[]),
         node: NodeType::Leaf,
         leaf: LeafType::FileChunk,
+        info: None,
         persistent_ref: ChunkRef {
             blob_id: None,
             blob_name: Vec::new(),
@@ -184,6 +186,7 @@ fn blob_identity() {
                 hash: hash::Hash::new(&[]),
                 node: NodeType::Leaf,
                 leaf: LeafType::FileChunk,
+                info: None,
                 persistent_ref: ChunkRef {
                     blob_id: None,
                     blob_name: Vec::new(),
@@ -266,6 +269,7 @@ fn empty_blocks_blob_ciphertext(blob: &mut Blob, blocksize: usize) -> Vec<u8> {
             hash: hash::Hash::new(&block[..]),
             node: NodeType::Leaf,
             leaf: LeafType::FileChunk,
+            info: None,
             persistent_ref: ChunkRef {
                 blob_id: None,
                 blob_name: Vec::new(),

@@ -26,6 +26,7 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use std::thread;
 use tags;
 use util::FnBox;
+use key;
 
 
 mod chunk;
@@ -113,6 +114,7 @@ impl<B: StoreBackend> StoreInner<B> {
              hash: Hash,
              node: NodeType,
              leaf: LeafType,
+             info: Option<&key::Info>,
              callback: Box<FnBox<HashRef, ()>>)
              -> HashRef {
         if chunk.is_empty() {
@@ -120,6 +122,7 @@ impl<B: StoreBackend> StoreInner<B> {
                 hash: hash,
                 node: node,
                 leaf: leaf,
+                info: None,
                 persistent_ref: ChunkRef {
                     blob_id: None,
                     blob_name: vec![0],
@@ -138,6 +141,7 @@ impl<B: StoreBackend> StoreInner<B> {
             hash: hash,
             node: node,
             leaf: leaf,
+            info: info.cloned(),
             persistent_ref: ChunkRef {
                 blob_id: Some(self.blob_desc.id),
                 blob_name: self.blob_desc.name.clone(),
@@ -155,6 +159,10 @@ impl<B: StoreBackend> StoreInner<B> {
             href.persistent_ref.blob_name = self.blob_desc.name.clone();
             self.blob.try_append(chunk, &mut href).unwrap();
         }
+
+        // Info is internal to the blob only.
+        href.info = None;
+
         self.blob_refs.push((href.clone(), callback));
 
         // To avoid unnecessary blocking, we reply with the ID *before* possibly flushing.
@@ -233,10 +241,11 @@ impl<B: StoreBackend> BlobStore<B> {
                  hash: Hash,
                  node: NodeType,
                  leaf: LeafType,
+                 info: Option<&key::Info>,
                  callback: Box<FnBox<HashRef, ()>>)
                  -> HashRef {
         let mut guard = self.lock();
-        guard.store(chunk, hash, node, leaf, callback)
+        guard.store(chunk, hash, node, leaf, info, callback)
     }
 
     /// Retrieve the data chunk identified by `ChunkRef`.

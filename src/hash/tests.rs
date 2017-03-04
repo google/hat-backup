@@ -81,28 +81,35 @@ impl HashTreeBackend for MemoryBackend {
     }
 
     fn insert_chunk(&self,
-                    hash: &Hash,
+                    chunk: &[u8],
                     node: NodeType,
                     leaf: LeafType,
                     childs: Option<Vec<i64>>,
-                    chunk: &[u8])
-                    -> Result<(i64, ChunkRef), Self::Err> {
+                    _: Option<&key::Info>)
+                    -> Result<(i64, HashRef), Self::Err> {
         let len = chunk.len();
         let mut guarded_seen = self.seen_chunks.lock().unwrap();
         guarded_seen.insert(chunk.to_vec());
 
         let mut guarded_chunks = self.chunks.lock().unwrap();
+
+        let hash = Hash::new(chunk);
         guarded_chunks.insert(hash.bytes.clone(), (node, leaf, childs, chunk.to_vec()));
 
-
         Ok((0,
-            ChunkRef {
+            HashRef {
+                hash: hash.clone(),
+                node: node,
+                leaf: leaf,
+                info: None,
+                persistent_ref: ChunkRef {
                 blob_id: None,
                 blob_name: hash.bytes.clone(),
                 offset: 0,
                 length: len,
                 packing: None,
                 key: None,
+                }
             }))
     }
 }
@@ -117,7 +124,7 @@ fn identity_many_small_blocks() {
             ht.append(b"a").unwrap();
         }
 
-        let hash_ref = ht.hash().unwrap();
+        let hash_ref = ht.hash(None).unwrap();
         assert_eq!(hash_ref.leaf, LeafType::FileChunk);
 
         let mut tree_it = LeafIterator::new(backend, hash_ref)
@@ -153,7 +160,7 @@ fn identity_empty() {
 
     ht.append(&block[..]).unwrap();
 
-    let hash_ref = ht.hash().unwrap();
+    let hash_ref = ht.hash(None).unwrap();
 
     let mut it = LeafIterator::new(backend, hash_ref)
         .unwrap()
@@ -172,7 +179,7 @@ fn identity_append1() {
 
     ht.append(&block[..]).unwrap();
 
-    let hash_ref = ht.hash().unwrap();
+    let hash_ref = ht.hash(None).unwrap();
 
     let mut it = LeafIterator::new(backend, hash_ref)
         .unwrap()
@@ -193,7 +200,7 @@ fn identity_append5() {
         ht.append(&block[..]).unwrap();
     }
 
-    let hash_ref = ht.hash().unwrap();
+    let hash_ref = ht.hash(None).unwrap();
 
     let mut it = LeafIterator::new(backend.clone(), hash_ref)
         .unwrap()
@@ -224,7 +231,7 @@ fn identity_implicit_flush() {
         assert!(backend.saw_chunk(&vec![i]));
     }
 
-    let hash_ref = ht.hash().unwrap();
+    let hash_ref = ht.hash(None).unwrap();
 
     let it = LeafIterator::new(backend, hash_ref)
         .unwrap()
@@ -248,7 +255,7 @@ fn identity_1_short_of_flush() {
         ht.append(&bytes[..]).unwrap();
     }
 
-    let hash_ref = ht.hash().unwrap();
+    let hash_ref = ht.hash(None).unwrap();
 
     for i in 1u8..order as u8 {
         assert!(backend.saw_chunk(&vec![i]));

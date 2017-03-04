@@ -249,6 +249,7 @@ impl HashIndex {
                     hash: hash.clone(),
                     node: queue_entry.node,
                     leaf: queue_entry.leaf,
+                    info: None,
                     persistent_ref: queue_entry.persistent_ref.expect("persistent_ref"),
                 }))
             }

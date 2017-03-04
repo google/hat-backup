@@ -294,7 +294,7 @@ impl<IT: io::Read, B: StoreBackend> MsgHandler<Msg<IT>, Reply<B>> for Store<B> {
                 });
 
                 // Get top tree hash:
-                let hash_ref = tree.hash(Some(&entry.info.name))?;
+                let hash_ref = tree.hash(Some(&entry.info))?;
 
                 // Update hash in key index.
                 // It is OK that this has is not yet valid, as we check hashes at snapshot time.
