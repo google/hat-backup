@@ -361,9 +361,8 @@ impl<B: StoreBackend> HatRc<B> {
             info!("Inspecting blob: {}", b.name.to_hex());
             for r in self.blob_store.retrieve_refs(b)?.unwrap_or(vec![]) {
                 match (r.leaf, r.info.as_ref()) {
-                    (blob::LeafType::TreeList, Some(ref i))
-                        if i.hat_snapshot_top && i.name == b"__hat__roots__" =>
-                    {
+                    (blob::LeafType::TreeList, Some(ref i)) if i.hat_snapshot_top &&
+                                                               i.name == b"__hat__roots__" => {
                         // FIXME(jos): Allow skipping first root in case it is not working.
                         return Ok(Some(r.clone()));
                     }
