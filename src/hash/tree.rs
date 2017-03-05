@@ -50,11 +50,11 @@ impl HashRef {
             self.persistent_ref.populate_msg(chunk_ref.borrow());
         }
         {
-            let mut info = msg.borrow().init_info();
+            let mut extra = msg.borrow().init_extra();
             if let Some(ref i) = self.info {
-                i.populate_msg(info.init_stat().borrow());
+                i.populate_msg(extra.init_info().borrow());
             } else {
-                info.set_none(());
+                extra.set_none(());
             }
         }
     }
@@ -65,9 +65,9 @@ impl HashRef {
             node: From::from(msg.get_height()),
             leaf: From::from(msg.get_leaf_type()),
             persistent_ref: ChunkRef::read_msg(&msg.get_chunk_ref()?)?,
-            info: match msg.get_info().which()? {
-                root_capnp::hash_ref::info::None(()) => None,
-                root_capnp::hash_ref::info::Stat(st) => Some(key::Info::read(st?)?),
+            info: match msg.get_extra().which()? {
+                root_capnp::hash_ref::extra::None(()) => None,
+                root_capnp::hash_ref::extra::Info(st) => Some(key::Info::read(st?)?),
             },
         })
     }

@@ -54,9 +54,9 @@ struct HashRef {
 
 	chunkRef @3 :ChunkRef;
 
-	info :union {
+	extra :union {
 	    none @4 :Void;
-	    stat @5 :Stat;
+	    info @5 :FileInfo;
 	}
 }
 
@@ -68,7 +68,7 @@ struct HashIds {
 	hashIds @0 :List(UInt64);
 }
 
-struct Stat {
+struct FileInfo {
     name @0 :Data;
 	created :union {
 		unknown @1 :Void;
@@ -86,7 +86,7 @@ struct Stat {
 
 struct File {
 	id @0 :UInt64;
-    stat @1 :Stat;
+    info @1 :FileInfo;
 
 	content :union {
 		data @2 :HashRef;

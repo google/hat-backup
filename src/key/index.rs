@@ -54,7 +54,7 @@ pub struct Info {
 }
 
 impl Info {
-    pub fn read(msg: root_capnp::stat::Reader) -> Result<Info, capnp::Error> {
+    pub fn read(msg: root_capnp::file_info::Reader) -> Result<Info, capnp::Error> {
         Ok(Info {
             name: msg.get_name()?.to_vec(),
             created: None,
@@ -66,7 +66,7 @@ impl Info {
             byte_length: None,
         })
     }
-    pub fn populate_msg(&self, mut msg: root_capnp::stat::Builder) {
+    pub fn populate_msg(&self, mut msg: root_capnp::file_info::Builder) {
         msg.borrow().set_name(&self.name);
 
         match self.created {

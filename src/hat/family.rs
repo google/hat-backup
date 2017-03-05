@@ -171,14 +171,14 @@ fn parse_dir_data(chunk: &[u8], mut out: &mut Vec<walker::FileEntry>) -> Result<
 
     let list = reader.get_root::<root_capnp::file_list::Reader>().unwrap();
     for f in list.get_files().unwrap().iter() {
-        if f.get_stat()?.get_name().unwrap().len() == 0 {
+        if f.get_info()?.get_name().unwrap().len() == 0 {
             // Empty entry at end.
             // TODO(jos): Can we get rid of these?
             break;
         }
         let entry = key::Entry {
             id: Some(f.get_id()),
-            info: key::Info::read(f.get_stat()?.borrow())?,
+            info: key::Info::read(f.get_info()?.borrow())?,
             data_hash: match f.get_content().which().unwrap() {
                 root_capnp::file::content::Data(r) => {
                     Some(r.unwrap().get_hash().unwrap().to_owned())
@@ -370,7 +370,7 @@ impl<B: StoreBackend> Family<B> {
                     file_msg.set_id(entry.id.unwrap_or(0));
 
                     {
-                        entry.info.populate_msg(file_msg.borrow().init_stat().borrow());
+                        entry.info.populate_msg(file_msg.borrow().init_info().borrow());
                     }
 
                     if let Some(hash_bytes) = entry.data_hash {
