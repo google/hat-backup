@@ -17,6 +17,7 @@
 
 use diesel;
 use diesel::prelude::*;
+use diesel::connection::{TransactionManager};
 use diesel::sqlite::SqliteConnection;
 use errors::DieselError;
 use hash;
@@ -112,7 +113,11 @@ impl InternalKeyIndex {
 
         let dir = diesel::migrations::find_migrations_directory()?;
         diesel::migrations::run_pending_migrations_in_directory(&ki.conn, &dir, &mut InfoWriter)?;
-        ki.conn.begin_transaction()?;
+
+        {
+            let tm = ki.conn.transaction_manager();
+            tm.begin_transaction(&ki.conn)?;
+        }
 
         Ok(ki)
     }
@@ -132,8 +137,9 @@ impl InternalKeyIndex {
     }
 
     fn flush(&mut self) -> Result<(), DieselError> {
-        self.conn.commit_transaction()?;
-        self.conn.begin_transaction()?;
+        let tm = self.conn.transaction_manager();
+        tm.commit_transaction(&self.conn)?;
+        tm.begin_transaction(&self.conn)?;
 
         Ok(())
     }

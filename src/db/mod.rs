@@ -20,6 +20,7 @@ use blob;
 use capnp;
 
 use diesel;
+use diesel::connection::{TransactionManager};
 use diesel::prelude::*;
 use diesel::sqlite::SqliteConnection;
 use errors::DieselError;
@@ -202,7 +203,10 @@ impl InternalIndex {
         let dir = diesel::migrations::find_migrations_directory()?;
         diesel::migrations::run_pending_migrations_in_directory(&idx.conn, &dir, &mut InfoWriter)?;
 
-        idx.conn.begin_transaction()?;
+        {
+            let tm = idx.conn.transaction_manager();
+            tm.begin_transaction(&idx.conn)?;
+        }
 
         idx.hash_refresh_id_counter();
         Ok(idx)
@@ -488,8 +492,9 @@ impl InternalIndex {
 
     pub fn flush(&mut self) {
         // Callbacks assume their data is safe, so commit before calling them
-        self.conn.commit_transaction().unwrap();
-        self.conn.begin_transaction().unwrap();
+        let tm = self.conn.transaction_manager();
+        tm.commit_transaction(&self.conn).unwrap();
+        tm.begin_transaction(&self.conn).unwrap();
     }
 
     pub fn blob_next_id(&mut self) -> i64 {
