@@ -1,8 +1,5 @@
 extern crate capnpc;
 
-use std::env;
-use std::path::Path;
-
 fn main() {
     ::capnpc::CompilerCommand::new()
         .src_prefix("schema")
