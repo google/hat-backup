@@ -343,6 +343,7 @@ impl<B: StoreBackend> HatRc<B> {
         self.commit(&family, None)?;
 
         // Delete old root snapshots, but always keep the past 10.
+        // FIXME(jos): Number of meta snapshots to keep to be configurable.
         all_root_ids.sort();
         for id in all_root_ids.iter().rev().skip(10) {
             self.deregister_by_name(synthetic_roots_family(), *id)?;
@@ -595,8 +596,8 @@ impl<B: StoreBackend> HatRc<B> {
                             println!("Resuming delete of: {} #{:?}",
                                      snapshot.family_name,
                                      snapshot.info.snapshot_id);
-                            try!(self.deregister_by_name(snapshot.family_name,
-                                                         snapshot.info.snapshot_id))
+                            self.deregister_by_name(snapshot.family_name,
+                                                    snapshot.info.snapshot_id)?
                         }
                         Some(gc::Status::Complete) => {
                             self.deregister_finalize_by_name(snapshot.family_name,
