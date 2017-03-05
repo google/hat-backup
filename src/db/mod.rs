@@ -20,7 +20,7 @@ use blob;
 use capnp;
 
 use diesel;
-use diesel::connection::{TransactionManager};
+use diesel::connection::TransactionManager;
 use diesel::prelude::*;
 use diesel::sqlite::SqliteConnection;
 use errors::DieselError;

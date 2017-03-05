@@ -14,6 +14,7 @@
 
 use hash::tests::MemoryBackend;
 
+use blob::LeafType;
 use hash::tree::*;
 use test::Bencher;
 
@@ -22,12 +23,12 @@ fn append_unknown_16x128_kb(bench: &mut Bencher) {
     let mut bytes = vec![0u8; 128*1024];
 
     bench.iter(|| {
-        let mut ht = SimpleHashTreeWriter::new(8, MemoryBackend::new());
+        let mut ht = SimpleHashTreeWriter::new(LeafType::FileChunk, 8, MemoryBackend::new());
         for i in 0u8..16 {
             bytes[0] = i;
             ht.append(&bytes[..]).unwrap();
         }
-        ht.hash().unwrap();
+        ht.hash(None).unwrap();
     });
 
     bench.bytes = 128 * 1024 * 16;
@@ -38,11 +39,11 @@ fn append_known_16x128_kb(bench: &mut Bencher) {
     let bytes = vec![0u8; 128*1024];
 
     bench.iter(|| {
-        let mut ht = SimpleHashTreeWriter::new(8, MemoryBackend::new());
+        let mut ht = SimpleHashTreeWriter::new(LeafType::FileChunk, 8, MemoryBackend::new());
         for _ in 0i32..16 {
             ht.append(&bytes[..]).unwrap();
         }
-        ht.hash().unwrap();
+        ht.hash(None).unwrap();
     });
 
     bench.bytes = 128 * 1024 * 16;

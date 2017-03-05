@@ -13,7 +13,7 @@
 // limitations under the License.
 
 
-use blob::{Blob, ChunkRef, Kind};
+use blob::{Blob, ChunkRef, NodeType, LeafType};
 use hash::Hash;
 use hash::tree::HashRef;
 
@@ -27,7 +27,8 @@ const CHUNKSIZE: usize = 128 * 1024;
 fn dummy_hashref() -> HashRef {
     HashRef {
         hash: Hash::new(&[]),
-        kind: Kind::TreeLeaf,
+        node: NodeType::Leaf,
+        leaf: LeafType::FileChunk,
         persistent_ref: ChunkRef {
             blob_id: None,
             blob_name: vec![],
@@ -36,6 +37,7 @@ fn dummy_hashref() -> HashRef {
             packing: None,
             key: None,
         },
+        info: None,
     }
 }
 

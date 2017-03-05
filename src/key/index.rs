@@ -17,7 +17,7 @@
 
 use diesel;
 use diesel::prelude::*;
-use diesel::connection::{TransactionManager};
+use diesel::connection::TransactionManager;
 use diesel::sqlite::SqliteConnection;
 use errors::DieselError;
 use hash;
