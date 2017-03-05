@@ -336,6 +336,8 @@ impl<B: StoreBackend> Family<B> {
             group_id: None,
             user_id: None,
             byte_length: None,
+            hat_snapshot_top: true,
+            hat_snapshot_ts: 0,  // FIXME(jos): Fill in timestamp for now()
         };
         Ok(top_tree.hash(Some(&info))?)
     }

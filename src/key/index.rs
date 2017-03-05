@@ -51,6 +51,8 @@ pub struct Info {
     pub group_id: Option<u64>,
 
     pub byte_length: Option<u64>,
+    pub hat_snapshot_top: bool,
+    pub hat_snapshot_ts: i64,
 }
 
 impl Info {
@@ -64,6 +66,8 @@ impl Info {
             user_id: None,
             group_id: None,
             byte_length: None,
+            hat_snapshot_top: msg.get_hat_snapshot_top(),
+            hat_snapshot_ts: msg.get_hat_snapshot_timestamp(),
         })
     }
     pub fn populate_msg(&self, mut msg: root_capnp::file_info::Builder) {
@@ -83,6 +87,9 @@ impl Info {
             None => msg.borrow().init_accessed().set_unknown(()),
             Some(ts) => msg.borrow().init_accessed().set_timestamp(ts),
         }
+
+        msg.borrow().set_hat_snapshot_top(self.hat_snapshot_top);
+        msg.borrow().set_hat_snapshot_timestamp(self.hat_snapshot_ts);
     }
 }
 
@@ -213,6 +220,8 @@ impl InternalKeyIndex {
                     user_id: row.user_id.map(|x| x as u64),
                     group_id: row.group_id.map(|x| x as u64),
                     byte_length: None,
+                    hat_snapshot_top: false,
+                    hat_snapshot_ts: 0,
                 },
             }))
         } else {
@@ -285,6 +294,8 @@ impl InternalKeyIndex {
                          user_id: r.user_id.map(|x| x as u64),
                          group_id: r.group_id.map(|x| x as u64),
                          byte_length: None,
+                         hat_snapshot_top: false,
+                         hat_snapshot_ts: 0,
                      },
                  },
                  r.hash_ref

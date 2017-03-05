@@ -52,6 +52,8 @@ pub fn entry(name: Vec<u8>) -> key::Entry {
             user_id: None,
             group_id: None,
             byte_length: None,
+            hat_snapshot_top: false,
+            hat_snapshot_ts: 0,
         },
     }
 }

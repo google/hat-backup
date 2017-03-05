@@ -82,6 +82,8 @@ struct FileInfo {
 		unknown @5 :Void;
 		timestamp @6 :Int64;
 	}
+	hatSnapshotTop @7 :Bool;
+	hatSnapshotTimestamp @8 :Int64;
 }
 
 struct File {
