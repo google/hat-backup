@@ -225,10 +225,7 @@ impl<IT: io::Read, B: StoreBackend> MsgHandler<Msg<IT>, Reply<B>> for Store<B> {
             Msg::Insert(org_entry, chunk_it_opt) => {
                 let entry = match self.index
                     .lookup(org_entry.parent_id, org_entry.info.name.clone())? {
-                    Some(ref entry) if org_entry.info.modified_ts_secs ==
-                                       entry.info.modified_ts_secs &&
-                                       org_entry.info.created_ts_secs ==
-                                       entry.info.created_ts_secs => {
+                    Some(ref entry) if org_entry.data_looks_unchanged(entry) => {
                         if chunk_it_opt.is_some() && entry.data_hash.is_some() {
                             let hash = hash::Hash { bytes: entry.data_hash.clone().unwrap() };
                             if self.hash_index.hash_exists(&hash) {

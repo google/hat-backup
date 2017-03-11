@@ -68,6 +68,18 @@ impl Entry {
             info: Info::new(name, meta, false),
         }
     }
+
+    pub fn data_looks_unchanged(&self, other: &Entry) -> bool {
+        if self.info.created_ts_secs.is_none() || self.info.modified_ts_secs.is_none() {
+            false
+        } else {
+            (self.parent_id, &self.info.name,
+             self.info.created_ts_secs, self.info.modified_ts_secs)
+                ==
+                (other.parent_id, &other.info.name,
+                 other.info.created_ts_secs, other.info.modified_ts_secs)
+        }
+    }
 }
 
 impl Info {
