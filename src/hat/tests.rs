@@ -39,23 +39,7 @@ fn setup_family() -> (Arc<MemoryBackend>, HatRc<MemoryBackend>, Family<MemoryBac
 }
 
 pub fn entry(name: Vec<u8>) -> key::Entry {
-    key::Entry {
-        id: None,
-        parent_id: None,
-        data_hash: None,
-        info: key::Info {
-            name: name,
-            created: None,
-            modified: None,
-            accessed: None,
-            permissions: None,
-            user_id: None,
-            group_id: None,
-            byte_length: None,
-            hat_snapshot_top: false,
-            hat_snapshot_ts: 0,
-        },
-    }
+    key::Entry::new(None, name, None)
 }
 
 fn snapshot_files<B: StoreBackend>(family: &Family<B>,

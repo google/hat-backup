@@ -18,6 +18,7 @@ use blob;
 use capnp;
 use db;
 use errors::HatError;
+use filetime;
 use gc::{self, Gc, GcRc};
 use hash;
 use key;
@@ -321,23 +322,7 @@ impl<B: StoreBackend> HatRc<B> {
         capnp::serialize_packed::write_message(&mut listing, &message).unwrap();
 
         let family = self.open_family(synthetic_roots_family()).unwrap();
-        family.snapshot_direct(key::Entry {
-                                 id: None,
-                                 parent_id: None,
-                                 info: key::Info {
-                                     name: From::from("root"),
-                                     created: None,
-                                     modified: None,
-                                     accessed: None,
-                                     permissions: None,
-                                     user_id: None,
-                                     group_id: None,
-                                     byte_length: Some(listing.len() as u64),
-                                     hat_snapshot_top: false,
-                                     hat_snapshot_ts: 0,
-                                 },
-                                 data_hash: None,
-                             },
+        family.snapshot_direct(key::Entry::new(None, From::from("root"), None),
                              false,
                              Some(FileIterator::from_bytes(listing)))?;
 
@@ -766,6 +751,17 @@ impl<B: StoreBackend> HatRc<B> {
             } else {
                 self.checkout_dir_ref(family, output, hash_ref)?;
             }
+
+            if let Some(perms) = entry.info.permissions {
+                fs::set_permissions(&output, perms)?;
+            }
+
+            if let (Some(m), Some(a)) = (entry.info.modified_ts_secs, entry.info.accessed_ts_secs) {
+                let atime = filetime::FileTime::from_seconds_since_1970(a, 0  /* nanos */);
+                let mtime = filetime::FileTime::from_seconds_since_1970(m, 0  /* nanos */);
+                filetime::set_file_times(&output, atime, mtime).unwrap();
+            }
+
             output.pop();
         }
         Ok(())

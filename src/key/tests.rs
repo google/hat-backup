@@ -91,9 +91,9 @@ fn rng_filesystem(size: usize) -> FileSystem {
                         name: random_ascii_bytes(),
                         byte_length: None,
 
-                        created: thread_rng().gen(),
-                        modified: thread_rng().gen(),
-                        accessed: thread_rng().gen(),
+                        created_ts_secs: thread_rng().gen(),
+                        modified_ts_secs: thread_rng().gen(),
+                        accessed_ts_secs: thread_rng().gen(),
 
                         permissions: None,
                         user_id: None,
@@ -122,9 +122,9 @@ fn rng_filesystem(size: usize) -> FileSystem {
             data_hash: None,
             info: Info {
                 name: b"root".to_vec(),
-                created: thread_rng().gen(),
-                modified: thread_rng().gen(),
-                accessed: thread_rng().gen(),
+                created_ts_secs: thread_rng().gen(),
+                modified_ts_secs: thread_rng().gen(),
+                accessed_ts_secs: thread_rng().gen(),
                 permissions: None,
                 user_id: None,
                 group_id: None,
@@ -178,9 +178,12 @@ fn verify_filesystem<B: StoreBackend>(fs: &FileSystem, ks_p: &StoreProcess<Entry
                 found = true;
 
                 assert_eq!(dir.file.key_entry.id, entry.id);
-                assert_eq!(dir.file.key_entry.info.created, entry.info.created);
-                assert_eq!(dir.file.key_entry.info.accessed, entry.info.accessed);
-                assert_eq!(dir.file.key_entry.info.modified, entry.info.modified);
+                assert_eq!(dir.file.key_entry.info.created_ts_secs,
+                           entry.info.created_ts_secs);
+                assert_eq!(dir.file.key_entry.info.accessed_ts_secs,
+                           entry.info.accessed_ts_secs);
+                assert_eq!(dir.file.key_entry.info.modified_ts_secs,
+                           entry.info.modified_ts_secs);
 
                 match dir.file.data {
                     Some(ref original) => {

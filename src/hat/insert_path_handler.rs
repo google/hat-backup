@@ -18,7 +18,6 @@ use key;
 use std::error::Error;
 use std::fs;
 use std::io;
-use std::os::unix::fs::MetadataExt;
 use std::path::PathBuf;
 use std::str;
 use std::sync::{Mutex, atomic};
@@ -29,7 +28,6 @@ struct FileEntry {
     key_entry: key::Entry,
     metadata: fs::Metadata,
     full_path: PathBuf,
-    link_path: Option<PathBuf>,
 }
 
 impl FileEntry {
@@ -40,29 +38,11 @@ impl FileEntry {
             full_path.file_name().and_then(|n| n.to_str()).map(|n| n.bytes().collect());
 
         if filename_opt.is_some() {
-            let md = fs::symlink_metadata(&full_path)?;
-            let link_path = fs::read_link(&full_path).ok();
+            let meta = fs::symlink_metadata(&full_path)?;
             Ok(FileEntry {
-                key_entry: key::Entry {
-                    info: key::Info {
-                        name: filename_opt.unwrap(),
-                        created: Some(md.ctime_nsec()),
-                        modified: Some(md.mtime_nsec()),
-                        accessed: Some(md.atime_nsec()),
-                        byte_length: Some(md.len()),
-                        permissions: None,
-                        user_id: None,
-                        group_id: None,
-                        hat_snapshot_top: false,
-                        hat_snapshot_ts: 0,
-                    },
-                    parent_id: parent,
-                    data_hash: None,
-                    id: None,
-                },
-                metadata: md,
+                key_entry: key::Entry::new(parent, filename_opt.unwrap(), Some(&meta)),
+                metadata: meta,
                 full_path: full_path,
-                link_path: link_path,
             })
         } else {
             Err(From::from("Could not parse filename."[..].to_owned()))
@@ -73,7 +53,7 @@ impl FileEntry {
         self.metadata.is_dir()
     }
     fn is_symlink(&self) -> bool {
-        self.link_path.is_some()
+        self.metadata.file_type().is_symlink()
     }
 }
 

@@ -33,6 +33,7 @@ extern crate libsodium_sys;
 extern crate rustc_serialize;
 extern crate scoped_pool;
 extern crate void;
+extern crate filetime;
 
 // Error definition macros.
 #[macro_use]

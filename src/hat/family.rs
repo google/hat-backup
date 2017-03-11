@@ -27,6 +27,7 @@ use std::io::Write;
 use std::path::PathBuf;
 use std::str;
 use util::{FileIterator, FnBox, PathHandler};
+use filetime;
 
 fn try_a_few_times_then_panic<F>(mut f: F, msg: &str)
     where F: FnMut() -> bool
@@ -262,6 +263,8 @@ impl<B: StoreBackend> Family<B> {
         try_a_few_times_then_panic(|| fd.flush().is_ok(), "Could not flush file.");
     }
 
+    // FIXME(jos): Merge with hat's checkout_in_dir which checks out snapshots.
+    // (this checkout_in_dir checks out the family index)
     pub fn checkout_in_dir(&self,
                            output_dir: PathBuf,
                            dir_id: Option<u64>)
@@ -284,6 +287,16 @@ impl<B: StoreBackend> Family<B> {
                         self.write_file_chunks(&mut fd, tree);
                     }
                 }
+            }
+
+            if let Some(perms) = entry.info.permissions {
+                fs::set_permissions(&path, perms)?;
+            }
+
+            if let (Some(m), Some(a)) = (entry.info.modified_ts_secs, entry.info.accessed_ts_secs) {
+                let atime = filetime::FileTime::from_seconds_since_1970(a, 0  /* nanos */);
+                let mtime = filetime::FileTime::from_seconds_since_1970(m, 0  /* nanos */);
+                filetime::set_file_times(&path, atime, mtime).unwrap();
             }
 
             // Prepare for next filename:
@@ -327,18 +340,7 @@ impl<B: StoreBackend> Family<B> {
         let mut top_tree = self.key_store.hash_tree_writer(blob::LeafType::TreeList);
         self.commit_to_tree(&mut top_tree, None, top_hash_fn)?;
 
-        let info = key::Info {
-            name: self.name.clone().into_bytes(),
-            accessed: None,
-            modified: None,
-            created: None,
-            permissions: None,
-            group_id: None,
-            user_id: None,
-            byte_length: None,
-            hat_snapshot_top: true,
-            hat_snapshot_ts: 0, // FIXME(jos): Fill in timestamp for now()
-        };
+        let info = key::Info::new(self.name.clone().into_bytes(), None, true);
         Ok(top_tree.hash(Some(&info))?)
     }
 

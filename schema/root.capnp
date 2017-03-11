@@ -68,22 +68,36 @@ struct HashIds {
 	hashIds @0 :List(UInt64);
 }
 
+struct UserGroup {
+    userId @0 :UInt64;
+    groupId @1 :UInt64;
+}
+
 struct FileInfo {
     name @0 :Data;
-	created :union {
-		unknown @1 :Void;
-		timestamp @2 :Int64;
+
+	createdTimestampSecs @1 :UInt64;
+	modifiedTimestampSecs @2 :UInt64;
+	accessedTimestampSecs @3 :UInt64;
+
+	byteLength @4 :UInt64;
+
+	owner :union {
+		none @5 :Void;
+		userGroup @6 :UserGroup;
 	}
-	modified :union {
-		unknown @3 :Void;
-		timestamp @4 :Int64;
+
+	permissions :union {
+	    none @7 :Void;
+	    mode @8 :UInt32;
 	}
-	accessed :union {
-		unknown @5 :Void;
-		timestamp @6 :Int64;
+
+	hatSnapshotTimestamp @11 :UInt64;
+
+	tag :union {
+	    none @9 :Void;
+	    snapshotTop @10 :Void;
 	}
-	hatSnapshotTop @7 :Bool;
-	hatSnapshotTimestamp @8 :Int64;
 }
 
 struct File {

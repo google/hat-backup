@@ -33,6 +33,7 @@ sodiumoxide = "*"
 time = "*"
 void = "1"
 scoped-pool = "*"
+filetime = "*"
 
 
 [dependencies.diesel]
