@@ -71,9 +71,9 @@ struct HashIds {
 struct FileInfo {
     name @0 :Data;
 
-	createdTimestampNSecs @1 :Int64;
-	modifiedTimestampNSecs @2 :Int64;
-	accessedTimestampNSecs @3 :Int64;
+	createdTimestampSecs @1 :UInt64;
+	modifiedTimestampSecs @2 :UInt64;
+	accessedTimestampSecs @3 :UInt64;
 
 	byteSize @4 :UInt64;
 
@@ -86,7 +86,7 @@ struct FileInfo {
 	}
 
 	hatSnapshotTop @9 :Bool;
-	hatSnapshotTimestamp @10 :Int64;
+	hatSnapshotTimestamp @10 :UInt64;
 }
 
 struct File {

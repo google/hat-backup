@@ -321,23 +321,7 @@ impl<B: StoreBackend> HatRc<B> {
         capnp::serialize_packed::write_message(&mut listing, &message).unwrap();
 
         let family = self.open_family(synthetic_roots_family()).unwrap();
-        family.snapshot_direct(key::Entry {
-                                 id: None,
-                                 parent_id: None,
-                                 info: key::Info {
-                                     name: From::from("root"),
-                                     created: None,
-                                     modified: None,
-                                     accessed: None,
-                                     permissions: None,
-                                     user_id: None,
-                                     group_id: None,
-                                     byte_length: Some(listing.len() as u64),
-                                     hat_snapshot_top: false,
-                                     hat_snapshot_ts: 0,
-                                 },
-                                 data_hash: None,
-                             },
+        family.snapshot_direct(key::Entry::new(None, From::from("root"), None),
                              false,
                              Some(FileIterator::from_bytes(listing)))?;
 

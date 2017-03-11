@@ -40,7 +40,7 @@ impl FileEntry {
         if filename_opt.is_some() {
             let meta = fs::symlink_metadata(&full_path)?;
             Ok(FileEntry {
-                key_entry: key::Entry::new(parent, filename_opt.unwrap(), &meta),
+                key_entry: key::Entry::new(parent, filename_opt.unwrap(), Some(&meta)),
                 metadata: meta,
                 full_path: full_path,
             })

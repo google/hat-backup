@@ -225,9 +225,10 @@ impl<IT: io::Read, B: StoreBackend> MsgHandler<Msg<IT>, Reply<B>> for Store<B> {
             Msg::Insert(org_entry, chunk_it_opt) => {
                 let entry = match self.index
                     .lookup(org_entry.parent_id, org_entry.info.name.clone())? {
-                    Some(ref entry) if org_entry.info.accessed == entry.info.accessed &&
-                                       org_entry.info.modified == entry.info.modified &&
-                                       org_entry.info.created == entry.info.created => {
+                    Some(ref entry) if org_entry.info.modified_ts_secs ==
+                                       entry.info.modified_ts_secs &&
+                                       org_entry.info.created_ts_secs ==
+                                       entry.info.created_ts_secs => {
                         if chunk_it_opt.is_some() && entry.data_hash.is_some() {
                             let hash = hash::Hash { bytes: entry.data_hash.clone().unwrap() };
                             if self.hash_index.hash_exists(&hash) {
@@ -261,7 +262,10 @@ impl<IT: io::Read, B: StoreBackend> MsgHandler<Msg<IT>, Reply<B>> for Store<B> {
                 if it_opt.is_none() {
                     // No data is associated with this entry.
                     self.index
-                        .update_data_hash(entry.id.unwrap(), entry.info.modified, None, None)?;
+                        .update_data_hash(entry.id.unwrap(),
+                                          entry.info.modified_ts_secs,
+                                          None,
+                                          None)?;
                     // Bail out before storing data that does not exist:
                     return Ok(());
                 }
@@ -300,7 +304,7 @@ impl<IT: io::Read, B: StoreBackend> MsgHandler<Msg<IT>, Reply<B>> for Store<B> {
                 // It is OK that this has is not yet valid, as we check hashes at snapshot time.
                 self.index
                     .update_data_hash(entry.id.unwrap(),
-                                      entry.info.modified,
+                                      entry.info.modified_ts_secs,
                                       Some(hash_ref.hash.clone()),
                                       Some(hash_ref))?;
 

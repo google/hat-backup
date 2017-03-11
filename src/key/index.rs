@@ -29,6 +29,7 @@ use std::sync::{Mutex, MutexGuard};
 
 use super::schema;
 use time::Duration;
+use std::time;
 use util::{InfoWriter, PeriodicTimer};
 use root_capnp;
 
@@ -45,9 +46,9 @@ pub struct Entry {
 pub struct Info {
     pub name: Vec<u8>,
 
-    pub created: Option<i64>,
-    pub modified: Option<i64>,
-    pub accessed: Option<i64>,
+    pub created_ts_secs: Option<u64>,
+    pub modified_ts_secs: Option<u64>,
+    pub accessed_ts_secs: Option<u64>,
 
     pub permissions: Option<u64>,
     pub user_id: Option<u64>,
@@ -55,42 +56,49 @@ pub struct Info {
 
     pub byte_length: Option<u64>,
     pub hat_snapshot_top: bool,
-    pub hat_snapshot_ts: i64,
+    pub hat_snapshot_ts: u64,
 }
 
 impl Entry {
-    pub fn new(parent: Option<u64>, name: Vec<u8>, meta: &fs::Metadata) -> Entry {
+    pub fn new(parent: Option<u64>, name: Vec<u8>, meta: Option<&fs::Metadata>) -> Entry {
         Entry {
             parent_id: parent,
             id: None,
             data_hash: None,
-
-            info: Info {
-                name: name,
-
-                created: None,
-                modified: None,
-                accessed: None,
-
-                permissions: None,
-                user_id: None,
-                group_id: None,
-
-                byte_length: Some(meta.len()),
-                hat_snapshot_top: false,
-                hat_snapshot_ts: 0,
-            }
+            info: Info::new(name, meta, false),
         }
     }
 }
 
 impl Info {
+    pub fn new(name: Vec<u8>, meta: Option<&fs::Metadata>, top: bool) -> Info {
+        fn since_epoch(t: time::SystemTime) -> Option<u64> {
+            t.duration_since(time::UNIX_EPOCH).ok().map(|d| d.as_secs())
+        }
+
+        Info {
+            name: name,
+
+            created_ts_secs: meta.and_then(|m| m.created().ok().and_then(since_epoch)),
+            modified_ts_secs: meta.and_then(|m| m.modified().ok().and_then(since_epoch)),
+            accessed_ts_secs: meta.and_then(|m| m.accessed().ok().and_then(since_epoch)),
+
+            permissions: None,
+            user_id: None,
+            group_id: None,
+
+            byte_length: meta.map(|m| m.len()),
+            hat_snapshot_top: top,
+            hat_snapshot_ts: since_epoch(time::SystemTime::now()).unwrap_or(0),
+        }
+    }
+
     pub fn read(msg: root_capnp::file_info::Reader) -> Result<Info, capnp::Error> {
         Ok(Info {
             name: msg.get_name()?.to_vec(),
-            created: None,
-            modified: None,
-            accessed: None,
+            created_ts_secs: None,
+            modified_ts_secs: None,
+            accessed_ts_secs: None,
             permissions: None,
             user_id: None,
             group_id: None,
@@ -102,9 +110,9 @@ impl Info {
     pub fn populate_msg(&self, mut msg: root_capnp::file_info::Builder) {
         msg.borrow().set_name(&self.name);
 
-        msg.borrow().set_created_timestamp_n_secs(self.created.unwrap_or(0));
-        msg.borrow().set_modified_timestamp_n_secs(self.modified.unwrap_or(0));
-        msg.borrow().set_accessed_timestamp_n_secs(self.accessed.unwrap_or(0));
+        msg.borrow().set_created_timestamp_secs(self.created_ts_secs.unwrap_or(0));
+        msg.borrow().set_modified_timestamp_secs(self.modified_ts_secs.unwrap_or(0));
+        msg.borrow().set_accessed_timestamp_secs(self.accessed_ts_secs.unwrap_or(0));
 
         msg.borrow().set_hat_snapshot_top(self.hat_snapshot_top);
         msg.borrow().set_hat_snapshot_timestamp(self.hat_snapshot_ts);
@@ -170,11 +178,11 @@ impl InternalKeyIndex {
             Some(id_) => {
                 // Replace existing entry.
                 try!(diesel::update(keys.find(id_ as i64))
-                    .set((parent.eq(entry.parent_id.map(|x| x as i64)),
+                    .set((parent.eq(entry.parent_id.map(|u| u as i64)),
                           name.eq(&entry.info.name[..]),
-                          created.eq(entry.info.created),
-                          modified.eq(entry.info.modified),
-                          accessed.eq(entry.info.accessed)))
+                          created.eq(entry.info.created_ts_secs.map(|u| u as i64)),
+                          modified.eq(entry.info.modified_ts_secs.map(|u| u as i64)),
+                          accessed.eq(entry.info.accessed_ts_secs.map(|u| u as i64))))
                     .execute(&self.conn));
                 entry
             }
@@ -182,14 +190,14 @@ impl InternalKeyIndex {
                 // Insert new entry.
                 {
                     let new = schema::NewKey {
-                        parent: entry.parent_id.map(|x| x as i64),
+                        parent: entry.parent_id.map(|u| u as i64),
                         name: &entry.info.name[..],
-                        created: entry.info.created,
-                        modified: entry.info.modified,
-                        accessed: entry.info.accessed,
-                        permissions: entry.info.permissions.map(|x| x as i64),
-                        group_id: entry.info.group_id.map(|x| x as i64),
-                        user_id: entry.info.user_id.map(|x| x as i64),
+                        created: entry.info.created_ts_secs.map(|u| u as i64),
+                        modified: entry.info.modified_ts_secs.map(|u| u as i64),
+                        accessed: entry.info.accessed_ts_secs.map(|u| u as i64),
+                        permissions: entry.info.permissions.map(|u| u as i64),
+                        group_id: entry.info.group_id.map(|u| u as i64),
+                        user_id: entry.info.user_id.map(|u| u as i64),
                         hash: None,
                         hash_ref: None,
                     };
@@ -236,9 +244,9 @@ impl InternalKeyIndex {
                 data_hash: row.hash,
                 info: Info {
                     name: name_,
-                    created: row.created,
-                    modified: row.modified,
-                    accessed: row.accessed,
+                    created_ts_secs: row.created.map(|i| i as u64),
+                    modified_ts_secs: row.modified.map(|i| i as u64),
+                    accessed_ts_secs: row.accessed.map(|i| i as u64),
                     permissions: row.permissions.map(|x| x as u64),
                     user_id: row.user_id.map(|x| x as u64),
                     group_id: row.group_id.map(|x| x as u64),
@@ -257,7 +265,7 @@ impl InternalKeyIndex {
     /// Returns `UpdateOk`.
     fn update_data_hash(&mut self,
                         id_: u64,
-                        last_modified: Option<i64>,
+                        last_modified: Option<u64>,
                         hash_opt: Option<hash::Hash>,
                         hash_ref_opt: Option<hash::tree::HashRef>)
                         -> Result<(), DieselError> {
@@ -272,7 +280,7 @@ impl InternalKeyIndex {
         if last_modified.is_some() {
             try!(diesel::update(keys.find(id_)
                     .filter(modified.eq::<Option<i64>>(None)
-                        .or(modified.le(last_modified))))
+                        .or(modified.le(last_modified.map(|u| u as i64)))))
                 .set((hash.eq(hash_bytes), hash_ref.eq(hash_ref_bytes)))
                 .execute(&self.conn));
         } else {
@@ -305,13 +313,13 @@ impl InternalKeyIndex {
             .map(|mut r| {
                 (Entry {
                      id: Some(r.id as u64),
-                     parent_id: r.parent.map(|x| x as u64),
+                     parent_id: r.parent.map(|i| i as u64),
                      data_hash: r.hash,
                      info: Info {
                          name: r.name,
-                         created: r.created,
-                         modified: r.modified,
-                         accessed: r.accessed,
+                         created_ts_secs: r.created.map(|i| i as u64),
+                         modified_ts_secs: r.modified.map(|i| i as u64),
+                         accessed_ts_secs: r.accessed.map(|i| i as u64),
                          permissions: r.permissions
                              .map(|x| x as u64),
                          user_id: r.user_id.map(|x| x as u64),
@@ -356,7 +364,7 @@ impl KeyIndex {
 
     pub fn update_data_hash(&self,
                             id: u64,
-                            last_modified: Option<i64>,
+                            last_modified: Option<u64>,
                             hash_opt: Option<hash::Hash>,
                             hash_ref_opt: Option<hash::tree::HashRef>)
                             -> Result<(), DieselError> {
