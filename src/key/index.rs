@@ -15,6 +15,8 @@
 //! Local state for keys in the snapshot in progress (the "index").
 
 
+use std::fs;
+
 use diesel;
 use diesel::prelude::*;
 use diesel::connection::TransactionManager;
@@ -56,6 +58,32 @@ pub struct Info {
     pub hat_snapshot_ts: i64,
 }
 
+impl Entry {
+    pub fn new(parent: Option<u64>, name: Vec<u8>, meta: &fs::Metadata) -> Entry {
+        Entry {
+            parent_id: parent,
+            id: None,
+            data_hash: None,
+
+            info: Info {
+                name: name,
+
+                created: None,
+                modified: None,
+                accessed: None,
+
+                permissions: None,
+                user_id: None,
+                group_id: None,
+
+                byte_length: Some(meta.len()),
+                hat_snapshot_top: false,
+                hat_snapshot_ts: 0,
+            }
+        }
+    }
+}
+
 impl Info {
     pub fn read(msg: root_capnp::file_info::Reader) -> Result<Info, capnp::Error> {
         Ok(Info {
@@ -74,20 +102,9 @@ impl Info {
     pub fn populate_msg(&self, mut msg: root_capnp::file_info::Builder) {
         msg.borrow().set_name(&self.name);
 
-        match self.created {
-            None => msg.borrow().init_created().set_unknown(()),
-            Some(ts) => msg.borrow().init_created().set_timestamp(ts),
-        }
-
-        match self.modified {
-            None => msg.borrow().init_modified().set_unknown(()),
-            Some(ts) => msg.borrow().init_modified().set_timestamp(ts),
-        }
-
-        match self.accessed {
-            None => msg.borrow().init_accessed().set_unknown(()),
-            Some(ts) => msg.borrow().init_accessed().set_timestamp(ts),
-        }
+        msg.borrow().set_created_timestamp_n_secs(self.created.unwrap_or(0));
+        msg.borrow().set_modified_timestamp_n_secs(self.modified.unwrap_or(0));
+        msg.borrow().set_accessed_timestamp_n_secs(self.accessed.unwrap_or(0));
 
         msg.borrow().set_hat_snapshot_top(self.hat_snapshot_top);
         msg.borrow().set_hat_snapshot_timestamp(self.hat_snapshot_ts);

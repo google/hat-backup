@@ -70,20 +70,23 @@ struct HashIds {
 
 struct FileInfo {
     name @0 :Data;
-	created :union {
-		unknown @1 :Void;
-		timestamp @2 :Int64;
+
+	createdTimestampNSecs @1 :Int64;
+	modifiedTimestampNSecs @2 :Int64;
+	accessedTimestampNSecs @3 :Int64;
+
+	byteSize @4 :UInt64;
+
+	userId @5 :UInt64;
+	groupId @6 :UInt64;
+
+	permissions :union {
+	    none @7 :Void;
+	    mode @8 :UInt32;
 	}
-	modified :union {
-		unknown @3 :Void;
-		timestamp @4 :Int64;
-	}
-	accessed :union {
-		unknown @5 :Void;
-		timestamp @6 :Int64;
-	}
-	hatSnapshotTop @7 :Bool;
-	hatSnapshotTimestamp @8 :Int64;
+
+	hatSnapshotTop @9 :Bool;
+	hatSnapshotTimestamp @10 :Int64;
 }
 
 struct File {
