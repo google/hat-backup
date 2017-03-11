@@ -26,5 +26,6 @@ pub trait StoreBackend: Sync + Send + 'static {
     fn store(&self, name: &[u8], data: &CipherText) -> Result<(), String>;
     fn retrieve(&self, name: &[u8]) -> Result<Option<Vec<u8>>, String>;
     fn delete(&self, name: &[u8]) -> Result<(), String>;
+    fn list(&self) -> Result<Vec<Box<[u8]>>, String>;
     fn flush(&self) -> Result<(), String>;
 }

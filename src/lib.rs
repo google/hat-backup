@@ -41,6 +41,8 @@ extern crate error_type;
 // Diesel supplies our SQLite wrapper.
 #[macro_use]
 extern crate diesel;
+#[macro_use]
+extern crate diesel_codegen;
 
 // Testing utilities.
 #[cfg(test)]
@@ -50,6 +52,7 @@ extern crate quickcheck;
 pub mod backend;
 mod blob;
 mod crypto;
+mod db;
 mod errors;
 mod gc;
 mod hash;

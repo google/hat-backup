@@ -28,33 +28,60 @@ pub enum Key {
     XSalsa20Poly1305(xsalsa20poly1305::Key),
 }
 
-#[derive(Debug, Clone, Eq, PartialEq)]
-pub enum Kind {
-    TreeBranch(i64),
-    TreeLeaf,
+#[derive(Debug, Copy, Clone, Eq, PartialEq)]
+pub enum NodeType {
+    Branch(i64),
+    Leaf,
 }
 
-pub fn node_from_height(height: i64) -> Kind {
-    assert!(height >= 0);
-    match height {
-        0 => Kind::TreeLeaf,
-        h => Kind::TreeBranch(h),
+impl From<i64> for NodeType {
+    fn from(n: i64) -> NodeType {
+        match n {
+            0 => NodeType::Leaf,
+            _ if n > 0 => NodeType::Branch(n),
+            _ => unreachable!("Negative node height: {}", n),
+        }
     }
 }
 
-pub fn node_height(kind: &Kind) -> i64 {
-    match kind {
-        &Kind::TreeBranch(height) => {
-            assert!(height >= 1);
-            height
+impl From<NodeType> for i64 {
+    fn from(t: NodeType) -> i64 {
+        match t {
+            NodeType::Branch(height) => height,
+            NodeType::Leaf => 0,
         }
-        &Kind::TreeLeaf => 0,
+    }
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub enum LeafType {
+    TreeList = 2,
+    FileChunk = 1,
+}
+
+impl From<i64> for LeafType {
+    fn from(n: i64) -> LeafType {
+        match n {
+            2 => LeafType::TreeList,
+            1 => LeafType::FileChunk,
+            _ => unreachable!("Corrupt LeafType tag: {}", n),
+        }
+    }
+}
+
+impl From<LeafType> for i64 {
+    fn from(t: LeafType) -> i64 {
+        match t {
+            LeafType::TreeList => 2,
+            LeafType::FileChunk => 1,
+        }
     }
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct ChunkRef {
-    pub blob_id: Vec<u8>,
+    pub blob_id: Option<i64>,
+    pub blob_name: Vec<u8>,
     pub offset: usize,
     pub length: usize,
     pub packing: Option<Packing>,
@@ -63,11 +90,11 @@ pub struct ChunkRef {
 
 impl ChunkRef {
     pub fn from_bytes(bytes: &mut &[u8]) -> Result<ChunkRef, capnp::Error> {
-        let reader = try!(capnp::serialize_packed::read_message(bytes,
-                                                       capnp::message::ReaderOptions::new()));
-        let root = try!(reader.get_root::<root_capnp::chunk_ref::Reader>());
+        let reader = capnp::serialize_packed::read_message(bytes,
+                                                           capnp::message::ReaderOptions::new())?;
+        let root = reader.get_root::<root_capnp::chunk_ref::Reader>()?;
 
-        Ok(try!(ChunkRef::read_msg(&root)))
+        Ok(ChunkRef::read_msg(&root)?)
     }
 
     pub fn as_bytes(&self) -> Vec<u8> {
@@ -76,15 +103,32 @@ impl ChunkRef {
             let mut root = message.init_root::<root_capnp::chunk_ref::Builder>();
             self.populate_msg(root.borrow());
         }
-
         let mut out = Vec::new();
         capnp::serialize_packed::write_message(&mut out, &message).unwrap();
+        out
+    }
 
+    pub fn as_bytes_no_name(&self) -> Vec<u8> {
+        let mut message = ::capnp::message::Builder::new_default();
+        {
+            let mut root = message.init_root::<root_capnp::chunk_ref::Builder>();
+            self.populate_msg_no_name(root.borrow());
+        }
+        let mut out = Vec::new();
+        capnp::serialize_packed::write_message(&mut out, &message).unwrap();
         out
     }
 
     pub fn populate_msg(&self, mut msg: root_capnp::chunk_ref::Builder) {
-        msg.set_blob_id(&self.blob_id[..]);
+        self.populate_msg_name(msg.borrow());
+        self.populate_msg_no_name(msg);
+    }
+
+    pub fn populate_msg_name(&self, mut msg: root_capnp::chunk_ref::Builder) {
+        msg.set_blob_name(&self.blob_name[..]);
+    }
+
+    pub fn populate_msg_no_name(&self, mut msg: root_capnp::chunk_ref::Builder) {
         msg.set_offset(self.offset as i64);
         msg.set_length(self.length as i64);
 
@@ -103,18 +147,19 @@ impl ChunkRef {
 
     pub fn read_msg(msg: &root_capnp::chunk_ref::Reader) -> Result<ChunkRef, capnp::Error> {
         Ok(ChunkRef {
-            blob_id: try!(msg.get_blob_id()).to_owned(),
+            blob_id: None,
+            blob_name: msg.get_blob_name()?.to_owned(),
             offset: msg.get_offset() as usize,
             length: msg.get_length() as usize,
-            packing: match try!(msg.get_packing().which()) {
+            packing: match msg.get_packing().which()? {
                 root_capnp::chunk_ref::packing::None(()) => None,
                 root_capnp::chunk_ref::packing::Gzip(()) => Some(Packing::GZip),
                 root_capnp::chunk_ref::packing::Snappy(()) => Some(Packing::Snappy),
             },
-            key: match try!(msg.get_key().which()) {
+            key: match msg.get_key().which()? {
                 root_capnp::chunk_ref::key::None(()) => None,
                 root_capnp::chunk_ref::key::Xsalsa20Poly1305(res) => {
-                    Some(Key::XSalsa20Poly1305(xsalsa20poly1305::Key::from_slice(try!(res))
+                    Some(Key::XSalsa20Poly1305(xsalsa20poly1305::Key::from_slice(res?)
                         .expect("Incorrect key-size")))
                 }
             },

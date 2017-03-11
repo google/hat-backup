@@ -17,21 +17,30 @@
 
 use diesel;
 use diesel::prelude::*;
+use diesel::connection::TransactionManager;
 use diesel::sqlite::SqliteConnection;
 use errors::DieselError;
 use hash;
+use capnp;
 
 use std::sync::{Mutex, MutexGuard};
 
 use super::schema;
 use time::Duration;
 use util::{InfoWriter, PeriodicTimer};
+use root_capnp;
 
 #[derive(Clone, Debug)]
 pub struct Entry {
     pub id: Option<u64>,
     pub parent_id: Option<u64>,
 
+    pub data_hash: Option<Vec<u8>>,
+    pub info: Info,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct Info {
     pub name: Vec<u8>,
 
     pub created: Option<i64>,
@@ -42,8 +51,47 @@ pub struct Entry {
     pub user_id: Option<u64>,
     pub group_id: Option<u64>,
 
-    pub data_hash: Option<Vec<u8>>,
-    pub data_length: Option<u64>,
+    pub byte_length: Option<u64>,
+    pub hat_snapshot_top: bool,
+    pub hat_snapshot_ts: i64,
+}
+
+impl Info {
+    pub fn read(msg: root_capnp::file_info::Reader) -> Result<Info, capnp::Error> {
+        Ok(Info {
+            name: msg.get_name()?.to_vec(),
+            created: None,
+            modified: None,
+            accessed: None,
+            permissions: None,
+            user_id: None,
+            group_id: None,
+            byte_length: None,
+            hat_snapshot_top: msg.get_hat_snapshot_top(),
+            hat_snapshot_ts: msg.get_hat_snapshot_timestamp(),
+        })
+    }
+    pub fn populate_msg(&self, mut msg: root_capnp::file_info::Builder) {
+        msg.borrow().set_name(&self.name);
+
+        match self.created {
+            None => msg.borrow().init_created().set_unknown(()),
+            Some(ts) => msg.borrow().init_created().set_timestamp(ts),
+        }
+
+        match self.modified {
+            None => msg.borrow().init_modified().set_unknown(()),
+            Some(ts) => msg.borrow().init_modified().set_timestamp(ts),
+        }
+
+        match self.accessed {
+            None => msg.borrow().init_accessed().set_unknown(()),
+            Some(ts) => msg.borrow().init_accessed().set_timestamp(ts),
+        }
+
+        msg.borrow().set_hat_snapshot_top(self.hat_snapshot_top);
+        msg.borrow().set_hat_snapshot_timestamp(self.hat_snapshot_ts);
+    }
 }
 
 pub struct KeyIndex(Mutex<InternalKeyIndex>);
@@ -56,18 +104,20 @@ pub struct InternalKeyIndex {
 
 impl InternalKeyIndex {
     fn new(path: &str) -> Result<InternalKeyIndex, DieselError> {
-        let conn = try!(SqliteConnection::establish(path));
+        let conn = SqliteConnection::establish(path)?;
 
         let ki = InternalKeyIndex {
             conn: conn,
             flush_timer: PeriodicTimer::new(Duration::seconds(5)),
         };
 
-        let dir = try!(diesel::migrations::find_migrations_directory());
-        try!(diesel::migrations::run_pending_migrations_in_directory(&ki.conn,
-                                                                     &dir,
-                                                                     &mut InfoWriter));
-        try!(ki.conn.begin_transaction());
+        let dir = diesel::migrations::find_migrations_directory()?;
+        diesel::migrations::run_pending_migrations_in_directory(&ki.conn, &dir, &mut InfoWriter)?;
+
+        {
+            let tm = ki.conn.transaction_manager();
+            tm.begin_transaction(&ki.conn)?;
+        }
 
         Ok(ki)
     }
@@ -80,15 +130,16 @@ impl InternalKeyIndex {
 
     fn maybe_flush(&mut self) -> Result<(), DieselError> {
         if self.flush_timer.did_fire() {
-            try!(self.flush());
+            self.flush()?;
         }
 
         Ok(())
     }
 
     fn flush(&mut self) -> Result<(), DieselError> {
-        try!(self.conn.commit_transaction());
-        try!(self.conn.begin_transaction());
+        let tm = self.conn.transaction_manager();
+        tm.commit_transaction(&self.conn)?;
+        tm.begin_transaction(&self.conn)?;
 
         Ok(())
     }
@@ -103,10 +154,10 @@ impl InternalKeyIndex {
                 // Replace existing entry.
                 try!(diesel::update(keys.find(id_ as i64))
                     .set((parent.eq(entry.parent_id.map(|x| x as i64)),
-                          name.eq(&entry.name[..]),
-                          created.eq(entry.created),
-                          modified.eq(entry.modified),
-                          accessed.eq(entry.accessed)))
+                          name.eq(&entry.info.name[..]),
+                          created.eq(entry.info.created),
+                          modified.eq(entry.info.modified),
+                          accessed.eq(entry.info.accessed)))
                     .execute(&self.conn));
                 entry
             }
@@ -115,23 +166,22 @@ impl InternalKeyIndex {
                 {
                     let new = schema::NewKey {
                         parent: entry.parent_id.map(|x| x as i64),
-                        name: &entry.name[..],
-                        created: entry.created,
-                        modified: entry.modified,
-                        accessed: entry.accessed,
-                        permissions: entry.permissions.map(|x| x as i64),
-                        group_id: entry.group_id.map(|x| x as i64),
-                        user_id: entry.user_id.map(|x| x as i64),
+                        name: &entry.info.name[..],
+                        created: entry.info.created,
+                        modified: entry.info.modified,
+                        accessed: entry.info.accessed,
+                        permissions: entry.info.permissions.map(|x| x as i64),
+                        group_id: entry.info.group_id.map(|x| x as i64),
+                        user_id: entry.info.user_id.map(|x| x as i64),
                         hash: None,
                         hash_ref: None,
                     };
 
-                    try!(diesel::insert(&new)
-                        .into(keys)
-                        .execute(&self.conn));
+                    diesel::insert(&new).into(keys)
+                        .execute(&self.conn)?;
                 }
                 let mut entry = entry;
-                entry.id = Some(try!(self.last_insert_rowid()) as u64);
+                entry.id = Some(self.last_insert_rowid()? as u64);
                 entry
             }
         };
@@ -149,16 +199,16 @@ impl InternalKeyIndex {
 
         let row_opt = match parent_ {
             Some(p) => {
-                try!(keys.filter(parent.eq(p as i64))
+                keys.filter(parent.eq(p as i64))
                     .filter(name.eq(&name_[..]))
                     .first::<schema::Key>(&self.conn)
-                    .optional())
+                    .optional()?
             }
             None => {
-                try!(keys.filter(parent.is_null())
+                keys.filter(parent.is_null())
                     .filter(name.eq(&name_[..]))
                     .first::<schema::Key>(&self.conn)
-                    .optional())
+                    .optional()?
             }
         };
 
@@ -166,15 +216,19 @@ impl InternalKeyIndex {
             Ok(Some(Entry {
                 id: Some(row.id as u64),
                 parent_id: parent_,
-                name: name_,
-                created: row.created,
-                modified: row.modified,
-                accessed: row.accessed,
-                permissions: row.permissions.map(|x| x as u64),
-                user_id: row.user_id.map(|x| x as u64),
-                group_id: row.group_id.map(|x| x as u64),
                 data_hash: row.hash,
-                data_length: None,
+                info: Info {
+                    name: name_,
+                    created: row.created,
+                    modified: row.modified,
+                    accessed: row.accessed,
+                    permissions: row.permissions.map(|x| x as u64),
+                    user_id: row.user_id.map(|x| x as u64),
+                    group_id: row.group_id.map(|x| x as u64),
+                    byte_length: None,
+                    hat_snapshot_top: false,
+                    hat_snapshot_ts: 0,
+                },
             }))
         } else {
             Ok(None)
@@ -205,9 +259,8 @@ impl InternalKeyIndex {
                 .set((hash.eq(hash_bytes), hash_ref.eq(hash_ref_bytes)))
                 .execute(&self.conn));
         } else {
-            try!(diesel::update(keys.find(id_))
-                .set((hash.eq(hash_bytes), hash_ref.eq(hash_ref_bytes)))
-                .execute(&self.conn));
+            diesel::update(keys.find(id_)).set((hash.eq(hash_bytes), hash_ref.eq(hash_ref_bytes)))
+                .execute(&self.conn)?;
         }
 
         self.maybe_flush()
@@ -222,12 +275,12 @@ impl InternalKeyIndex {
 
         let rows = match parent_opt {
             Some(p) => {
-                try!(keys.filter(parent.eq(p as i64))
-                    .load::<schema::Key>(&self.conn))
+                keys.filter(parent.eq(p as i64))
+                    .load::<schema::Key>(&self.conn)?
             }
             None => {
-                try!(keys.filter(parent.is_null())
-                    .load::<schema::Key>(&self.conn))
+                keys.filter(parent.is_null())
+                    .load::<schema::Key>(&self.conn)?
             }
         };
 
@@ -236,16 +289,20 @@ impl InternalKeyIndex {
                 (Entry {
                      id: Some(r.id as u64),
                      parent_id: r.parent.map(|x| x as u64),
-                     name: r.name,
-                     created: r.created,
-                     modified: r.modified,
-                     accessed: r.accessed,
-                     permissions: r.permissions
-                         .map(|x| x as u64),
-                     user_id: r.user_id.map(|x| x as u64),
-                     group_id: r.group_id.map(|x| x as u64),
                      data_hash: r.hash,
-                     data_length: None,
+                     info: Info {
+                         name: r.name,
+                         created: r.created,
+                         modified: r.modified,
+                         accessed: r.accessed,
+                         permissions: r.permissions
+                             .map(|x| x as u64),
+                         user_id: r.user_id.map(|x| x as u64),
+                         group_id: r.group_id.map(|x| x as u64),
+                         byte_length: None,
+                         hat_snapshot_top: false,
+                         hat_snapshot_ts: 0,
+                     },
                  },
                  r.hash_ref
                      .as_mut()

@@ -15,18 +15,14 @@
 //! Local state for external blobs and their states.
 
 
-use diesel;
-use diesel::prelude::*;
-use diesel::sqlite::SqliteConnection;
+use crypto;
+use db;
 
 use errors::DieselError;
 
-use sodiumoxide::randombytes::randombytes;
-use std::sync::{Mutex, MutexGuard};
+use std::sync::{Arc, Mutex};
 
-use super::schema;
 use tags;
-use util;
 
 
 #[derive(Clone, Debug, Default)]
@@ -36,60 +32,85 @@ pub struct BlobDesc {
 }
 
 pub struct InternalBlobIndex {
-    conn: SqliteConnection,
-    next_id: i64,
+    index: Arc<db::Index>,
+    next_id: Arc<Mutex<i64>>,
+    name_key: Arc<crypto::FixedKey>,
 }
 
-pub struct BlobIndex(Mutex<InternalBlobIndex>);
+pub struct BlobIndex(InternalBlobIndex);
 
 
 impl InternalBlobIndex {
-    pub fn new(path: &str) -> Result<InternalBlobIndex, DieselError> {
-        let conn = try!(SqliteConnection::establish(path));
+    pub fn new(index: Arc<db::Index>) -> Result<InternalBlobIndex, DieselError> {
+        // TODO(jos): Plug an actual crypto key through somehow.
+        let pubkey = crypto::sealed::desc::PublicKey::from_slice(&[215, 136, 80, 128, 158, 109,
+                                                                   227, 141, 219, 63, 118, 91,
+                                                                   123, 97, 1, 97, 65, 237, 62,
+                                                                   171, 83, 159, 200, 11, 68,
+                                                                   138, 40, 82, 24, 47, 187, 29])
+            .unwrap();
+        let seckey = crypto::sealed::desc::SecretKey::from_slice(&[94, 13, 181, 81, 97, 87, 76,
+                                                                   37, 53, 92, 120, 232, 17, 126,
+                                                                   234, 78, 12, 23, 141, 61, 40,
+                                                                   10, 136, 127, 103, 192, 255,
+                                                                   193, 142, 154, 101, 35])
+            .unwrap();
+        let name_key = crypto::FixedKey::new(pubkey, Some(seckey));
 
-        let mut bi = InternalBlobIndex {
-            conn: conn,
-            next_id: -1,
+
+        let bi = InternalBlobIndex {
+            index: index,
+            next_id: Arc::new(Mutex::new(0)),
+            name_key: Arc::new(name_key),
         };
-
-        let dir = try!(diesel::migrations::find_migrations_directory());
-        try!(diesel::migrations::run_pending_migrations_in_directory(&bi.conn,
-                                                                     &dir,
-                                                                     &mut util::InfoWriter));
-        try!(bi.conn.begin_transaction());
         bi.refresh_next_id();
         Ok(bi)
     }
 
-    fn new_blob_desc(&mut self) -> BlobDesc {
+    fn name_of_id(&self, id: i64) -> Vec<u8> {
+        return self.name_key
+            .light_seal(crypto::PlainText::from_i64(id).as_ref())
+            .to_vec();
+    }
+
+    fn id_of_name(&self, name: &[u8]) -> Result<i64, String> {
+        return Ok(self.name_key
+            .light_unseal(crypto::CipherTextRef::new(name))
+            .unwrap()
+            .as_ref()
+            .read_i64()
+            .unwrap());
+    }
+
+    fn new_blob_desc(&self) -> BlobDesc {
+        let id = self.next_id();
         BlobDesc {
-            name: randombytes(24),
-            id: self.next_id(),
+            name: self.name_of_id(id),
+            id: id,
         }
     }
 
-    pub fn refresh_next_id(&mut self) {
-        use diesel::expression::max;
-        use super::schema::blobs::dsl::*;
-
-        let id_opt = blobs.select(max(id).nullable())
-            .first::<Option<i64>>(&self.conn)
-            .optional()
-            .expect("Error querying blobs")
-            .and_then(|x| x);
-
-        self.next_id = 1 + id_opt.unwrap_or(0);
+    pub fn refresh_next_id(&self) {
+        let id = {
+            self.index.lock().blob_next_id()
+        };
+        let mut next_id = self.next_id.lock().unwrap();
+        *next_id = 1 + id;
     }
 
-    fn next_id(&mut self) -> i64 {
-        let id = self.next_id;
-        self.next_id += 1;
-
-        id
+    fn next_id(&self) -> i64 {
+        let mut id = self.next_id.lock().unwrap();
+        *id += 1;
+        *id
     }
 
-    fn recover(&mut self, name: Vec<u8>) -> BlobDesc {
-        if let Some(id) = self.find_id(&name[..]) {
+    fn recover(&self, name: Vec<u8>) -> BlobDesc {
+        let wanted_id = self.id_of_name(&name).unwrap();
+        if let Some(id) = {
+            self.index.lock().blob_id_from_name(&name[..])
+        } {
+            assert_eq!(id, wanted_id);
+
             // Blob exists.
             return BlobDesc {
                 name: name,
@@ -99,161 +120,76 @@ impl InternalBlobIndex {
 
         let blob = BlobDesc {
             name: name,
-            id: self.next_id(),
+            id: wanted_id,
         };
-        self.in_air(&blob);
-        self.commit_blob(&blob);
+        self.index.lock().blob_in_air(&blob);
+        self.index.lock().blob_commit(&blob);
 
         blob
     }
 
-    fn reserve(&mut self) -> BlobDesc {
+    fn reserve(&self) -> BlobDesc {
         self.new_blob_desc()
-    }
-
-    fn in_air(&mut self, blob: &BlobDesc) {
-        use super::schema::blobs::dsl::*;
-
-        let new = schema::NewBlob {
-            id: blob.id,
-            name: &blob.name,
-            tag: tags::Tag::InProgress as i32,
-        };
-        diesel::insert(&new)
-            .into(blobs)
-            .execute(&self.conn)
-            .expect("Error inserting blob");
-
-        self.new_transaction();
-    }
-
-    fn new_transaction(&mut self) {
-        self.conn.commit_transaction().unwrap();
-        self.conn.begin_transaction().unwrap();
-    }
-
-    fn commit_blob(&mut self, blob: &BlobDesc) {
-        use super::schema::blobs::dsl::*;
-
-        diesel::update(blobs.find(blob.id))
-            .set(tag.eq(tags::Tag::Done as i32))
-            .execute(&self.conn)
-            .expect("Error updating blob");
-        self.new_transaction();
-    }
-
-    fn find_id(&mut self, name_: &[u8]) -> Option<i64> {
-        use super::schema::blobs::dsl::*;
-        blobs.filter(name.eq(name_))
-            .select(id)
-            .first::<i64>(&self.conn)
-            .optional()
-            .expect("Error reading blob")
-    }
-
-    fn tag(&mut self, tag_: tags::Tag, target: Option<&BlobDesc>) {
-        use super::schema::blobs::dsl::*;
-        match target {
-            None => {
-                diesel::update(blobs)
-                    .set(tag.eq(tag_ as i32))
-                    .execute(&self.conn)
-                    .expect("Error updating blob tags")
-            }
-            Some(t) if t.id > 0 => {
-                diesel::update(blobs.find(t.id))
-                    .set(tag.eq(tag_ as i32))
-                    .execute(&self.conn)
-                    .expect("Error updating blob tags")
-            }
-            Some(t) if !t.name.is_empty() => {
-                diesel::update(blobs.filter(name.eq(&t.name)))
-                    .set(tag.eq(tag_ as i32))
-                    .execute(&self.conn)
-                    .expect("Error updating blob tags")
-            }
-            _ => unreachable!(),
-        };
-    }
-
-    fn delete_by_tag(&mut self, tag_: tags::Tag) {
-        use super::schema::blobs::dsl::*;
-        diesel::delete(blobs.filter(tag.eq(tag_ as i32)))
-            .execute(&self.conn)
-            .expect("Error deleting blobs");
-    }
-
-    fn list_by_tag(&mut self, tag_: tags::Tag) -> Vec<BlobDesc> {
-        use super::schema::blobs::dsl::*;
-        blobs.filter(tag.eq(tag_ as i32))
-            .load::<schema::Blob>(&self.conn)
-            .expect("Error listing blobs")
-            .into_iter()
-            .map(|blob_| {
-                BlobDesc {
-                    id: blob_.id,
-                    name: blob_.name,
-                }
-            })
-            .collect()
     }
 }
 
 impl BlobIndex {
-    pub fn new(path: &str) -> Result<BlobIndex, DieselError> {
-        InternalBlobIndex::new(path).map(|index| BlobIndex(Mutex::new(index)))
-    }
-
-    #[cfg(test)]
-    pub fn new_for_testing() -> Result<BlobIndex, DieselError> {
-        BlobIndex::new(":memory:")
-    }
-
-    fn lock(&self) -> MutexGuard<InternalBlobIndex> {
-        self.0.lock().expect("index-process has failed")
+    pub fn new(index: Arc<db::Index>) -> Result<BlobIndex, DieselError> {
+        InternalBlobIndex::new(index).map(|bi| BlobIndex(bi))
     }
 
     /// Reserve an internal `BlobDesc` for a new blob.
     pub fn reserve(&self) -> BlobDesc {
-        self.lock().reserve()
+        self.0.reserve()
     }
 
     /// Report that this blob is in the process of being committed to persistent storage. If a
     /// blob is in this state when the system starts up, it may or may not exist in the persistent
     /// storage, but **should not** be referenced elsewhere, and is therefore safe to delete.
     pub fn in_air(&self, blob: &BlobDesc) {
-        self.lock().in_air(blob)
+        self.0.index.lock().blob_in_air(blob)
     }
 
     /// Report that this blob has been fully committed to persistent storage. We can now use its
     /// reference internally. Only committed blobs are considered "safe to use".
     pub fn commit_done(&self, blob: &BlobDesc) {
-        self.lock().commit_blob(blob)
+        self.0.index.lock().blob_commit(blob)
     }
 
     /// Reinstall blob recovered by from external storage.
     /// Creates a new blob by a known external name.
     pub fn recover(&self, name: Vec<u8>) -> BlobDesc {
-        self.lock().recover(name)
+        self.0.recover(name)
+    }
+
+    pub fn find(&self, name: &[u8]) -> Option<BlobDesc> {
+        if let Some(id) = self.0.index.lock().blob_id_from_name(&name) {
+            Some(BlobDesc {
+                name: name.to_vec(),
+                id: id,
+            })
+        } else {
+            None
+        }
     }
 
     pub fn tag(&self, blob: &BlobDesc, tag: tags::Tag) {
-        self.lock().tag(tag, Some(blob))
+        self.0.index.lock().blob_set_tag(tag, Some(blob))
     }
 
     pub fn tag_all(&self, tag: tags::Tag) {
-        self.lock().tag(tag, None)
+        self.0.index.lock().blob_set_tag(tag, None)
     }
 
     pub fn list_by_tag(&self, tag: tags::Tag) -> Vec<BlobDesc> {
-        self.lock().list_by_tag(tag)
+        self.0.index.lock().blob_list_by_tag(tag)
     }
 
     pub fn delete_by_tag(&self, tag: tags::Tag) {
-        self.lock().delete_by_tag(tag)
+        self.0.index.lock().blob_delete_by_tag(tag)
     }
 
     pub fn flush(&self) {
-        self.lock().new_transaction()
+        self.0.index.lock().flush()
     }
 }

@@ -18,14 +18,17 @@ use errors::CryptoError;
 use hash::Hash;
 use hash::tree::HashRef;
 use sodiumoxide::crypto::stream;
+use std::io;
 
 pub struct PlainText(Vec<u8>);
 pub struct PlainTextRef<'a>(&'a [u8]);
+
 pub struct CipherText {
     chunks: Vec<Vec<u8>>,
     len: usize,
 }
 pub struct CipherTextRef<'a>(&'a [u8]);
+
 
 pub mod authed {
     pub mod desc {
@@ -80,6 +83,9 @@ impl<'a> PlainTextRef<'a> {
     pub fn len(&self) -> usize {
         self.0.len()
     }
+    pub fn read_i64(&self) -> Result<i64, io::Error> {
+        return (&self.0[..]).read_i64::<LittleEndian>();
+    }
     pub fn to_ciphertext(&self,
                          nonce: &authed::desc::Nonce,
                          key: &authed::desc::Key)
@@ -88,6 +94,9 @@ impl<'a> PlainTextRef<'a> {
     }
     pub fn to_sealed_ciphertext(&self, pubkey: &sealed::desc::PublicKey) -> CipherText {
         CipherText::new(sealed::imp::seal(self.0, pubkey))
+    }
+    pub fn as_ref(&'a self) -> PlainTextRef<'a> {
+        PlainTextRef(self.0)
     }
 }
 
@@ -106,6 +115,11 @@ impl PlainText {
     }
     pub fn into_vec(self) -> Vec<u8> {
         self.0
+    }
+    pub fn from_i64(n: i64) -> Self {
+        let mut buf = PlainText::new(Vec::with_capacity(8));
+        buf.0.write_i64::<LittleEndian>(n).unwrap();
+        return buf;
     }
 }
 
@@ -168,7 +182,7 @@ impl<'a> CipherTextRef<'a> {
                             len: usize)
                             -> Result<(CipherTextRef<'a>, CipherTextRef<'a>), CryptoError> {
         if self.len() < len {
-            Err("crypto read failed".into())
+            Err("crypto read failed: split_from_right".into())
         } else {
             Ok((self.slice(0, self.len() - len), self.slice(self.len() - len, self.len())))
         }
@@ -178,14 +192,14 @@ impl<'a> CipherTextRef<'a> {
                         key: &authed::desc::Key)
                         -> Result<PlainText, CryptoError> {
         Ok(PlainText::new(try!(authed::imp::open(&self.0, &nonce, &key)
-           .map_err(|()| "crypto read failed"))))
+           .map_err(|()| "crypto read failed: to_plaintext"))))
     }
     pub fn to_sealed_plaintext(&self,
                                pubkey: &sealed::desc::PublicKey,
                                seckey: &sealed::desc::SecretKey)
                                -> Result<PlainText, CryptoError> {
         Ok(PlainText::new(try!(sealed::imp::open(&self.0, &pubkey, &seckey)
-            .map_err(|()| "crypto read failed"))))
+            .map_err(|()| "crypto read failed: to_sealed_plaintext"))))
     }
 }
 
@@ -216,11 +230,11 @@ impl RefKey {
             Some(Key::XSalsa20Poly1305(ref key)) if hash.bytes.len() >=
                                                     authed::desc::NONCEBYTES => {
                 match authed::desc::Nonce::from_slice(&hash.bytes[..authed::desc::NONCEBYTES]) {
-                    None => Err("crypto read failed".into()),
-                    Some(nonce) => Ok(try!(ct.to_plaintext(&nonce, &key))),
+                    None => Err("crypto read failed: unseal".into()),
+                    Some(nonce) => Ok(ct.to_plaintext(&nonce, &key)?),
                 }
             }
-            _ => Err("crypto read failed".into()),
+            _ => Err("crypto read failed: unseal".into()),
         }
     }
 }
@@ -240,39 +254,45 @@ impl FixedKey {
         }
     }
 
+    pub fn light_seal(&self, pt: PlainTextRef) -> CipherText {
+        pt.to_sealed_ciphertext(&self.pubkey)
+    }
+
     pub fn seal(&self, pt: PlainTextRef) -> CipherText {
-        let mut ct = pt.to_sealed_ciphertext(&self.pubkey);
+        let mut ct = self.light_seal(pt.as_ref());
 
         // Add ciphertext length as LittleEndian.
-        let mut foot_pt = PlainText::new(Vec::with_capacity(8));
-        foot_pt.0.write_u64::<LittleEndian>(ct.len() as u64).unwrap();
+        let foot_pt = PlainText::from_i64(ct.len() as i64);
         assert_eq!(foot_pt.len(), sealed::desc::footer_plain_bytes());
 
         // Append sealed ciphertext length to full ciphertext.
-        ct.append(foot_pt.as_ref().to_sealed_ciphertext(&self.pubkey));
+        ct.append(self.light_seal(foot_pt.as_ref()));
         assert_eq!(ct.len(), pt.len() + sealed::desc::overhead());
 
         // Return complete ciphertext.
         ct
     }
 
+    pub fn light_unseal<'a>(&self, ct: CipherTextRef<'a>) -> Result<PlainText, CryptoError> {
+        let seckey = self.seckey.as_ref().expect("unseal requires access to read-key");
+        Ok(ct.to_sealed_plaintext(&self.pubkey, &seckey)?)
+    }
+
     pub fn unseal<'a>(&self,
                       ct: CipherTextRef<'a>)
                       -> Result<(CipherTextRef<'a>, PlainText), CryptoError> {
-        let seckey = self.seckey.as_ref().expect("unseal requires access to read-key");
-
         // Read sealed ciphertext length and unseal it.
-        let (rest, foot_ct) = try!(ct.split_from_right(sealed::desc::footer_cipher_bytes()));
-        let foot_pt = try!(foot_ct.to_sealed_plaintext(&self.pubkey, &seckey));
+        let (rest, foot_ct) = ct.split_from_right(sealed::desc::footer_cipher_bytes())?;
+        let foot_pt = self.light_unseal(foot_ct)?;
         assert_eq!(foot_pt.len(), sealed::desc::footer_plain_bytes());
 
         // Parse back from encoded LittleEndian.
-        let ct_len = try!(foot_pt.as_bytes()
-            .read_u64::<LittleEndian>()
-            .map_err(|_| "crypto read failed"));
+        let ct_len = foot_pt.as_ref()
+            .read_i64()
+            .map_err(|_| "crypto read failed: unseal")?;
 
         // Read and unseal original ciphertext.
-        let (rest, ct) = try!(rest.split_from_right(ct_len as usize));
-        Ok((rest, try!(ct.to_sealed_plaintext(&self.pubkey, &seckey))))
+        let (rest, ct) = rest.split_from_right(ct_len as usize)?;
+        Ok((rest, self.light_unseal(ct)?))
     }
 }

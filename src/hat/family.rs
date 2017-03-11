@@ -14,6 +14,7 @@
 
 
 use backend::StoreBackend;
+use blob;
 use capnp;
 use errors::HatError;
 use hash;
@@ -25,7 +26,6 @@ use std::fs;
 use std::io::Write;
 use std::path::PathBuf;
 use std::str;
-use std::sync::mpsc;
 use util::{FileIterator, FnBox, PathHandler};
 
 fn try_a_few_times_then_panic<F>(mut f: F, msg: &str)
@@ -146,11 +146,14 @@ pub mod recover {
             });
             true
         }
-        fn leaf_leave(&mut self, chunk: Vec<u8>, href: &tree::HashRef) -> bool {
+        fn leaf_enter(&mut self, href: &tree::HashRef) -> bool {
             self.nodes.push_back(Node {
                 href: href.clone(),
                 childs: None,
             });
+            true
+        }
+        fn leaf_leave(&mut self, chunk: Vec<u8>, _href: &tree::HashRef) -> bool {
             parse_dir_data(&chunk[..], &mut self.files).unwrap();
             true
         }
@@ -168,37 +171,20 @@ fn parse_dir_data(chunk: &[u8], mut out: &mut Vec<walker::FileEntry>) -> Result<
 
     let list = reader.get_root::<root_capnp::file_list::Reader>().unwrap();
     for f in list.get_files().unwrap().iter() {
-        if f.get_name().unwrap().len() == 0 {
+        if f.get_info()?.get_name().unwrap().len() == 0 {
             // Empty entry at end.
             // TODO(jos): Can we get rid of these?
             break;
         }
         let entry = key::Entry {
             id: Some(f.get_id()),
-            name: f.get_name().unwrap().to_owned(),
-            created: match f.get_created().which().unwrap() {
-                root_capnp::file::created::Unknown(()) => None,
-                root_capnp::file::created::Timestamp(ts) => Some(ts),
-            },
-            modified: match f.get_modified().which().unwrap() {
-                root_capnp::file::modified::Unknown(()) => None,
-                root_capnp::file::modified::Timestamp(ts) => Some(ts),
-            },
-            accessed: match f.get_accessed().which().unwrap() {
-                root_capnp::file::accessed::Unknown(()) => None,
-                root_capnp::file::accessed::Timestamp(ts) => Some(ts),
-            },
+            info: key::Info::read(f.get_info()?.borrow())?,
             data_hash: match f.get_content().which().unwrap() {
                 root_capnp::file::content::Data(r) => {
                     Some(r.unwrap().get_hash().unwrap().to_owned())
                 }
                 root_capnp::file::content::Directory(_) => None,
             },
-            // TODO(jos): Implement support for these remaining fields.
-            user_id: None,
-            group_id: None,
-            permissions: None,
-            data_length: None,
             parent_id: None,
         };
         let hash_ref = match f.get_content().which().unwrap() {
@@ -250,7 +236,7 @@ impl<B: StoreBackend> Family<B> {
         } else {
             Some(Box::new(move |()| contents) as Box<FnBox<(), _>>)
         };
-        match try!(self.key_store_process[0].send_reply(key::Msg::Insert(file, f))) {
+        match self.key_store_process[0].send_reply(key::Msg::Insert(file, f))? {
             key::Reply::Id(id) => Ok(id),
             _ => Err(From::from("Unexpected reply from key store")),
         }
@@ -258,7 +244,7 @@ impl<B: StoreBackend> Family<B> {
 
     pub fn flush(&self) -> Result<(), HatError> {
         for ks in &self.key_store_process {
-            if let key::Reply::FlushOk = try!(ks.send_reply(key::Msg::Flush)) {
+            if let key::Reply::FlushOk = ks.send_reply(key::Msg::Flush)? {
                 continue;
             }
             return Err(From::from("Unexpected reply from key store"));
@@ -281,20 +267,20 @@ impl<B: StoreBackend> Family<B> {
                            dir_id: Option<u64>)
                            -> Result<(), HatError> {
         let mut path = output_dir;
-        for (entry, _ref, read_fn_opt) in try!(self.list_from_key_store(dir_id)) {
+        for (entry, _ref, read_fn_opt) in self.list_from_key_store(dir_id)? {
             // Extend directory with filename:
-            path.push(str::from_utf8(&entry.name[..]).unwrap());
+            path.push(str::from_utf8(&entry.info.name[..]).unwrap());
 
             match read_fn_opt {
                 None => {
                     // This is a directory, recurse!
                     fs::create_dir_all(&path).unwrap();
-                    try!(self.checkout_in_dir(path.clone(), entry.id));
+                    self.checkout_in_dir(path.clone(), entry.id)?;
                 }
                 Some(read_fn) => {
                     // This is a file, write it
                     let mut fd = fs::File::create(&path).unwrap();
-                    if let Some(tree) = try!(read_fn.init()) {
+                    if let Some(tree) = read_fn.init()? {
                         self.write_file_chunks(&mut fd, tree);
                     }
                 }
@@ -310,7 +296,7 @@ impl<B: StoreBackend> Family<B> {
     pub fn list_from_key_store(&self,
                                dir_id: Option<u64>)
                                -> Result<Vec<key::DirElem<B>>, HatError> {
-        match try!(self.key_store_process[0].send_reply(key::Msg::ListDir(dir_id))) {
+        match self.key_store_process[0].send_reply(key::Msg::ListDir(dir_id))? {
             key::Reply::ListResult(ls) => Ok(ls),
             _ => Err(From::from("Unexpected result from key store")),
         }
@@ -321,36 +307,50 @@ impl<B: StoreBackend> Family<B> {
          dir_hash: hash::tree::HashRef,
          backend: HTB)
          -> Result<Vec<(key::Entry, hash::tree::HashRef)>, HatError> {
-        let it = try!(hash::tree::LeafIterator::new(backend, dir_hash))
+        let it = hash::tree::LeafIterator::new(backend, dir_hash)
+            ?
             .expect("unable to open dir");
 
         let mut out = Vec::new();
         for chunk in it {
             if !chunk.is_empty() {
-                try!(parse_dir_data(&chunk[..], &mut out));
+                parse_dir_data(&chunk[..], &mut out)?;
             }
         }
 
         Ok(out.into_iter().map(|f| (f.meta, f.hash_ref)).collect())
     }
 
-    pub fn commit(&mut self,
-                  hash_ch: &mpsc::Sender<hash::Hash>)
-                  -> Result<hash::tree::HashRef, HatError> {
-        let mut top_tree = self.key_store.hash_tree_writer();
-        try!(self.commit_to_tree(&mut top_tree, None, hash_ch));
+    pub fn commit<F>(&mut self, top_hash_fn: &F) -> Result<hash::tree::HashRef, HatError>
+        where F: Fn(&hash::Hash)
+    {
+        let mut top_tree = self.key_store.hash_tree_writer(blob::LeafType::TreeList);
+        self.commit_to_tree(&mut top_tree, None, top_hash_fn)?;
 
-        Ok(try!(top_tree.hash()))
+        let info = key::Info {
+            name: self.name.clone().into_bytes(),
+            accessed: None,
+            modified: None,
+            created: None,
+            permissions: None,
+            group_id: None,
+            user_id: None,
+            byte_length: None,
+            hat_snapshot_top: true,
+            hat_snapshot_ts: 0, // FIXME(jos): Fill in timestamp for now()
+        };
+        Ok(top_tree.hash(Some(&info))?)
     }
 
-    pub fn commit_to_tree(&mut self,
+    pub fn commit_to_tree<F>(&mut self,
                           tree: &mut hash::tree::SimpleHashTreeWriter<key::HashStoreBackend<B>>,
                           dir_id: Option<u64>,
-                          hash_ch: &mpsc::Sender<hash::Hash>)
-                          -> Result<(), HatError> {
+                          top_hash_fn: &F)
+                          -> Result<(), HatError>
+                          where F: Fn(&hash::Hash) {
 
         let files_at_a_time = 1024;
-        let mut it = try!(self.list_from_key_store(dir_id)).into_iter();
+        let mut it = self.list_from_key_store(dir_id)?.into_iter();
 
         loop {
             let mut current_msg_is_empty = true;
@@ -370,21 +370,9 @@ impl<B: StoreBackend> Family<B> {
                     let mut file_msg = files.borrow().get(idx as u32);
 
                     file_msg.set_id(entry.id.unwrap_or(0));
-                    file_msg.set_name(&entry.name);
 
-                    match entry.created {
-                        None => file_msg.borrow().init_created().set_unknown(()),
-                        Some(ts) => file_msg.borrow().init_created().set_timestamp(ts),
-                    }
-
-                    match entry.modified {
-                        None => file_msg.borrow().init_modified().set_unknown(()),
-                        Some(ts) => file_msg.borrow().init_modified().set_timestamp(ts),
-                    }
-
-                    match entry.accessed {
-                        None => file_msg.borrow().init_accessed().set_unknown(()),
-                        Some(ts) => file_msg.borrow().init_accessed().set_timestamp(ts),
+                    {
+                        entry.info.populate_msg(file_msg.borrow().init_info().borrow());
                     }
 
                     if let Some(hash_bytes) = entry.data_hash {
@@ -397,18 +385,19 @@ impl<B: StoreBackend> Family<B> {
                         data_ref.expect("has data")
                             .populate_msg(hash_ref_root.borrow());
                         // Set as file content.
-                        try!(file_msg.borrow()
+                        file_msg.borrow()
                             .init_content()
-                            .set_data(hash_ref_root.as_reader()));
-                        hash_ch.send(hash::Hash { bytes: hash_bytes }).unwrap();
+                            .set_data(hash_ref_root.as_reader())?;
+                        top_hash_fn(&hash::Hash { bytes: hash_bytes });
                     } else {
                         drop(data_ref);  // May not use data reference without hash.
 
                         // This is a directory, recurse!
-                        let mut inner_tree = self.key_store.hash_tree_writer();
-                        try!(self.commit_to_tree(&mut inner_tree, entry.id, hash_ch));
+                        let mut inner_tree = self.key_store
+                            .hash_tree_writer(blob::LeafType::TreeList);
+                        self.commit_to_tree(&mut inner_tree, entry.id, top_hash_fn)?;
                         // Store a reference for the sub-tree in our tree:
-                        let dir_hash_ref = try!(inner_tree.hash());
+                        let dir_hash_ref = inner_tree.hash(Some(&entry.info))?;
 
                         let mut hash_ref_msg = capnp::message::Builder::new_default();
                         let mut hash_ref_root =
@@ -417,11 +406,11 @@ impl<B: StoreBackend> Family<B> {
                         // Populate directory hash and ChunkRef.
                         dir_hash_ref.populate_msg(hash_ref_root.borrow());
                         // Set as directory content.
-                        try!(file_msg.borrow()
+                        file_msg.borrow()
                             .init_content()
-                            .set_directory(hash_ref_root.as_reader()));
+                            .set_directory(hash_ref_root.as_reader())?;
 
-                        hash_ch.send(dir_hash_ref.hash).unwrap();
+                        top_hash_fn(&dir_hash_ref.hash);
                     }
                 }
             }
@@ -432,8 +421,8 @@ impl<B: StoreBackend> Family<B> {
                 break;
             } else {
                 let mut buf = vec![];
-                try!(capnp::serialize_packed::write_message(&mut buf, &file_block_msg));
-                try!(tree.append(&buf[..]));
+                capnp::serialize_packed::write_message(&mut buf, &file_block_msg)?;
+                tree.append(&buf[..])?;
             }
         }
 

@@ -30,7 +30,7 @@ struct SnapshotList {
 }
 
 struct ChunkRef {
-	blobId @0 :Data;
+	blobName @0 :Data;
 
 	offset @1: Int64;
 	length @2: Int64;
@@ -50,7 +50,14 @@ struct ChunkRef {
 struct HashRef {
 	hash @0 :Data;
 	height @1 :Int64;
-	chunkRef @2 :ChunkRef;
+	leafType @2 :Int64;
+
+	chunkRef @3 :ChunkRef;
+
+	extra :union {
+	    none @4 :Void;
+	    info @5 :FileInfo;
+	}
 }
 
 struct HashRefList {
@@ -61,26 +68,31 @@ struct HashIds {
 	hashIds @0 :List(UInt64);
 }
 
-struct File {
-	id @0 :UInt64;
-	name @1 :Data;
-
+struct FileInfo {
+    name @0 :Data;
 	created :union {
-		unknown @2 :Void;
-		timestamp @3 :Int64;
+		unknown @1 :Void;
+		timestamp @2 :Int64;
 	}
 	modified :union {
-		unknown @4 :Void;
-		timestamp @5 :Int64;
+		unknown @3 :Void;
+		timestamp @4 :Int64;
 	}
 	accessed :union {
-		unknown @6 :Void;
-		timestamp @7 :Int64;
+		unknown @5 :Void;
+		timestamp @6 :Int64;
 	}
+	hatSnapshotTop @7 :Bool;
+	hatSnapshotTimestamp @8 :Int64;
+}
+
+struct File {
+	id @0 :UInt64;
+    info @1 :FileInfo;
 
 	content :union {
-		data @8 :HashRef;
-		directory @9 :HashRef;
+		data @2 :HashRef;
+		directory @3 :HashRef;
 	}
 }
 

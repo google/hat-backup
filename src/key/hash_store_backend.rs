@@ -19,6 +19,7 @@ use errors::RetryError;
 use hash;
 use hash::tree::HashTreeBackend;
 use key::MsgError;
+use key;
 use std::sync::Arc;
 
 pub struct HashStoreBackend<B> {
@@ -46,7 +47,7 @@ impl<B: StoreBackend> HashStoreBackend<B> {
 
     fn fetch_chunk_from_hash(&self, hash: &hash::Hash) -> Result<Option<Vec<u8>>, MsgError> {
         assert!(!hash.bytes.is_empty());
-        match try!(self.hash_index.fetch_persistent_ref(hash)) {
+        match self.hash_index.fetch_persistent_ref(hash)? {
             None => Ok(None),
             Some(chunk_ref) => self.fetch_chunk_from_persistent_ref(hash, &chunk_ref),
         }
@@ -56,7 +57,7 @@ impl<B: StoreBackend> HashStoreBackend<B> {
                                        hash: &hash::Hash,
                                        cref: &blob::ChunkRef)
                                        -> Result<Option<Vec<u8>>, MsgError> {
-        let res = try!(self.blob_store.retrieve(&hash, &cref));
+        let res = self.blob_store.retrieve(&hash, &cref)?;
         Ok(res)
     }
 }
@@ -71,9 +72,9 @@ impl<B: StoreBackend> HashTreeBackend for HashStoreBackend<B> {
         assert!(!hash.bytes.is_empty());
 
         let data_opt = if let Some(r) = persistent_ref {
-            try!(self.fetch_chunk_from_persistent_ref(&hash, &r))
+            self.fetch_chunk_from_persistent_ref(&hash, &r)?
         } else {
-            try!(self.fetch_chunk_from_hash(&hash))
+            self.fetch_chunk_from_hash(&hash)?
         };
 
         Ok(data_opt.and_then(|data| {
@@ -108,16 +109,16 @@ impl<B: StoreBackend> HashTreeBackend for HashStoreBackend<B> {
     }
 
     fn insert_chunk(&self,
-                    hash: &hash::Hash,
-                    height: i64,
+                    chunk: &[u8],
+                    node: blob::NodeType,
+                    leaf: blob::LeafType,
                     childs: Option<Vec<i64>>,
-                    chunk: &[u8])
-                    -> Result<(i64, blob::ChunkRef), MsgError> {
-        assert!(!hash.bytes.is_empty());
-
+                    info: Option<&key::Info>)
+                    -> Result<(i64, hash::tree::HashRef), MsgError> {
         let mut hash_entry = hash::Entry {
-            hash: hash.clone(),
-            level: height,
+            hash: hash::Hash::new(chunk),
+            node: node,
+            leaf: leaf,
             childs: childs,
             persistent_ref: None,
         };
@@ -125,9 +126,16 @@ impl<B: StoreBackend> HashTreeBackend for HashStoreBackend<B> {
         match self.hash_index.reserve(&hash_entry) {
             hash::ReserveResult::HashKnown(id) => {
                 // Someone came before us: piggyback on their result.
+                let pref = self.fetch_persistent_ref(&hash_entry.hash)
+                    .expect("Could not find persistent ref for known hash");
                 Ok((id,
-                    self.fetch_persistent_ref(hash)
-                        .expect("Could not find persistent ref for known hash")))
+                    hash::tree::HashRef {
+                        hash: hash_entry.hash,
+                        node: node,
+                        leaf: leaf,
+                        info: None,
+                        persistent_ref: pref,
+                    }))
             }
             hash::ReserveResult::ReserveOk(id) => {
                 // We came first: this data-chunk is ours to process.
@@ -136,11 +144,11 @@ impl<B: StoreBackend> HashTreeBackend for HashStoreBackend<B> {
                 let callback = Box::new(move |href: hash::tree::HashRef| {
                     local_hash_index.commit(&href.hash, href.persistent_ref);
                 });
-                let kind = blob::node_from_height(height);
-                let href = self.blob_store.store(chunk, hash.clone(), kind, callback);
+                let href = self.blob_store
+                    .store(chunk, hash_entry.hash.clone(), node, leaf, info, callback);
                 hash_entry.persistent_ref = Some(href.persistent_ref.clone());
                 self.hash_index.update_reserved(hash_entry);
-                Ok((id, href.persistent_ref))
+                Ok((id, href))
             }
         }
     }

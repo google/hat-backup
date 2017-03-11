@@ -13,4 +13,8 @@
 # Emacs/VIM temp/backup files
 \#*\#
 *.swp
+*.swo
 *.bk
+
+# Idea project files.
+.idea/*

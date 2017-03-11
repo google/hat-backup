@@ -40,21 +40,25 @@ impl FileEntry {
             full_path.file_name().and_then(|n| n.to_str()).map(|n| n.bytes().collect());
 
         if filename_opt.is_some() {
-            let md = try!(fs::symlink_metadata(&full_path));
+            let md = fs::symlink_metadata(&full_path)?;
             let link_path = fs::read_link(&full_path).ok();
             Ok(FileEntry {
                 key_entry: key::Entry {
-                    name: filename_opt.unwrap(),
-                    created: Some(md.ctime_nsec()),
-                    modified: Some(md.mtime_nsec()),
-                    accessed: Some(md.atime_nsec()),
+                    info: key::Info {
+                        name: filename_opt.unwrap(),
+                        created: Some(md.ctime_nsec()),
+                        modified: Some(md.mtime_nsec()),
+                        accessed: Some(md.atime_nsec()),
+                        byte_length: Some(md.len()),
+                        permissions: None,
+                        user_id: None,
+                        group_id: None,
+                        hat_snapshot_top: false,
+                        hat_snapshot_ts: 0,
+                    },
                     parent_id: parent,
-                    data_length: Some(md.len()),
                     data_hash: None,
                     id: None,
-                    permissions: None,
-                    user_id: None,
-                    group_id: None,
                 },
                 metadata: md,
                 full_path: full_path,

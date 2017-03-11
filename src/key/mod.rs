@@ -36,7 +36,7 @@ mod tests;
 mod benchmarks;
 
 pub use self::hash_store_backend::HashStoreBackend;
-pub use self::index::{Entry, KeyIndex};
+pub use self::index::{Entry, Info, KeyIndex};
 
 
 error_type! {
@@ -129,9 +129,11 @@ impl<B: StoreBackend> Store<B> {
 
     #[cfg(test)]
     pub fn new_for_testing(backend: Arc<B>, max_blob_size: usize) -> Result<Store<B>, DieselError> {
-        let ki_p = Arc::new(try!(index::KeyIndex::new_for_testing()));
-        let hi_p = Arc::new(try!(hash::HashIndex::new_for_testing()));
-        let blob_index = Arc::new(try!(blob::BlobIndex::new_for_testing()));
+        use db;
+        let db_p = Arc::new(db::Index::new_for_testing());
+        let ki_p = Arc::new(index::KeyIndex::new_for_testing()?);
+        let hi_p = Arc::new(hash::HashIndex::new(db_p.clone())?);
+        let blob_index = Arc::new(blob::BlobIndex::new(db_p)?);
         let bs_p = Arc::new(blob::BlobStore::new(blob_index, backend, max_blob_size));
         Ok(Store {
             index: ki_p,
@@ -143,14 +145,16 @@ impl<B: StoreBackend> Store<B> {
     pub fn flush(&mut self) -> Result<(), MsgError> {
         self.blob_store.flush();
         self.hash_index.flush();
-        try!(self.index.flush());
+        self.index.flush()?;
 
         Ok(())
     }
 
-    pub fn hash_tree_writer(&mut self) -> SimpleHashTreeWriter<HashStoreBackend<B>> {
+    pub fn hash_tree_writer(&mut self,
+                            leaf: blob::LeafType)
+                            -> SimpleHashTreeWriter<HashStoreBackend<B>> {
         let backend = HashStoreBackend::new(self.hash_index.clone(), self.blob_store.clone());
-        SimpleHashTreeWriter::new(8, backend)
+        SimpleHashTreeWriter::new(leaf, 8, backend)
     }
 }
 
@@ -187,7 +191,7 @@ impl<IT: io::Read, B: StoreBackend> MsgHandler<Msg<IT>, Reply<B>> for Store<B> {
 
         match msg {
             Msg::Flush => {
-                try!(self.flush());
+                self.flush()?;
                 reply_ok!(Reply::FlushOk)
             }
 
@@ -219,11 +223,11 @@ impl<IT: io::Read, B: StoreBackend> MsgHandler<Msg<IT>, Reply<B>> for Store<B> {
             }
 
             Msg::Insert(org_entry, chunk_it_opt) => {
-                let entry = match try!(self.index
-                    .lookup(org_entry.parent_id, org_entry.name.clone())) {
-                    Some(ref entry) if org_entry.accessed == entry.accessed &&
-                                       org_entry.modified == entry.modified &&
-                                       org_entry.created == entry.created => {
+                let entry = match self.index
+                    .lookup(org_entry.parent_id, org_entry.info.name.clone())? {
+                    Some(ref entry) if org_entry.info.accessed == entry.info.accessed &&
+                                       org_entry.info.modified == entry.info.modified &&
+                                       org_entry.info.created == entry.info.created => {
                         if chunk_it_opt.is_some() && entry.data_hash.is_some() {
                             let hash = hash::Hash { bytes: entry.data_hash.clone().unwrap() };
                             if self.hash_index.hash_exists(&hash) {
@@ -241,7 +245,7 @@ impl<IT: io::Read, B: StoreBackend> MsgHandler<Msg<IT>, Reply<B>> for Store<B> {
                     None => org_entry,
                 };
 
-                let entry = try!(self.index.insert(entry));
+                let entry = self.index.insert(entry)?;
 
                 // Send out the ID early to allow the client to continue its key discovery routine.
                 // The bounded input-channel will prevent the client from overflowing us.
@@ -250,18 +254,14 @@ impl<IT: io::Read, B: StoreBackend> MsgHandler<Msg<IT>, Reply<B>> for Store<B> {
 
 
                 // Setup hash tree structure
-                let mut tree = self.hash_tree_writer();
+                let mut tree = self.hash_tree_writer(blob::LeafType::FileChunk);
 
                 // Check if we have an data source:
                 let it_opt = chunk_it_opt.and_then(|open| open.call(()));
                 if it_opt.is_none() {
                     // No data is associated with this entry.
-                    try!(self.index.update_data_hash(
-                        entry.id.unwrap(),
-                        entry.modified,
-                        None,
-                        None
-                    ));
+                    self.index
+                        .update_data_hash(entry.id.unwrap(), entry.info.modified, None, None)?;
                     // Bail out before storing data that does not exist:
                     return Ok(());
                 }
@@ -285,25 +285,24 @@ impl<IT: io::Read, B: StoreBackend> MsgHandler<Msg<IT>, Reply<B>> for Store<B> {
                         break;
                     }
                     file_len += chunk_len as u64;
-                    try!(tree.append(&chunk[..chunk_len]))
+                    tree.append(&chunk[..chunk_len])?
                 }
 
                 // Warn the user if we did not read the expected size:
-                entry.data_length.map(|s| {
-                    file_size_warning(&entry.name, s, file_len);
+                entry.info.byte_length.map(|s| {
+                    file_size_warning(&entry.info.name, s, file_len);
                 });
 
                 // Get top tree hash:
-                let hash_ref = try!(tree.hash());
+                let hash_ref = tree.hash(Some(&entry.info))?;
 
                 // Update hash in key index.
                 // It is OK that this has is not yet valid, as we check hashes at snapshot time.
-                try!(self.index.update_data_hash(
-                    entry.id.unwrap(),
-                    entry.modified,
-                    Some(hash_ref.hash.clone()),
-                    Some(hash_ref)
-                ));
+                self.index
+                    .update_data_hash(entry.id.unwrap(),
+                                      entry.info.modified,
+                                      Some(hash_ref.hash.clone()),
+                                      Some(hash_ref))?;
 
                 Ok(())
             }

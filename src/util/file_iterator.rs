@@ -19,7 +19,6 @@ use std::path::PathBuf;
 
 pub enum FileIterator {
     File(io::BufReader<fs::File>),
-    #[cfg(test)]
     Buf(Vec<u8>, usize),
     #[cfg(all(test, feature = "benchmarks"))]
     Reader(Box<Read + Send>),
@@ -32,7 +31,6 @@ impl FileIterator {
             Err(e) => Err(e),
         }
     }
-    #[cfg(test)]
     pub fn from_bytes(contents: Vec<u8>) -> FileIterator {
         FileIterator::Buf(contents, 0)
     }
@@ -49,7 +47,6 @@ impl Read for FileIterator {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
         match *self {
             FileIterator::File(ref mut f) => f.read(buf),
-            #[cfg(test)]
             FileIterator::Buf(ref vec, ref mut pos) => {
                 use std::cmp;
                 if *pos >= vec.len() {

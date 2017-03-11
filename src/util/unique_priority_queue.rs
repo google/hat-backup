@@ -56,6 +56,10 @@ impl<P: Clone + Ord, K: Clone + Ord, V> UniquePriorityQueue<P, K, V> {
         prio_opt.and_then(|prio| self.priority.get(prio).map(|&(_, _, ref v_opt)| v_opt))
     }
 
+    pub fn find_mut_value_of_priority(&mut self, p: &P) -> Option<&mut V> {
+        self.priority.get_mut(p).map(|&mut (_, _, ref mut v_opt)| v_opt)
+    }
+
     pub fn update_value<F>(&mut self, k: &K, f: F)
         where F: FnOnce(&mut V)
     {

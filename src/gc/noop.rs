@@ -13,8 +13,8 @@
 // limitations under the License.
 
 
+use db::SnapshotInfo;
 use gc;
-use snapshot;
 use std::sync::mpsc;
 use void::Void;
 
@@ -32,31 +32,22 @@ impl<B: gc::GcBackend> gc::Gc<B> for GcNoop {
         false
     }
 
-    fn register(&mut self,
-                _snapshot: &snapshot::Info,
-                refs: mpsc::Receiver<gc::Id>)
-                -> Result<(), Self::Err> {
-        // It is an error to ignore the provided refereces, so we consume them here.
-        refs.iter().last();
-        Ok(())
-    }
-
     fn register_final(&mut self,
-                      _snapshot: &snapshot::Info,
+                      _snapshot: &SnapshotInfo,
                       _ref_final: gc::Id)
                       -> Result<(), Self::Err> {
         Ok(())
     }
 
     fn register_cleanup(&mut self,
-                        _snapshot: &snapshot::Info,
+                        _snapshot: &SnapshotInfo,
                         _ref_final: gc::Id)
                         -> Result<(), Self::Err> {
         Ok(())
     }
 
     fn deregister<F>(&mut self,
-                     _snapshot: &snapshot::Info,
+                     _snapshot: &SnapshotInfo,
                      _final_ref: gc::Id,
                      _refs: F)
                      -> Result<(), Self::Err>

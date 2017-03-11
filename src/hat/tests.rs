@@ -40,17 +40,21 @@ fn setup_family() -> (Arc<MemoryBackend>, HatRc<MemoryBackend>, Family<MemoryBac
 
 pub fn entry(name: Vec<u8>) -> key::Entry {
     key::Entry {
-        name: name,
         id: None,
         parent_id: None,
-        created: None,
-        modified: None,
-        accessed: None,
-        permissions: None,
-        user_id: None,
-        group_id: None,
         data_hash: None,
-        data_length: None,
+        info: key::Info {
+            name: name,
+            created: None,
+            modified: None,
+            accessed: None,
+            permissions: None,
+            user_id: None,
+            group_id: None,
+            byte_length: None,
+            hat_snapshot_top: false,
+            hat_snapshot_ts: 0,
+        },
     }
 }
 
@@ -82,7 +86,7 @@ fn snapshot_files<B: StoreBackend>(family: &Family<B>,
             // We have a file to insert.
             let mut e = entry(current.bytes().collect());
             e.parent_id = parent.clone();
-            try!(family.snapshot_direct(e, false, Some(FileIterator::from_bytes(contents))));
+            family.snapshot_direct(e, false, Some(FileIterator::from_bytes(contents)))?;
         }
     }
     Ok(())
@@ -148,6 +152,12 @@ fn snapshot_commit_many_empty_files() {
     hat.deregister(&fam, 1).unwrap();
     let (deleted, live) = hat.gc().unwrap();
     assert!(deleted > 0);
+    assert!(live > 0);
+
+    // Delete everything including root.
+    hat.delete_all_snapshots().unwrap();
+    let (deleted, live) = hat.gc().unwrap();
+    assert!(deleted > 0);
     assert_eq!(live, 0);
 }
 
@@ -169,6 +179,12 @@ fn snapshot_commit_many_empty_directories() {
     assert!(live > 0);
 
     hat.deregister(&fam, 1).unwrap();
+    let (deleted, live) = hat.gc().unwrap();
+    assert!(deleted > 0);
+    assert!(live > 0);
+
+    // Delete everything including root.
+    hat.delete_all_snapshots().unwrap();
     let (deleted, live) = hat.gc().unwrap();
     assert!(deleted > 0);
     assert_eq!(live, 0);
@@ -259,5 +275,11 @@ fn recover() {
 
     let (deleted, live3) = hat2.gc().unwrap();
     assert!(deleted > 0);
-    assert_eq!(live3, 0);
+    assert!(live3 > 0);
+
+    // Delete everything including root.
+    hat2.delete_all_snapshots().unwrap();
+    let (deleted, live4) = hat2.gc().unwrap();
+    assert!(deleted > 0);
+    assert_eq!(live4, 0);
 }

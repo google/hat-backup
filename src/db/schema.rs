@@ -14,8 +14,38 @@
 
 use diesel::prelude::*;
 
-
 // Table schemas.
+
+table! {
+    hashes {
+        id -> BigInt,
+        hash -> Binary,
+        tag -> BigInt,
+        height -> BigInt,
+        leaf_type -> BigInt,
+        childs -> Nullable<Binary>,
+        blob_id -> BigInt,
+        blob_ref -> Nullable<Binary>,
+    }
+}
+
+table! {
+    gc_metadata {
+        id -> BigInt,
+        hash_id -> BigInt,
+        family_id -> BigInt,
+        gc_int -> BigInt,
+        gc_vec -> Binary,
+    }
+}
+
+table! {
+    blobs {
+        id -> BigInt,
+        name -> Binary,
+        tag -> Integer,
+    }
+}
 
 table! {
     family {
@@ -41,8 +71,71 @@ select_column_workaround!(snapshots -> family (id, tag, family_id, snapshot_id, 
                                                hash, hash_ref));
 select_column_workaround!(family -> snapshots (id, name));
 
+joinable!(hashes -> blobs (blob_id));
+select_column_workaround!(blobs -> hashes (id, name, tag));
+select_column_workaround!(
+    hashes -> blobs (id, hash, tag, height, leaf_type, childs, blob_id, blob_ref));
+
 
 // Rust models.
+
+#[derive(Queryable)]
+pub struct Hash {
+    pub id: i64,
+    pub hash: Vec<u8>,
+    pub tag: i64,
+    pub height: i64,
+    pub leaf_type: i64,
+    pub childs: Option<Vec<u8>>,
+    pub blob_id: i64,
+    pub blob_ref: Option<Vec<u8>>,
+}
+
+#[derive(Insertable)]
+#[table_name="hashes"]
+pub struct NewHash<'a> {
+    pub id: i64,
+    pub hash: &'a [u8],
+    pub tag: i64,
+    pub height: i64,
+    pub leaf_type: i64,
+    pub childs: Option<&'a [u8]>,
+    pub blob_id: i64,
+    pub blob_ref: Option<&'a [u8]>,
+}
+
+#[derive(Queryable)]
+pub struct GcMetadata {
+    pub id: i64,
+    pub hash_id: i64,
+    pub family_id: i64,
+    pub gc_int: i64,
+    pub gc_vec: Vec<u8>,
+}
+
+#[derive(Insertable)]
+#[table_name="gc_metadata"]
+pub struct NewGcMetadata<'a> {
+    pub hash_id: i64,
+    pub family_id: i64,
+    pub gc_int: i64,
+    pub gc_vec: &'a [u8],
+}
+
+#[derive(Queryable)]
+pub struct Blob {
+    pub id: i64,
+    pub name: Vec<u8>,
+    pub tag: i32,
+}
+
+#[derive(Insertable)]
+#[table_name="blobs"]
+pub struct NewBlob<'a> {
+    pub id: i64,
+    pub name: &'a [u8],
+    pub tag: i32,
+}
 
 #[derive(Queryable)]
 pub struct Family {

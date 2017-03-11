@@ -13,8 +13,7 @@
 // limitations under the License.
 
 
-use hash::{GcData, UpdateFn};
-use snapshot;
+use db::{GcData, UpdateFn, SnapshotInfo};
 #[cfg(test)]
 use std::collections::HashMap;
 #[cfg(test)]
@@ -71,15 +70,15 @@ pub trait GcBackend {
 pub fn mark_tree<B>(backend: &mut B, root: Id, tag: tags::Tag) -> Result<(), B::Err>
     where B: GcBackend
 {
-    try!(backend.set_tag(root, tag));
-    for r in try!(backend.reverse_refs(root)) {
-        if let Some(current) = try!(backend.get_tag(r)) {
+    backend.set_tag(root, tag)?;
+    for r in backend.reverse_refs(root)? {
+        if let Some(current) = backend.get_tag(r)? {
             if current == tag {
                 continue;
             }
         }
-        try!(backend.set_tag(r, tag));
-        try!(mark_tree(backend, r, tag));
+        backend.set_tag(r, tag)?;
+        mark_tree(backend, r, tag)?;
     }
 
     Ok(())
@@ -92,21 +91,14 @@ pub trait Gc<B> {
 
     fn is_exact() -> bool;
 
-    fn register(&mut self,
-                snapshot: &snapshot::Info,
-                refs: mpsc::Receiver<Id>)
-                -> Result<(), Self::Err>;
-    fn register_final(&mut self,
-                      snapshot: &snapshot::Info,
-                      final_ref: Id)
-                      -> Result<(), Self::Err>;
+    fn register_final(&mut self, snapshot: &SnapshotInfo, final_ref: Id) -> Result<(), Self::Err>;
     fn register_cleanup(&mut self,
-                        snapshot: &snapshot::Info,
+                        snapshot: &SnapshotInfo,
                         final_ref: Id)
                         -> Result<(), Self::Err>;
 
     fn deregister<F>(&mut self,
-                     snapshot: &snapshot::Info,
+                     snapshot: &SnapshotInfo,
                      final_ref: Id,
                      refs: F)
                      -> Result<(), Self::Err>
@@ -153,11 +145,11 @@ impl SafeMemoryBackend {
         SafeMemoryBackend { backend: Arc::new(Mutex::new(MemoryBackend::new())) }
     }
 
-    fn insert_snapshot(&mut self, info: &snapshot::Info, refs: Vec<Id>) {
+    fn insert_snapshot(&mut self, info: &SnapshotInfo, refs: Vec<Id>) {
         self.backend.lock().unwrap().snapshot_refs.insert(info.unique_id, refs);
     }
 
-    fn list_snapshot_refs(&self, info: snapshot::Info) -> mpsc::Receiver<Id> {
+    fn list_snapshot_refs(&self, info: SnapshotInfo) -> mpsc::Receiver<Id> {
         let (sender, receiver) = mpsc::channel();
         let refs = self.backend
             .lock()
@@ -214,7 +206,7 @@ impl GcBackend for SafeMemoryBackend {
                                 family_id: Id,
                                 f: F)
                                 -> Result<GcData, Self::Err> {
-        let new = match f(try!(self.get_data(hash_id, family_id))) {
+        let new = match f(self.get_data(hash_id, family_id)?) {
             Some(d) => d,
             None => {
                 GcData {
@@ -300,7 +292,7 @@ pub fn gc_test<GC>(snapshots: Vec<Vec<u8>>)
 
     let mut infos = vec![];
     for (i, refs) in snapshots.iter().enumerate() {
-        let info = snapshot::Info {
+        let info = SnapshotInfo {
             unique_id: i as i64,
             family_id: 1,
             snapshot_id: i as i64,
@@ -310,11 +302,12 @@ pub fn gc_test<GC>(snapshots: Vec<Vec<u8>>)
     }
 
     for (i, refs) in snapshots.iter().enumerate() {
-        let (sender, receiver) = mpsc::channel();
-        refs[..refs.len() - 1].iter().map(|id| sender.send(*id as Id)).last();
-        drop(sender);
+        backend.set_all_tags(tags::Tag::Done).unwrap();
+        refs[..refs.len() - 1]
+            .iter()
+            .map(|id| backend.set_tag(*id as Id, tags::Tag::Reserved))
+            .last();
 
-        gc.register(&infos[i], receiver).unwrap();
         let last_ref = *refs.iter().last().expect("len() >= 0") as i64;
         gc.register_final(&infos[i], last_ref).unwrap();
         gc.register_cleanup(&infos[i], last_ref).unwrap();
@@ -360,12 +353,22 @@ pub fn resume_register_test<GC>()
     let mut gc = GC::new(backend.clone());
 
     let refs = vec![1, 2, 3, 4, 5];
-    let info = snapshot::Info {
+    let info = SnapshotInfo {
         unique_id: 1,
         family_id: 1,
         snapshot_id: 1,
     };
     backend.insert_snapshot(&info, refs.iter().map(|i| *i as Id).collect());
+
+    backend.set_all_tags(tags::Tag::Done).unwrap();
+    refs[..refs.len() - 1].iter().map(|id| backend.set_tag(*id as Id, tags::Tag::Reserved)).last();
+
+    let final_ref = *refs.last().expect("nonempty");
+    gc.register_final(&info, final_ref).unwrap();
+    assert_eq!(gc.status(final_ref).ok(), Some(Some(Status::InProgress)));
+    gc.register_cleanup(&info, final_ref).unwrap();
+    assert_eq!(gc.status(final_ref).ok(), Some(None));
+
 
     let receiver = |n| {
         let (sender, receiver) = mpsc::channel();
@@ -374,21 +377,6 @@ pub fn resume_register_test<GC>()
 
         receiver
     };
-
-    for n in 1..refs.len() {
-        gc.register(&info, receiver(n)).unwrap();
-        assert_eq!(gc.status(*refs.last().expect("nonempty")).ok(), Some(None));
-        backend.rollback();
-    }
-
-    gc.register(&info, receiver(refs.len() - 1)).unwrap();
-    let final_ref = *refs.last().expect("nonempty");
-    gc.register_final(&info, final_ref).unwrap();
-    assert_eq!(gc.status(final_ref).ok(), Some(Some(Status::InProgress)));
-    gc.register_cleanup(&info, final_ref).unwrap();
-    assert_eq!(gc.status(final_ref).ok(), Some(None));
-
-
     let last = receiver(refs.len()).iter().last().unwrap();
     let receive = receiver(refs.len());
     gc.deregister(&info, last, move || receive).unwrap();
@@ -413,12 +401,19 @@ pub fn resume_deregister_test<GC>()
     let mut gc = GC::new(backend.clone());
 
     let refs = vec![1, 2, 3, 4, 5];
-    let info = snapshot::Info {
+    let info = SnapshotInfo {
         unique_id: 1,
         family_id: 1,
         snapshot_id: 1,
     };
     backend.insert_snapshot(&info, refs.iter().map(|i| *i as Id).collect());
+
+    backend.set_all_tags(tags::Tag::Done).unwrap();
+    refs[..refs.len() - 1].iter().map(|id| backend.set_tag(*id as Id, tags::Tag::Reserved)).last();
+
+    let final_ref = *refs.last().expect("nonempty");
+    gc.register_final(&info, final_ref).unwrap();
+    gc.register_cleanup(&info, final_ref).unwrap();
 
     let receiver = |n| {
         let (sender, receiver) = mpsc::channel();
@@ -427,10 +422,6 @@ pub fn resume_deregister_test<GC>()
 
         receiver
     };
-    gc.register(&info, receiver(refs.len() - 1)).unwrap();
-    let final_ref = *refs.last().expect("nonempty");
-    gc.register_final(&info, final_ref).unwrap();
-    gc.register_cleanup(&info, final_ref).unwrap();
 
     backend.manual_commit().unwrap();
     for _ in 1..10 {

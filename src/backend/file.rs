@@ -15,10 +15,10 @@
 
 use backend::StoreBackend;
 use crypto::CipherText;
-use rustc_serialize::hex::ToHex;
+use rustc_serialize::hex::{FromHex, ToHex};
 use std::collections::BTreeMap;
 use std::fs;
-use std::io::{Read, Write};
+use std::io;
 use std::path::PathBuf;
 use std::sync::Mutex;
 
@@ -45,6 +45,8 @@ impl FileBackend {
     }
 
     fn get(&self, name: &[u8]) -> Result<Option<Vec<u8>>, String> {
+        use self::io::Read;
+
         // Read key:
         let path = {
             let mut p = self.root.clone();
@@ -79,6 +81,8 @@ impl FileBackend {
 
 impl StoreBackend for FileBackend {
     fn store(&self, name: &[u8], data: &CipherText) -> Result<(), String> {
+        use self::io::Write;
+
         let mut path = self.root.clone();
         path.push(&name.to_hex());
 
@@ -124,6 +128,20 @@ impl StoreBackend for FileBackend {
             Ok(_) => Ok(()),
             Err(e) => Err(e.to_string()),
         }
+    }
+
+    fn list(&self) -> Result<Vec<Box<[u8]>>, String> {
+        let es = &|e: io::Error| e.to_string();
+
+        let mut out = vec![];
+        for p in fs::read_dir(&self.root).map_err(es)? {
+            if let Some(name) = p.map_err(es)?.path().file_name() {
+                name.to_str()
+                    .map(|s| s.from_hex().unwrap())
+                    .map(|b| out.push(b.into_boxed_slice()));
+            }
+        }
+        Ok(out)
     }
 
     fn flush(&self) -> Result<(), String> {

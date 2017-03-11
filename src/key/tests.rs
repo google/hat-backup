@@ -85,18 +85,23 @@ fn rng_filesystem(size: usize) -> FileSystem {
                 key_entry: Entry {
                     id: None,
                     parent_id: None, // updated by insert_and_update_fs()
-
-                    name: random_ascii_bytes(),
                     data_hash: None,
-                    data_length: None,
 
-                    created: thread_rng().gen(),
-                    modified: thread_rng().gen(),
-                    accessed: thread_rng().gen(),
+                    info: Info {
+                        name: random_ascii_bytes(),
+                        byte_length: None,
 
-                    permissions: None,
-                    user_id: None,
-                    group_id: None,
+                        created: thread_rng().gen(),
+                        modified: thread_rng().gen(),
+                        accessed: thread_rng().gen(),
+
+                        permissions: None,
+                        user_id: None,
+                        group_id: None,
+
+                        hat_snapshot_top: false,
+                        hat_snapshot_ts: 0,
+                    },
                 },
             };
 
@@ -114,15 +119,19 @@ fn rng_filesystem(size: usize) -> FileSystem {
         key_entry: Entry {
             parent_id: None,
             id: None, // updated by insert_and_update_fs()
-            name: b"root".to_vec(),
             data_hash: None,
-            data_length: None,
-            created: thread_rng().gen(),
-            modified: thread_rng().gen(),
-            accessed: thread_rng().gen(),
-            permissions: None,
-            user_id: None,
-            group_id: None,
+            info: Info {
+                name: b"root".to_vec(),
+                created: thread_rng().gen(),
+                modified: thread_rng().gen(),
+                accessed: thread_rng().gen(),
+                permissions: None,
+                user_id: None,
+                group_id: None,
+                byte_length: None,
+                hat_snapshot_top: false,
+                hat_snapshot_ts: 0,
+            },
         },
     };
 
@@ -165,13 +174,13 @@ fn verify_filesystem<B: StoreBackend>(fs: &FileSystem, ks_p: &StoreProcess<Entry
         let mut found = false;
 
         for dir in fs.filelist.iter() {
-            if dir.file.key_entry.name == entry.name {
+            if dir.file.key_entry.info.name == entry.info.name {
                 found = true;
 
                 assert_eq!(dir.file.key_entry.id, entry.id);
-                assert_eq!(dir.file.key_entry.created, entry.created);
-                assert_eq!(dir.file.key_entry.accessed, entry.accessed);
-                assert_eq!(dir.file.key_entry.modified, entry.modified);
+                assert_eq!(dir.file.key_entry.info.created, entry.info.created);
+                assert_eq!(dir.file.key_entry.info.accessed, entry.info.accessed);
+                assert_eq!(dir.file.key_entry.info.modified, entry.info.modified);
 
                 match dir.file.data {
                     Some(ref original) => {

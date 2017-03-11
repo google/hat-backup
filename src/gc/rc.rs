@@ -12,10 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use gc;
 
-use hash::GcData;
-use snapshot;
+use db::{GcData, SnapshotInfo};
+use gc;
 use std::sync::mpsc;
 use tags;
 
@@ -42,89 +41,85 @@ impl<B: gc::GcBackend> gc::Gc<B> for GcRc<B> {
         true
     }
 
-    fn register(&mut self,
-                _snapshot: &snapshot::Info,
-                refs: mpsc::Receiver<gc::Id>)
-                -> Result<(), Self::Err> {
-        // Start off with a commit to disable automatic commit and run register as one transaction.
-        try!(self.backend.manual_commit());
-
-        // Increment counters.
-        for r in refs.iter() {
-            try!(self.backend.update_data(r, DATA_FAMILY, move |GcData { num, bytes }| {
-                Some(GcData {
-                    num: num + 1,
-                    bytes: bytes,
-                })
-            }));
-        }
-
-        Ok(())
-    }
-
     fn register_final(&mut self,
-                      _snapshot: &snapshot::Info,
+                      _snapshot: &SnapshotInfo,
                       ref_final: gc::Id)
                       -> Result<(), Self::Err> {
-        // Increment final counter and tag it as ready.
-        try!(self.backend.update_data(ref_final, DATA_FAMILY, move |GcData { num, bytes }| {
-            Some(GcData {
-                num: num + 1,
-                bytes: bytes,
-            })
-        }));
-        try!(self.backend.set_tag(ref_final, tags::Tag::InProgress));
+        // Start off with a commit to disable automatic commit and run register as one transaction.
+        self.backend.manual_commit()?;
+
+        // Add final reference to the set of hashes to update.
+        self.backend.set_tag(ref_final, tags::Tag::Reserved)?;
+
+        for r in self.backend.list_ids_by_tag(tags::Tag::Reserved)? {
+            self.backend
+                .update_data(r, DATA_FAMILY, move |GcData { num, bytes }| {
+                    Some(GcData {
+                        num: num + 1,
+                        bytes: bytes,
+                    })
+                })?;
+        }
+
+        self.backend.set_tag(ref_final, tags::Tag::InProgress)?;
 
         Ok(())
     }
 
     fn register_cleanup(&mut self,
-                        _snapshot: &snapshot::Info,
-                        ref_final: gc::Id)
+                        _snapshot: &SnapshotInfo,
+                        _ref_final: gc::Id)
                         -> Result<(), Self::Err> {
-        // Clear tag of final reference.
-        try!(self.backend.set_tag(ref_final, tags::Tag::Done));
+        // Clear all tags including final reference.
+        self.backend.set_all_tags(tags::Tag::Done)?;
 
         Ok(())
     }
 
     fn deregister<F>(&mut self,
-                     _snapshot: &snapshot::Info,
+                     _snapshot: &SnapshotInfo,
                      ref_final: gc::Id,
                      refs: F)
                      -> Result<(), Self::Err>
         where F: FnOnce() -> mpsc::Receiver<gc::Id>
     {
+        self.backend.set_all_tags(tags::Tag::Done)?;
+        // Tag hashes whose counters will be decremented.
+        for r in refs().iter() {
+            self.backend.set_tag(r, tags::Tag::Reserved)?;
+        }
+
         // Start off with a commit to disable automatic commit.
         // This causes deregister to run as one transaction.
-        try!(self.backend.manual_commit());
+        self.backend.manual_commit()?;
 
-        for r in refs().iter() {
-            try!(self.backend.update_data(r, DATA_FAMILY, move |GcData { num, bytes }| {
-                Some(GcData {
-                    num: num - 1,
-                    bytes: bytes,
-                })
-            }));
+        for r in self.backend.list_ids_by_tag(tags::Tag::Reserved)? {
+            self.backend
+                .update_data(r, DATA_FAMILY, move |GcData { num, bytes }| {
+                    Some(GcData {
+                        num: num - 1,
+                        bytes: bytes,
+                    })
+                })?;
         }
-        try!(self.backend.set_tag(ref_final, tags::Tag::ReadyDelete));
+        self.backend.set_tag(ref_final, tags::Tag::ReadyDelete)?;
 
         Ok(())
     }
 
 
     fn list_unused_ids(&mut self, refs: mpsc::Sender<gc::Id>) -> Result<(), Self::Err> {
-        try!(self.backend.set_all_tags(tags::Tag::Done));
-        for r in try!(self.backend.list_ids_by_tag(tags::Tag::Done)) {
-            let data = try!(self.backend.get_data(r, DATA_FAMILY));
+        self.backend.set_all_tags(tags::Tag::Done)?;
+        for r in self.backend.list_ids_by_tag(tags::Tag::Done)? {
+            let data = self.backend.get_data(r, DATA_FAMILY)?;
             assert!(data.num >= 0);
             if data.num > 0 {
-                try!(gc::mark_tree(&mut self.backend, r, tags::Tag::Reserved));
+                gc::mark_tree(&mut self.backend, r, tags::Tag::Reserved)?;
             }
         }
         // Everything that is still 'Done' is unused.
         // Everything that is 'Reserved' is used.
-        for r in try!(self.backend.list_ids_by_tag(tags::Tag::Done)).iter() {
+        for r in self.backend.list_ids_by_tag(tags::Tag::Done)?.iter() {
             if refs.send(r).is_err() {
                 break;
             }
@@ -134,7 +129,7 @@ impl<B: gc::GcBackend> gc::Gc<B> for GcRc<B> {
     }
 
     fn status(&mut self, final_ref: gc::Id) -> Result<Option<gc::Status>, Self::Err> {
-        Ok(match try!(self.backend.get_tag(final_ref)) {
+        Ok(match self.backend.get_tag(final_ref)? {
             Some(tags::Tag::Complete) |
             Some(tags::Tag::ReadyDelete) => Some(gc::Status::Complete),
             Some(tags::Tag::InProgress) => Some(gc::Status::InProgress),

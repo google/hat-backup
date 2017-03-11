@@ -13,7 +13,8 @@
 // limitations under the License
 
 use backend::{MemoryBackend, StoreBackend};
-use blob::{Blob, BlobError, BlobIndex, BlobStore, ChunkRef, Key, Kind};
+use blob::{Blob, BlobError, BlobIndex, BlobStore, ChunkRef, Key, NodeType, LeafType};
+use db;
 use hash;
 use quickcheck;
 
@@ -25,14 +26,17 @@ fn identity() {
     fn prop(chunks: Vec<Vec<u8>>) -> bool {
         let backend = Arc::new(MemoryBackend::new());
 
-        let blob_index = Arc::new(BlobIndex::new_for_testing().unwrap());
+        let db = Arc::new(db::Index::new_for_testing());
+        let blob_index = Arc::new(BlobIndex::new(db).unwrap());
         let bs_p = BlobStore::new(blob_index, backend.clone(), 1024);
 
         let mut ids = Vec::new();
         for chunk in chunks.iter() {
             ids.push((bs_p.store(&chunk[..],
                                  hash::Hash::new(chunk),
-                                 Kind::TreeLeaf,
+                                 NodeType::Leaf,
+                                 LeafType::FileChunk,
+                                 None,
                                  Box::new(move |_| {})),
                       chunk));
         }
@@ -42,7 +46,7 @@ fn identity() {
         // Non-empty chunks must be in the backend now:
         for &(ref id, chunk) in ids.iter() {
             if chunk.len() > 0 {
-                match backend.retrieve(&id.persistent_ref.blob_id[..]) {
+                match backend.retrieve(&id.persistent_ref.blob_name[..]) {
                     Ok(_) => (),
                     Err(e) => panic!(e),
                 }
@@ -67,14 +71,17 @@ fn identity_with_excessive_flushing() {
     fn prop(chunks: Vec<Vec<u8>>) -> bool {
         let backend = Arc::new(MemoryBackend::new());
 
-        let blob_index = Arc::new(BlobIndex::new_for_testing().unwrap());
+        let db = Arc::new(db::Index::new_for_testing());
+        let blob_index = Arc::new(BlobIndex::new(db).unwrap());
         let bs_p = BlobStore::new(blob_index, backend.clone(), 1024);
 
         let mut ids = Vec::new();
         for chunk in chunks.iter() {
             ids.push((bs_p.store(&chunk[..],
                                  hash::Hash::new(chunk),
-                                 Kind::TreeLeaf,
+                                 NodeType::Leaf,
+                                 LeafType::FileChunk,
+                                 None,
                                  Box::new(move |_| {})),
                       chunk));
             bs_p.flush();
@@ -88,7 +95,7 @@ fn identity_with_excessive_flushing() {
         // Non-empty chunks must be in the backend now:
         for &(ref id, chunk) in ids.iter() {
             if chunk.len() > 0 {
-                match backend.retrieve(&id.persistent_ref.blob_id[..]) {
+                match backend.retrieve(&id.persistent_ref.blob_name[..]) {
                     Ok(_) => (),
                     Err(e) => panic!(e),
                 }
@@ -111,15 +118,16 @@ fn identity_with_excessive_flushing() {
 #[test]
 fn blobid_identity() {
     fn prop(name: Vec<u8>, offset: usize, length: usize) -> bool {
-        let blob_id = ChunkRef {
-            blob_id: name.to_vec(),
+        let blob_name = ChunkRef {
+            blob_id: None,
+            blob_name: name.to_vec(),
             offset: offset,
             length: length,
             packing: None,
             key: None,
         };
-        let blob_id_bytes = blob_id.as_bytes();
-        ChunkRef::from_bytes(&mut &blob_id_bytes[..]).unwrap() == blob_id
+        let blob_name_bytes = blob_name.as_bytes();
+        ChunkRef::from_bytes(&mut &blob_name_bytes[..]).unwrap() == blob_name
     }
     quickcheck::quickcheck(prop as fn(Vec<u8>, usize, usize) -> bool);
 }
@@ -128,9 +136,12 @@ fn blobid_identity() {
 fn blob_reuse() {
     let mut c1 = hash::tree::HashRef {
         hash: hash::Hash::new(&[]),
-        kind: Kind::TreeLeaf,
+        node: NodeType::Leaf,
+        leaf: LeafType::FileChunk,
+        info: None,
         persistent_ref: ChunkRef {
-            blob_id: Vec::new(),
+            blob_id: None,
+            blob_name: Vec::new(),
             offset: 0,
             length: 0,
             packing: None,
@@ -174,9 +185,12 @@ fn blob_identity() {
         for chunk in chunks.iter() {
             let mut cref = hash::tree::HashRef {
                 hash: hash::Hash::new(&[]),
-                kind: Kind::TreeLeaf,
+                node: NodeType::Leaf,
+                leaf: LeafType::FileChunk,
+                info: None,
                 persistent_ref: ChunkRef {
-                    blob_id: Vec::new(),
+                    blob_id: None,
+                    blob_name: Vec::new(),
                     offset: 0,
                     length: 0,
                     packing: None,
@@ -229,7 +243,8 @@ fn random_input_fails() {
         let key = vec![0; 32];
         let hash = hash::Hash { bytes: hash };
         let mut cref = ChunkRef {
-            blob_id: Vec::new(),
+            blob_id: None,
+            blob_name: Vec::new(),
             offset: 0,
             length: 0,
             packing: None,
@@ -253,9 +268,12 @@ fn empty_blocks_blob_ciphertext(blob: &mut Blob, blocksize: usize) -> Vec<u8> {
     loop {
         let mut cref = hash::tree::HashRef {
             hash: hash::Hash::new(&block[..]),
-            kind: Kind::TreeLeaf,
+            node: NodeType::Leaf,
+            leaf: LeafType::FileChunk,
+            info: None,
             persistent_ref: ChunkRef {
-                blob_id: Vec::new(),
+                blob_id: None,
+                blob_name: Vec::new(),
                 offset: 0,
                 length: block.len(),
                 packing: None,
@@ -293,8 +311,8 @@ fn blob_ciphertext_authed_allbytes() {
 
     fn verify(blob: &Blob, bs: &[u8]) -> Result<Vec<Vec<u8>>, BlobError> {
         let mut vs = vec![];
-        for r in try!(blob.refs_from_bytes(bs)) {
-            vs.push(try!(Blob::read_chunk(&bs, &r.hash, &r.persistent_ref)));
+        for r in blob.refs_from_bytes(bs)? {
+            vs.push(Blob::read_chunk(&bs, &r.hash, &r.persistent_ref)?);
         }
         Ok(vs)
     };
