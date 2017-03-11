@@ -10,6 +10,7 @@ dependencies = [
  "diesel_codegen 0.11.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "env_logger 0.4.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "error-type 0.1.2 (registry+https://github.com/rust-lang/crates.io-index)",
+ "filetime 0.1.10 (registry+https://github.com/rust-lang/crates.io-index)",
  "libsodium-sys 0.0.14 (registry+https://github.com/rust-lang/crates.io-index)",
  "log 0.3.6 (registry+https://github.com/rust-lang/crates.io-index)",
  "quickcheck 0.4.1 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -141,6 +142,14 @@ dependencies = [
 name = "error-type"
 version = "0.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[package]]
+name = "filetime"
+version = "0.1.10"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+dependencies = [
+ "libc 0.2.21 (registry+https://github.com/rust-lang/crates.io-index)",
+]
 
 [[package]]
 name = "gcc"
@@ -456,6 +465,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 "checksum env_logger 0.3.5 (registry+https://github.com/rust-lang/crates.io-index)" = "15abd780e45b3ea4f76b4e9a26ff4843258dd8a3eed2775a0e7368c2e7936c2f"
 "checksum env_logger 0.4.1 (registry+https://github.com/rust-lang/crates.io-index)" = "ed39959122ea027670b704fb70539f4286ddf4a49eefede23bf0b4b2a069ec03"
 "checksum error-type 0.1.2 (registry+https://github.com/rust-lang/crates.io-index)" = "1ff27640d2b446283471dc40a1a7ce0e650fdb94ded47ef32c0ac098b3187d4e"
+"checksum filetime 0.1.10 (registry+https://github.com/rust-lang/crates.io-index)" = "5363ab8e4139b8568a6237db5248646e5a8a2f89bd5ccb02092182b11fd3e922"
 "checksum gcc 0.3.43 (registry+https://github.com/rust-lang/crates.io-index)" = "c07c758b972368e703a562686adb39125707cc1ef3399da8c019fc6c2498a75d"
 "checksum kernel32-sys 0.2.2 (registry+https://github.com/rust-lang/crates.io-index)" = "7507624b29483431c0ba2d82aece8ca6cdba9382bff4ddd0f7490560c056098d"
 "checksum libc 0.2.21 (registry+https://github.com/rust-lang/crates.io-index)" = "88ee81885f9f04bff991e306fea7c1c60a5f0f9e409e99f6b40e3311a3363135"
