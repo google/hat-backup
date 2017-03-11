@@ -92,8 +92,12 @@ struct FileInfo {
 	    mode @8 :UInt32;
 	}
 
-	hatSnapshotTop @9 :Bool;
-	hatSnapshotTimestamp @10 :UInt64;
+	hatSnapshotTimestamp @11 :UInt64;
+
+	tag :union {
+	    none @9 :Void;
+	    snapshotTop @10 :Void;
+	}
 }
 
 struct File {

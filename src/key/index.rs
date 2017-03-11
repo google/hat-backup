@@ -144,7 +144,11 @@ impl Info {
 
             byte_length: Some(msg.get_byte_length()),
 
-            hat_snapshot_top: msg.get_hat_snapshot_top(),
+            hat_snapshot_top: match msg.get_tag().which()? {
+                root_capnp::file_info::tag::SnapshotTop(()) => true,
+                _ => false,
+            },
+
             hat_snapshot_ts: msg.get_hat_snapshot_timestamp(),
         })
     }
@@ -172,7 +176,12 @@ impl Info {
             None => msg.borrow().get_permissions().set_none(()),
         }
 
-        msg.borrow().set_hat_snapshot_top(self.hat_snapshot_top);
+        if self.hat_snapshot_top {
+            msg.borrow().get_tag().set_snapshot_top(());
+        } else {
+            msg.borrow().get_tag().set_none(());
+        }
+
         msg.borrow().set_hat_snapshot_timestamp(self.hat_snapshot_ts);
     }
 }
