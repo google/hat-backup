@@ -16,6 +16,7 @@
 
 
 use std::fs;
+use std::os::unix::fs::PermissionsExt;
 
 use diesel;
 use diesel::prelude::*;
@@ -24,6 +25,7 @@ use diesel::sqlite::SqliteConnection;
 use errors::DieselError;
 use hash;
 use capnp;
+use filetime::FileTime;
 
 use std::sync::{Mutex, MutexGuard};
 
@@ -50,7 +52,7 @@ pub struct Info {
     pub modified_ts_secs: Option<u64>,
     pub accessed_ts_secs: Option<u64>,
 
-    pub permissions: Option<u64>,
+    pub permissions: Option<fs::Permissions>,
     pub user_id: Option<u64>,
     pub group_id: Option<u64>,
 
@@ -73,48 +75,75 @@ impl Entry {
         if self.info.created_ts_secs.is_none() || self.info.modified_ts_secs.is_none() {
             false
         } else {
-            (self.parent_id, &self.info.name,
-             self.info.created_ts_secs, self.info.modified_ts_secs)
-                ==
-                (other.parent_id, &other.info.name,
-                 other.info.created_ts_secs, other.info.modified_ts_secs)
+            (self.parent_id,
+             &self.info.name,
+             self.info.created_ts_secs,
+             self.info.modified_ts_secs) ==
+            (other.parent_id,
+             &other.info.name,
+             other.info.created_ts_secs,
+             other.info.modified_ts_secs)
         }
     }
 }
 
 impl Info {
     pub fn new(name: Vec<u8>, meta: Option<&fs::Metadata>, top: bool) -> Info {
-        fn since_epoch(t: time::SystemTime) -> Option<u64> {
-            t.duration_since(time::UNIX_EPOCH).ok().map(|d| d.as_secs())
-        }
+        use std::os::linux::fs::MetadataExt;
+
+        let created = meta.and_then(|m| FileTime::from_creation_time(m))
+            .map(|t| t.seconds_relative_to_1970());
+        let modified =
+            meta.map(|m| FileTime::from_last_modification_time(m).seconds_relative_to_1970());
+        let accessed = meta.map(|m| FileTime::from_last_access_time(m).seconds_relative_to_1970());
 
         Info {
             name: name,
 
-            created_ts_secs: meta.and_then(|m| m.created().ok().and_then(since_epoch)),
-            modified_ts_secs: meta.and_then(|m| m.modified().ok().and_then(since_epoch)),
-            accessed_ts_secs: meta.and_then(|m| m.accessed().ok().and_then(since_epoch)),
+            created_ts_secs: created,
+            modified_ts_secs: modified,
+            accessed_ts_secs: accessed,
 
-            permissions: None,
-            user_id: None,
-            group_id: None,
+            permissions: meta.map(|m| m.permissions()),
+
+            user_id: meta.map(|m| m.st_uid() as u64),
+            group_id: meta.map(|m| m.st_gid() as u64),
 
             byte_length: meta.map(|m| m.len()),
             hat_snapshot_top: top,
-            hat_snapshot_ts: since_epoch(time::SystemTime::now()).unwrap_or(0),
+            hat_snapshot_ts: time::SystemTime::now()
+                .duration_since(time::UNIX_EPOCH)
+                .unwrap()
+                .as_secs(),
         }
     }
 
     pub fn read(msg: root_capnp::file_info::Reader) -> Result<Info, capnp::Error> {
+        fn none_if_zero(x: u64) -> Option<u64> {
+            if x == 0 { None } else { Some(x) }
+        }
+        let owner = match msg.get_owner().which()? {
+            root_capnp::file_info::owner::None(()) => None,
+            root_capnp::file_info::owner::UserGroup(res) => {
+                let ug = res?;
+                Some((ug.get_user_id(), ug.get_group_id()))
+            }
+        };
         Ok(Info {
             name: msg.get_name()?.to_vec(),
-            created_ts_secs: None,
-            modified_ts_secs: None,
-            accessed_ts_secs: None,
-            permissions: None,
-            user_id: None,
-            group_id: None,
-            byte_length: None,
+            created_ts_secs: none_if_zero(msg.get_created_timestamp_secs()),
+            modified_ts_secs: none_if_zero(msg.get_modified_timestamp_secs()),
+            accessed_ts_secs: none_if_zero(msg.get_accessed_timestamp_secs()),
+            permissions: match msg.get_permissions().which()? {
+                root_capnp::file_info::permissions::None(()) => None,
+                root_capnp::file_info::permissions::Mode(m) => Some(fs::Permissions::from_mode(m)),
+            },
+
+            user_id: owner.as_ref().map(|&(uid, _)| uid),
+            group_id: owner.as_ref().map(|&(_, gid)| gid),
+
+            byte_length: Some(msg.get_byte_length()),
+
             hat_snapshot_top: msg.get_hat_snapshot_top(),
             hat_snapshot_ts: msg.get_hat_snapshot_timestamp(),
         })
@@ -125,6 +154,23 @@ impl Info {
         msg.borrow().set_created_timestamp_secs(self.created_ts_secs.unwrap_or(0));
         msg.borrow().set_modified_timestamp_secs(self.modified_ts_secs.unwrap_or(0));
         msg.borrow().set_accessed_timestamp_secs(self.accessed_ts_secs.unwrap_or(0));
+        msg.borrow().set_byte_length(self.byte_length.unwrap_or(0));
+
+        match (self.user_id, self.group_id) {
+            (Some(uid), Some(gid)) => {
+                let mut ug = msg.borrow().get_owner().init_user_group();
+                ug.set_user_id(uid);
+                ug.set_group_id(gid);
+            }
+            _ => {
+                msg.borrow().get_owner().set_none(());
+            }
+        }
+
+        match self.permissions {
+            Some(ref p) => msg.borrow().get_permissions().set_mode(p.mode()),
+            None => msg.borrow().get_permissions().set_none(()),
+        }
 
         msg.borrow().set_hat_snapshot_top(self.hat_snapshot_top);
         msg.borrow().set_hat_snapshot_timestamp(self.hat_snapshot_ts);
@@ -207,7 +253,7 @@ impl InternalKeyIndex {
                         created: entry.info.created_ts_secs.map(|u| u as i64),
                         modified: entry.info.modified_ts_secs.map(|u| u as i64),
                         accessed: entry.info.accessed_ts_secs.map(|u| u as i64),
-                        permissions: entry.info.permissions.map(|u| u as i64),
+                        permissions: entry.info.permissions.as_ref().map(|p| p.mode() as i64),
                         group_id: entry.info.group_id.map(|u| u as i64),
                         user_id: entry.info.user_id.map(|u| u as i64),
                         hash: None,
@@ -259,7 +305,7 @@ impl InternalKeyIndex {
                     created_ts_secs: row.created.map(|i| i as u64),
                     modified_ts_secs: row.modified.map(|i| i as u64),
                     accessed_ts_secs: row.accessed.map(|i| i as u64),
-                    permissions: row.permissions.map(|x| x as u64),
+                    permissions: row.permissions.map(|m| fs::Permissions::from_mode(m as u32)),
                     user_id: row.user_id.map(|x| x as u64),
                     group_id: row.group_id.map(|x| x as u64),
                     byte_length: None,
@@ -332,8 +378,7 @@ impl InternalKeyIndex {
                          created_ts_secs: r.created.map(|i| i as u64),
                          modified_ts_secs: r.modified.map(|i| i as u64),
                          accessed_ts_secs: r.accessed.map(|i| i as u64),
-                         permissions: r.permissions
-                             .map(|x| x as u64),
+                         permissions: r.permissions.map(|m| fs::Permissions::from_mode(m as u32)),
                          user_id: r.user_id.map(|x| x as u64),
                          group_id: r.group_id.map(|x| x as u64),
                          byte_length: None,

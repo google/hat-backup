@@ -68,6 +68,11 @@ struct HashIds {
 	hashIds @0 :List(UInt64);
 }
 
+struct UserGroup {
+    userId @0 :UInt64;
+    groupId @1 :UInt64;
+}
+
 struct FileInfo {
     name @0 :Data;
 
@@ -75,10 +80,12 @@ struct FileInfo {
 	modifiedTimestampSecs @2 :UInt64;
 	accessedTimestampSecs @3 :UInt64;
 
-	byteSize @4 :UInt64;
+	byteLength @4 :UInt64;
 
-	userId @5 :UInt64;
-	groupId @6 :UInt64;
+	owner :union {
+		none @5 :Void;
+		userGroup @6 :UserGroup;
+	}
 
 	permissions :union {
 	    none @7 :Void;

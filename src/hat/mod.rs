@@ -18,6 +18,7 @@ use blob;
 use capnp;
 use db;
 use errors::HatError;
+use filetime;
 use gc::{self, Gc, GcRc};
 use hash;
 use key;
@@ -750,6 +751,17 @@ impl<B: StoreBackend> HatRc<B> {
             } else {
                 self.checkout_dir_ref(family, output, hash_ref)?;
             }
+
+            if let Some(perms) = entry.info.permissions {
+                fs::set_permissions(&output, perms)?;
+            }
+
+            if let (Some(m), Some(a)) = (entry.info.modified_ts_secs, entry.info.accessed_ts_secs) {
+                let atime = filetime::FileTime::from_seconds_since_1970(a, 0  /* nanos */);
+                let mtime = filetime::FileTime::from_seconds_since_1970(m, 0  /* nanos */);
+                filetime::set_file_times(&output, atime, mtime).unwrap();
+            }
+
             output.pop();
         }
         Ok(())
