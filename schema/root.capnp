@@ -22,7 +22,7 @@ struct Snapshot {
 	familyName @1: Text;
 	msg @2 :Text;
 
-	hashRef @3 :Data;
+	hashRef @3 :HashRef;
 }
 
 struct SnapshotList {
