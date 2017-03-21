@@ -50,17 +50,19 @@ pub mod sealed {
         pub const SEALBYTES: usize = PUBLICKEYBYTES + MACBYTES;
 
         pub fn footer_plain_bytes() -> usize {
-            // Footer contains a LittleEndian u64.
-            8
+            // Footer encodes message length in LittleEndian i64 + a symmetric inner key.
+            8 + ::crypto::authed::desc::KEYBYTES
         }
 
         pub fn footer_cipher_bytes() -> usize {
+            // Footer plaintext + seal.
             footer_plain_bytes() + SEALBYTES
         }
 
         pub fn overhead() -> usize {
-            // MAC for the plaintext being sealed + the footer.
-            SEALBYTES + footer_cipher_bytes()
+            // plaintext MAC + random inner nonce + the footer.
+            ::crypto::authed::desc::MACBYTES + ::crypto::authed::desc::NONCEBYTES +
+            footer_cipher_bytes()
         }
     }
 
@@ -86,6 +88,18 @@ impl<'a> PlainTextRef<'a> {
     pub fn read_i64(&self) -> Result<i64, io::Error> {
         return (&self.0[..]).read_i64::<LittleEndian>();
     }
+    pub fn slice(&self, from: usize, to: usize) -> PlainTextRef<'a> {
+        PlainTextRef(&self.0[from..to])
+    }
+    pub fn split_from_right(&self,
+                            len: usize)
+                            -> Result<(PlainTextRef<'a>, PlainTextRef<'a>), CryptoError> {
+        if self.len() < len {
+            Err("crypto read failed: split_from_right".into())
+        } else {
+            Ok((self.slice(0, self.len() - len), self.slice(self.len() - len, self.len())))
+        }
+    }
     pub fn to_ciphertext(&self,
                          nonce: &authed::desc::Nonce,
                          key: &authed::desc::Key)
@@ -94,9 +108,6 @@ impl<'a> PlainTextRef<'a> {
     }
     pub fn to_sealed_ciphertext(&self, pubkey: &sealed::desc::PublicKey) -> CipherText {
         CipherText::new(sealed::imp::seal(self.0, pubkey))
-    }
-    pub fn as_ref(&'a self) -> PlainTextRef<'a> {
-        PlainTextRef(self.0)
     }
 }
 
@@ -259,17 +270,26 @@ impl FixedKey {
     }
 
     pub fn seal(&self, pt: PlainTextRef) -> CipherText {
-        let mut ct = self.light_seal(pt.as_ref());
+        // Generate inner symmetric key.
+        let inner_key = ::crypto::authed::imp::gen_key();
+        let nonce = ::crypto::authed::imp::gen_nonce();
 
-        // Add ciphertext length as LittleEndian.
-        let foot_pt = PlainText::from_i64(ct.len() as i64);
+        // Encrypt plaintext with inner key.
+        let mut ct = pt.to_ciphertext(&nonce, &inner_key);
+        ct.append(CipherText::new(nonce.0.to_vec()));
+
+        // Construct footer of length as LittleEndian and inner key.
+        let mut foot_pt = PlainText::from_i64(ct.len() as i64);
+        foot_pt.0.extend_from_slice(&inner_key.0);
         assert_eq!(foot_pt.len(), sealed::desc::footer_plain_bytes());
 
-        // Append sealed ciphertext length to full ciphertext.
-        ct.append(self.light_seal(foot_pt.as_ref()));
-        assert_eq!(ct.len(), pt.len() + sealed::desc::overhead());
+        // Seal footer.
+        let foot_ct = self.light_seal(foot_pt.as_ref());
+        assert_eq!(foot_ct.len(), sealed::desc::footer_cipher_bytes());
 
-        // Return complete ciphertext.
+        // Append sealed footer to symmetric cipher text.
+        ct.append(foot_ct);
+        assert_eq!(ct.len(), pt.len() + sealed::desc::overhead());
         ct
     }
 
@@ -286,13 +306,20 @@ impl FixedKey {
         let foot_pt = self.light_unseal(foot_ct)?;
         assert_eq!(foot_pt.len(), sealed::desc::footer_plain_bytes());
 
-        // Parse back from encoded LittleEndian.
-        let ct_len = foot_pt.as_ref()
-            .read_i64()
-            .map_err(|_| "crypto read failed: unseal")?;
+        // Read length as LittleEndian and inner key.
+        let (foot_len, inner_key) = foot_pt.as_ref()
+            .split_from_right(::crypto::authed::desc::KEYBYTES)?;
 
-        // Read and unseal original ciphertext.
-        let (rest, ct) = rest.split_from_right(ct_len as usize)?;
-        Ok((rest, self.light_unseal(ct)?))
+        // Parse length of inner symmetric cipher text.
+        let ct_len = foot_len.read_i64()
+            .map_err(|_| "crypto read failed: unseal")?;
+        assert!(ct_len > 0);
+
+        // Read and unseal inner symmetric cipher text.
+        let (rest, ct_and_nonce) = rest.split_from_right(ct_len as usize)?;
+        let (ct, nonce) = ct_and_nonce.split_from_right(::crypto::authed::desc::NONCEBYTES)?;
+        Ok((rest,
+            ct.to_plaintext(&::crypto::authed::desc::Nonce::from_slice(nonce.0).unwrap(),
+                              &::crypto::authed::desc::Key::from_slice(inner_key.0).unwrap())?))
     }
 }
