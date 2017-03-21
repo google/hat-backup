@@ -53,14 +53,14 @@ impl Blob {
             master_key: master_key,
             chunks: CipherText::empty(),
             footer: Vec::with_capacity(max_len / 2),
-            overhead: crypto::sealed::desc::overhead(),
+            overhead: crypto::sealed::desc::overhead() + crypto::authed::hash::DIGESTBYTES,
             max_len: max_len,
         }
     }
 
     pub fn read_chunk(blob: &[u8], hash: &Hash, cref: &ChunkRef) -> Result<Vec<u8>, BlobError> {
         let ct = crypto::CipherTextRef::new(blob);
-        Ok(crypto::RefKey::unseal(hash, cref, ct)?.into_vec())
+        Ok(crypto::RefKey::unseal(hash, cref, ct.strip_authentication()?)?.into_vec())
     }
 
     pub fn upperbound_len(&self) -> usize {
@@ -102,13 +102,18 @@ impl Blob {
             return None;
         }
 
+        let footer_overhead = self.footer.len() + self.overhead;
         let footer = self.master_key.seal(PlainTextRef::new(&self.footer[..]));
         self.footer.truncate(0);
 
-        assert!(self.chunks.len() + footer.len() <= self.max_len);
+        assert!(self.chunks.len() + footer_overhead <= self.max_len);
+
         let mut out = mem::replace(&mut self.chunks, CipherText::empty());
-        out.random_pad_upto(self.max_len - footer.len());
+        out.random_pad_upto(self.max_len - footer_overhead);
         out.append(footer);
+        out.append_authentication();
+
+        assert_eq!(out.len(), self.max_len);
 
         // Everything has been reset. We are ready to go again.
         assert_eq!(0, self.chunks.len());
@@ -118,7 +123,8 @@ impl Blob {
     }
 
     pub fn refs_from_bytes(&self, bytes: &[u8]) -> Result<Vec<HashRef>, BlobError> {
-        let (_rest, footer_vec) = self.master_key.unseal(CipherTextRef::new(bytes))?;
+        let ct = CipherTextRef::new(bytes);
+        let (_rest, footer_vec) = self.master_key.unseal(ct.strip_authentication()?)?;
         let mut footer_pos = footer_vec.as_bytes();
 
         let mut hrefs = Vec::new();

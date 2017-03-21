@@ -39,6 +39,25 @@ pub mod authed {
     pub mod imp {
         pub use sodiumoxide::crypto::secretbox::xsalsa20poly1305::{gen_key, gen_nonce, open, seal};
     }
+
+    pub mod hash {
+        use libsodium_sys::crypto_generichash_blake2b;
+        pub use libsodium_sys::crypto_generichash_blake2b_BYTES_MAX as DIGESTBYTES;
+
+        pub fn new(text: &[u8]) -> Vec<u8> {
+            let mut digest = vec![0; DIGESTBYTES];
+            let key = vec![];
+            unsafe {
+                crypto_generichash_blake2b(digest.as_mut_ptr(),
+                                           digest.len(),
+                                           text.as_ptr(),
+                                           text.len() as u64,
+                                           key.as_ptr(),
+                                           key.len());
+            }
+            digest
+        }
+    }
 }
 
 pub mod sealed {
@@ -71,8 +90,6 @@ pub mod sealed {
         pub use sodiumoxide::crypto::sealedbox::curve25519blake2bxsalsa20poly1305::{open, seal};
     }
 }
-
-
 
 fn wrap_key(key: authed::desc::Key) -> Key {
     Key::XSalsa20Poly1305(key)
@@ -174,6 +191,12 @@ impl CipherText {
         out
     }
 
+    pub fn append_authentication(&mut self) {
+        let v = self.to_vec();
+        let h = authed::hash::new(&v[..]);
+        self.append(CipherText::new(h));
+    }
+
     pub fn slices(&self) -> Vec<&[u8]> {
         self.chunks.iter().map(|x| &x[..]).collect()
     }
@@ -211,6 +234,16 @@ impl<'a> CipherTextRef<'a> {
                                -> Result<PlainText, CryptoError> {
         Ok(PlainText::new(try!(sealed::imp::open(&self.0, &pubkey, &seckey)
             .map_err(|()| "crypto read failed: to_sealed_plaintext"))))
+    }
+
+    pub fn strip_authentication(&self) -> Result<CipherTextRef, CryptoError> {
+        let (rest, want) = self.split_from_right(authed::hash::DIGESTBYTES)?;
+        let got = authed::hash::new(rest.0);
+        if want.0 == &got[..] {
+            Ok(rest)
+        } else {
+            Err(From::from("crypto read failed: strip_authentication"))
+        }
     }
 }
 
