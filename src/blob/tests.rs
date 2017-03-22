@@ -334,29 +334,11 @@ fn blob_ciphertext_authed_allbytes() {
         res
     };
 
-    let mut unauthed = vec![];
-
     // Blob is valid.
     let vs = verify(&blob, &bytes[..]).unwrap();
     for i in 0..bytes.len() {
-        if let Ok(_) = with_modified(&mut bytes[..], i, 1, |bs| verify(&blob, bs)) {
-            // As we did not notice the modification, this index was not authenticated.
-            unauthed.push(i);
-        }
+        assert!(with_modified(&mut bytes[..], i, 1, |bs| verify(&blob, bs)).is_err());
     }
     // We did not corrupt the blob.
     assert_eq!(vs, verify(&blob, &bytes[..]).unwrap());
-
-    // Some unauthenticated random padding is expected.
-    // However, it should be a single continuous segment.
-    assert!(unauthed.len() >= 2);
-    for (a, b) in unauthed.iter().zip(unauthed[1..].iter()) {
-        assert_eq!(*a + 1, *b);
-    }
-
-    // No important byte is unauthenticated.
-    // Removing the random padding does not affect unpacking.
-    let mut authed = bytes[0..unauthed[0]].to_owned();
-    authed.extend_from_slice(&bytes[unauthed.iter().last().unwrap() + 1..]);
-    assert_eq!(vs, verify(&blob, &authed[..]).unwrap());
 }

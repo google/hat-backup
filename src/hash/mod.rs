@@ -16,11 +16,11 @@
 
 
 use blob;
+use crypto;
 use db;
 
 use errors::{DieselError, RetryError};
 
-use libsodium_sys;
 use std::sync::{Arc, Mutex, MutexGuard};
 use tags;
 use util::UniquePriorityQueue;
@@ -46,17 +46,7 @@ pub struct Hash {
 impl Hash {
     /// Computes `hash(text)` and stores this digest as the `bytes` field in a new `Hash` structure.
     pub fn new(text: &[u8]) -> Hash {
-        let digest_len = libsodium_sys::crypto_generichash_blake2b_BYTES_MAX;
-        let mut digest = vec![0; digest_len];
-        unsafe {
-            libsodium_sys::crypto_generichash_blake2b(digest.as_mut_ptr(),
-                                                      digest_len,
-                                                      text.as_ptr(),
-                                                      text.len() as u64,
-                                                      vec![].as_ptr(),
-                                                      0);
-        }
-        Hash { bytes: digest }
+        Hash { bytes: crypto::authed::hash::new(text) }
     }
 }
 
