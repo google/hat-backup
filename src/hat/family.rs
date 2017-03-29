@@ -229,11 +229,25 @@ impl<B: StoreBackend> Family<B> {
         let mut parent_path = PathBuf::from("/");
 
         let dir = fs::canonicalize(dir).unwrap();
+        info!("Committing: {}", dir.display());
         assert!(dir.is_absolute());
 
+        let mut inside_non_dir = false;
         for name in dir.iter().map(PathBuf::from).filter(|p| !p.has_root()) {
+            if inside_non_dir {
+                // The remaining part of the path is inside a link or similar.
+                // This should not happen, as the path was canonical.
+                warn!("Ignoring components after non-dir path: {}", parent_path.display());
+                return;
+            }
             parent_path.push(name);
-            parent = handler.handle_path(&parent, &parent_path).unwrap();
+            if let Some(new_parent) = handler.handle_path(&parent, &parent_path) {
+                parent = new_parent;
+            } else {
+                // Trigger warning if this is not the final component.
+                // If this is the final component, we just commit'ed a file or link, which is OK.
+                inside_non_dir = true;
+            }
         }
 
         if dir.is_dir() {

@@ -99,16 +99,13 @@ fn main() {
             let mut hat = hat::Hat::open_repository(PathBuf::from("repo"), backend, MAX_BLOB_SIZE)
                 .unwrap();
 
-            {
-                let family = hat.open_family(name.clone())
-                    .expect(&format!("Could not open family '{}'", name));
+            let family = hat.open_family(name.clone())
+                .expect(&format!("Could not open family '{}'", name));
 
-                family.snapshot_dir(PathBuf::from(path));
-                family.flush().unwrap();
-            }
+            family.snapshot_dir(PathBuf::from(path));
+            family.flush().unwrap();
 
             println!("Finalizing commit.");
-
             hat.commit_by_name(name, None).unwrap();
             hat.meta_commit().unwrap();
         }
