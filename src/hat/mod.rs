@@ -311,7 +311,9 @@ impl<B: StoreBackend> HatRc<B> {
                 s.set_family_name(&snapshot.family_name);
                 s.set_msg(&snapshot.msg.unwrap_or("".to_owned()));
                 let hash_ref = snapshot.hash_ref.unwrap();
-                hash::tree::HashRef::from_bytes(&mut hash_ref.as_ref())?.populate_msg(s.init_hash_ref());
+                hash::tree::HashRef::from_bytes(&mut hash_ref.as_ref())
+                    ?
+                    .populate_msg(s.init_hash_ref());
 
                 if snapshot.family_name == synthetic_roots_family() {
                     all_root_ids.push(snapshot.info.snapshot_id);
@@ -389,8 +391,7 @@ impl<B: StoreBackend> HatRc<B> {
                 .unwrap();
 
             for s in snapshot_list.get_snapshots().unwrap().iter() {
-                let hash_ref = hash::tree::HashRef::read_msg(&s.get_hash_ref().unwrap())
-                    .unwrap();
+                let hash_ref = hash::tree::HashRef::read_msg(&s.get_hash_ref().unwrap()).unwrap();
                 self.snapshot_index
                     .recover(s.get_id(),
                              s.get_family_name()
@@ -758,8 +759,8 @@ impl<B: StoreBackend> HatRc<B> {
             }
 
             if let (Some(m), Some(a)) = (entry.info.modified_ts_secs, entry.info.accessed_ts_secs) {
-                let atime = filetime::FileTime::from_seconds_since_1970(a, 0  /* nanos */);
-                let mtime = filetime::FileTime::from_seconds_since_1970(m, 0  /* nanos */);
+                let atime = filetime::FileTime::from_seconds_since_1970(a, 0 /* nanos */);
+                let mtime = filetime::FileTime::from_seconds_since_1970(m, 0 /* nanos */);
                 filetime::set_file_times(&output, atime, mtime).unwrap();
             }
 

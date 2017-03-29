@@ -51,25 +51,19 @@ fn main() {
     // Because "snapshot" and "checkout" use the exact same type of arguments, we can make a
     // template. This template defines two positional arguments, both are required
     let arg_template = "<NAME> 'Name of the snapshot'
-                        <PATH> 'The path of \
-                        the snapshot'";
+                        <PATH> 'The path of the snapshot'";
 
     // Create valid arguments
     let matches = App::new("hat")
         .version(&format!("v{}", crate_version!())[..])
         .about("Create backup snapshots")
         .arg_from_usage("--license 'Display the license'")
-        .subcommand(SubCommand::with_name("snapshot")
-            .about("Create a snapshot")
+        .subcommand(SubCommand::with_name("commit")
+            .about("Commit a new snapshot")
             .args_from_usage(arg_template))
         .subcommand(SubCommand::with_name("checkout")
             .about("Checkout a snapshot")
             .args_from_usage(arg_template))
-        .subcommand(SubCommand::with_name("commit")
-            .about("Commit a snapshot")
-            .arg_from_usage("<NAME> 'Name of the snapshot'"))
-        .subcommand(SubCommand::with_name("meta-commit")
-            .about("Commit snapshot metadata (required for recover command"))
         .subcommand(SubCommand::with_name("recover").about("Recover list of commit'ed snapshots"))
         .subcommand(SubCommand::with_name("delete")
             .about("Delete a snapshot")
@@ -97,12 +91,12 @@ fn main() {
             let backend = Arc::new(backend::FileBackend::new(blob_dir()));
             hat::Hat::open_repository(PathBuf::from("repo"), backend, MAX_BLOB_SIZE).unwrap();
         }
-        ("snapshot", Some(cmd)) => {
+        ("commit", Some(cmd)) => {
             let name = cmd.value_of("NAME").unwrap().to_owned();
             let path = cmd.value_of("PATH").unwrap();
 
             let backend = Arc::new(backend::FileBackend::new(blob_dir()));
-            let hat = hat::Hat::open_repository(PathBuf::from("repo"), backend, MAX_BLOB_SIZE)
+            let mut hat = hat::Hat::open_repository(PathBuf::from("repo"), backend, MAX_BLOB_SIZE)
                 .unwrap();
 
             let family = hat.open_family(name.clone())
@@ -111,7 +105,9 @@ fn main() {
             family.snapshot_dir(PathBuf::from(path));
             family.flush().unwrap();
 
-            println!("Waiting for final flush...");
+            println!("Finalizing commit.");
+            hat.commit_by_name(name, None).unwrap();
+            hat.meta_commit().unwrap();
         }
         ("checkout", Some(cmd)) => {
             let name = cmd.value_of("NAME").unwrap().to_owned();
@@ -123,28 +119,12 @@ fn main() {
 
             hat.checkout_in_dir(name, PathBuf::from(path)).unwrap();
         }
-        ("meta-commit", Some(_cmd)) => {
-            let backend = Arc::new(backend::FileBackend::new(blob_dir()));
-            let mut hat = hat::Hat::open_repository(PathBuf::from("repo"), backend, MAX_BLOB_SIZE)
-                .unwrap();
-
-            hat.meta_commit().unwrap();
-        }
         ("recover", Some(_cmd)) => {
             let backend = Arc::new(backend::FileBackend::new(blob_dir()));
             let mut hat = hat::Hat::open_repository(PathBuf::from("repo"), backend, MAX_BLOB_SIZE)
                 .unwrap();
 
             hat.recover().unwrap();
-        }
-        ("commit", Some(cmd)) => {
-            let name = cmd.value_of("NAME").unwrap().to_owned();
-
-            let backend = Arc::new(backend::FileBackend::new(blob_dir()));
-            let mut hat = hat::Hat::open_repository(PathBuf::from("repo"), backend, MAX_BLOB_SIZE)
-                .unwrap();
-
-            hat.commit_by_name(name, None).unwrap();
         }
         ("delete", Some(cmd)) => {
             let name = cmd.value_of("NAME").unwrap().to_owned();

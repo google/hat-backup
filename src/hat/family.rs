@@ -224,7 +224,35 @@ impl<B: StoreBackend> Clone for Family<B> {
 impl<B: StoreBackend> Family<B> {
     pub fn snapshot_dir(&self, dir: PathBuf) {
         let handler = InsertPathHandler::new(self.key_store_process.clone());
-        handler.recurse(PathBuf::from(&dir), None);
+
+        let mut parent = None;
+        let mut parent_path = PathBuf::from("/");
+
+        let dir = fs::canonicalize(dir).unwrap();
+        info!("Committing: {}", dir.display());
+        assert!(dir.is_absolute());
+
+        let mut inside_non_dir = false;
+        for name in dir.iter().map(PathBuf::from).filter(|p| !p.has_root()) {
+            if inside_non_dir {
+                // The remaining part of the path is inside a link or similar.
+                // This should not happen, as the path was canonical.
+                warn!("Ignoring components after non-dir path: {}", parent_path.display());
+                return;
+            }
+            parent_path.push(name);
+            if let Some(new_parent) = handler.handle_path(&parent, &parent_path) {
+                parent = new_parent;
+            } else {
+                // Trigger warning if this is not the final component.
+                // If this is the final component, we just commit'ed a file or link, which is OK.
+                inside_non_dir = true;
+            }
+        }
+
+        if dir.is_dir() {
+            handler.recurse(PathBuf::from(&dir), parent);
+        }
     }
 
     pub fn snapshot_direct(&self,
@@ -294,8 +322,8 @@ impl<B: StoreBackend> Family<B> {
             }
 
             if let (Some(m), Some(a)) = (entry.info.modified_ts_secs, entry.info.accessed_ts_secs) {
-                let atime = filetime::FileTime::from_seconds_since_1970(a, 0  /* nanos */);
-                let mtime = filetime::FileTime::from_seconds_since_1970(m, 0  /* nanos */);
+                let atime = filetime::FileTime::from_seconds_since_1970(a, 0 /* nanos */);
+                let mtime = filetime::FileTime::from_seconds_since_1970(m, 0 /* nanos */);
                 filetime::set_file_times(&path, atime, mtime).unwrap();
             }
 
