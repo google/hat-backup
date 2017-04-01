@@ -83,6 +83,14 @@ pub struct InternalHashIndex {
     queue: Mutex<Queue>,
 }
 
+impl Drop for InternalHashIndex {
+    fn drop(&mut self) {
+        // Sanity check that we flushed this hash index fully before dropping it.
+        // Blob store accumulates chunks for the next blob and needs flushing.
+        assert_eq!(0, self.queue.lock().unwrap().len());
+    }
+}
+
 impl InternalHashIndex {
     fn new(index: Arc<db::Index>) -> Result<InternalHashIndex, DieselError> {
         Ok(InternalHashIndex {

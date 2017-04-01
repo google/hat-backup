@@ -71,6 +71,13 @@ pub struct StoreInner<B> {
     blob: Blob,
 }
 
+impl<B> Drop for StoreInner<B> {
+    fn drop(&mut self) {
+        // Sanity check that we flushed this blob store before dropping it.
+        assert_eq!(0, self.blob.upperbound_len());
+    }
+}
+
 impl<B: StoreBackend> StoreInner<B> {
     fn new(index: Arc<BlobIndex>, backend: Arc<B>, max_blob_size: usize) -> StoreInner<B> {
         let mut bs = StoreInner {

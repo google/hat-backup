@@ -491,7 +491,6 @@ impl InternalIndex {
     }
 
     pub fn flush(&mut self) {
-        // Callbacks assume their data is safe, so commit before calling them
         let tm = self.conn.transaction_manager();
         tm.commit_transaction(&self.conn).unwrap();
         tm.begin_transaction(&self.conn).unwrap();

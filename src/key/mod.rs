@@ -245,12 +245,6 @@ impl<IT: io::Read, B: StoreBackend> MsgHandler<Msg<IT>, Reply<B>> for Store<B> {
 
                 let entry = self.index.insert(entry)?;
 
-                // Send out the ID early to allow the client to continue its key discovery routine.
-                // The bounded input-channel will prevent the client from overflowing us.
-                assert!(entry.id.is_some());
-                reply(Ok(Reply::Id(entry.id.unwrap())));
-
-
                 // Setup hash tree structure
                 let mut tree = self.hash_tree_writer(blob::LeafType::FileChunk);
 
@@ -264,7 +258,7 @@ impl<IT: io::Read, B: StoreBackend> MsgHandler<Msg<IT>, Reply<B>> for Store<B> {
                                           None,
                                           None)?;
                     // Bail out before storing data that does not exist:
-                    return Ok(());
+                    return reply_ok!(Reply::Id(entry.id.unwrap()));
                 }
 
                 // Read and insert all file chunks:
@@ -305,7 +299,7 @@ impl<IT: io::Read, B: StoreBackend> MsgHandler<Msg<IT>, Reply<B>> for Store<B> {
                                       Some(hash_ref.hash.clone()),
                                       Some(hash_ref))?;
 
-                Ok(())
+                return reply_ok!(Reply::Id(entry.id.unwrap()));
             }
         }
     }

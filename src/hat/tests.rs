@@ -30,7 +30,7 @@ pub fn setup_hat<B: StoreBackend>(backend: Arc<B>) -> HatRc<B> {
 
 fn setup_family() -> (Arc<MemoryBackend>, HatRc<MemoryBackend>, Family<MemoryBackend>) {
     let backend = Arc::new(MemoryBackend::new());
-    let hat = setup_hat(backend.clone());
+    let mut hat = setup_hat(backend.clone());
 
     let family = "familyname".to_string();
     let fam = hat.open_family(family).unwrap();
@@ -105,12 +105,12 @@ fn basic_snapshot<B: StoreBackend>(fam: &Family<B>) {
 
 #[test]
 fn snapshot_commit() {
-    let (_, mut hat, fam) = setup_family();
+    let (_, mut hat, mut fam) = setup_family();
 
     basic_snapshot(&fam);
 
     fam.flush().unwrap();
-    hat.commit(&fam, None).unwrap();
+    hat.commit(&mut fam, None).unwrap();
     hat.meta_commit().unwrap();
 
     let (deleted, live) = hat.gc().unwrap();
@@ -120,13 +120,13 @@ fn snapshot_commit() {
 
 #[test]
 fn snapshot_commit_many_empty_files() {
-    let (_, mut hat, fam) = setup_family();
+    let (_, mut hat, mut fam) = setup_family();
 
     let names: Vec<String> = (0..3000).map(|i| format!("name-{}", i)).collect();
     snapshot_files(&fam, names.iter().map(|n| (n.as_str(), vec![])).collect()).unwrap();
 
     fam.flush().unwrap();
-    hat.commit(&fam, None).unwrap();
+    hat.commit(&mut fam, None).unwrap();
     hat.meta_commit().unwrap();
 
     let (deleted, live) = hat.gc().unwrap();
@@ -147,7 +147,7 @@ fn snapshot_commit_many_empty_files() {
 
 #[test]
 fn snapshot_commit_many_empty_directories() {
-    let (_, mut hat, fam) = setup_family();
+    let (_, mut hat, mut fam) = setup_family();
 
     for i in 0..3000 {
         fam.snapshot_direct(entry(format!("name-{}", i).bytes().collect()), true, None)
@@ -155,7 +155,7 @@ fn snapshot_commit_many_empty_directories() {
     }
 
     fam.flush().unwrap();
-    hat.commit(&fam, None).unwrap();
+    hat.commit(&mut fam, None).unwrap();
     hat.meta_commit().unwrap();
 
     let (deleted, live) = hat.gc().unwrap();
@@ -176,7 +176,7 @@ fn snapshot_commit_many_empty_directories() {
 
 #[test]
 fn snapshot_reuse_index() {
-    let (_, mut hat, fam) = setup_family();
+    let (_, mut hat, mut fam) = setup_family();
 
     // Insert hashes.
     basic_snapshot(&fam);
@@ -197,7 +197,7 @@ fn snapshot_reuse_index() {
     fam.flush().unwrap();
 
     // Commit.
-    hat.commit(&fam, None).unwrap();
+    hat.commit(&mut fam, None).unwrap();
     let (deleted, live) = hat.gc().unwrap();
     assert_eq!(deleted, 0);
     assert!(live > 0);
@@ -232,11 +232,11 @@ fn snapshot_gc() {
 #[test]
 fn recover() {
     // Prepare a snapshot.
-    let (backend, mut hat, fam) = setup_family();
+    let (backend, mut hat, mut fam) = setup_family();
     basic_snapshot(&fam);
     fam.flush().unwrap();
 
-    hat.commit(&fam, None).unwrap();
+    hat.commit(&mut fam, None).unwrap();
     hat.meta_commit().unwrap();
 
     let (deleted, live1) = hat.gc().unwrap();

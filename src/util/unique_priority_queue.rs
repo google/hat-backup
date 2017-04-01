@@ -37,6 +37,10 @@ impl<P: Clone + Ord, K: Clone + Ord, V> UniquePriorityQueue<P, K, V> {
         }
     }
 
+    pub fn len(&self) -> usize {
+        self.priority.len()
+    }
+
     pub fn find_key(&self, k: &K) -> Option<&P> {
         self.key_to_priority.get(k)
     }
