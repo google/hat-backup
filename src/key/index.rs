@@ -71,19 +71,10 @@ impl Entry {
         }
     }
 
-    pub fn data_looks_unchanged(&self, other: &Entry) -> bool {
-        if self.info.created_ts_secs.is_none() || self.info.modified_ts_secs.is_none() {
-            false
-        } else {
-            (self.parent_id,
-             &self.info.name,
-             self.info.created_ts_secs,
-             self.info.modified_ts_secs) ==
-            (other.parent_id,
-             &other.info.name,
-             other.info.created_ts_secs,
-             other.info.modified_ts_secs)
-        }
+    pub fn data_looks_unchanged(&self, them: &Entry) -> bool {
+        self.info.modified_ts_secs.is_some() &&
+        ((self.parent_id, &self.info.name, self.info.modified_ts_secs) ==
+         (them.parent_id, &them.info.name, them.info.modified_ts_secs))
     }
 }
 
