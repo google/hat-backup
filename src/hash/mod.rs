@@ -187,10 +187,10 @@ impl InternalHashIndex {
 
     fn commit(&self,
               id: i64,
-              entry: Entry,
+              entry_opt: Option<Entry>,
               mut queue: &mut MutexGuard<Queue>,
               mut index: &mut db::IndexGuard) {
-        self.update_reserved(id, entry, queue);
+        entry_opt.map(|e| self.update_reserved(id, e, queue));
 
         queue.set_ready(&id);
         self.insert_completed_in_order(&mut queue, &mut index);
@@ -294,7 +294,7 @@ impl HashIndex {
 
     /// A `Hash` is committed when it has been `finalized` in the external storage. `Commit`
     /// includes the persistent reference that the content is available at.
-    pub fn commit(&self, id: i64, entry: Entry) {
+    pub fn commit(&self, id: i64, entry: Option<Entry>) {
         let (mut queue, mut index) = self.0.lock();
         self.0.commit(id, entry, &mut queue, &mut index);
     }

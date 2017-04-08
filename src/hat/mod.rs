@@ -493,7 +493,7 @@ impl<B: StoreBackend> HatRc<B> {
                 hash::ReserveResult::ReserveOk(id) => id,
             };
             // Commit hash.
-            hashes.commit(id, entry.clone());
+            hashes.commit(id, Some(entry));
         }
 
         let mut dir_v = family::recover::DirVisitor::new();

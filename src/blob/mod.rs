@@ -67,7 +67,7 @@ pub struct StoreInner<B> {
     backend: Arc<B>,
     blob_index: Arc<BlobIndex>,
     blob_desc: BlobDesc,
-    blob_refs: Vec<(HashRef, Box<FnBox<HashRef, ()>>)>,
+    blob_refs: Vec<(Box<FnBox<(), ()>>)>,
     blob: Blob,
 }
 
@@ -111,8 +111,8 @@ impl<B: StoreBackend> StoreInner<B> {
         self.blob_index.commit_done(&old_blob_desc);
 
         // Go through callbacks
-        while let Some((href, callback)) = self.blob_refs.pop() {
-            callback.call(href);
+        while let Some(callback) = self.blob_refs.pop() {
+            callback.call(());
         }
     }
 
@@ -122,7 +122,7 @@ impl<B: StoreBackend> StoreInner<B> {
              node: NodeType,
              leaf: LeafType,
              info: Option<&key::Info>,
-             callback: Box<FnBox<HashRef, ()>>)
+             callback: Box<FnBox<(), ()>>)
              -> HashRef {
         if chunk.is_empty() {
             let href = HashRef {
@@ -139,8 +139,7 @@ impl<B: StoreBackend> StoreInner<B> {
                     key: None,
                 },
             };
-            let local_href = href.clone();
-            thread::spawn(move || callback.call(local_href));
+            thread::spawn(move || callback.call(()));
             return href;
         }
 
@@ -166,11 +165,10 @@ impl<B: StoreBackend> StoreInner<B> {
             href.persistent_ref.blob_name = self.blob_desc.name.clone();
             self.blob.try_append(chunk, &mut href).unwrap();
         }
+        self.blob_refs.push(callback);
 
         // Info is internal to the blob only.
         href.info = None;
-
-        self.blob_refs.push((href.clone(), callback));
 
         // To avoid unnecessary blocking, we reply with the ID *before* possibly flushing.
         href
@@ -249,7 +247,7 @@ impl<B: StoreBackend> BlobStore<B> {
                  node: NodeType,
                  leaf: LeafType,
                  info: Option<&key::Info>,
-                 callback: Box<FnBox<HashRef, ()>>)
+                 callback: Box<FnBox<(), ()>>)
                  -> HashRef {
         let mut guard = self.lock();
         guard.store(chunk, hash, node, leaf, info, callback)
