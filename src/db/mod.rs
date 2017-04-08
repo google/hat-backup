@@ -84,17 +84,14 @@ fn decode_childs(bytes: &[u8]) -> Result<Vec<i64>, capnp::Error> {
 fn decode_chunk_ref(cref: Option<&Vec<u8>>,
                     blob: Option<self::schema::Blob>)
                     -> Option<blob::ChunkRef> {
-    cref.and_then(|c| {
+    cref.map(|c| {
         let mut r = blob::ChunkRef::from_bytes(&mut &c[..]).expect("Failed to decode chunk");
         if r.length > 0 {
-            blob.map(|b| {
-                r.blob_name = b.name;
-                r
-            })
+            r.blob_name = blob.expect("Non-empty chunk without blob name").name;
         } else {
             r.blob_name = vec![0];
-            Some(r)
         }
+        r
     })
 }
 
@@ -339,15 +336,16 @@ impl InternalIndex {
 
     pub fn hash_set_ready(&mut self, id_: i64, entry: &QueueEntry) {
         use self::schema::hashes::dsl::*;
-        let blob_ref_ = entry.persistent_ref.as_ref().map(|c| c.as_bytes_no_name());
+        let blob_ref_ = entry.persistent_ref.as_ref().expect("ready").as_bytes_no_name();
+        let blob_id_ = entry.persistent_ref.as_ref().expect("ready").blob_id.expect("ready");
         let childs_ = entry.childs.as_ref().map(|v| encode_childs(&v[..]));
 
         let height_: i64 = From::from(entry.node);
         let leaf_type_: i64 = From::from(entry.leaf);
 
         diesel::update(hashes.find(id_))
-            .set((blob_id.eq(entry.persistent_ref.as_ref().and_then(|r| r.blob_id).unwrap_or(0)),
-                  blob_ref.eq(blob_ref_.as_ref().map(|v| &v[..])),
+            .set((blob_id.eq(blob_id_),
+                  blob_ref.eq(&blob_ref_[..]),
                   ready.eq(true),
                   height.eq(height_),
                   leaf_type.eq(leaf_type_),
