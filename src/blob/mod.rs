@@ -124,52 +124,42 @@ impl<B: StoreBackend> StoreInner<B> {
              info: Option<&key::Info>,
              callback: Box<FnBox<(), ()>>)
              -> HashRef {
-        if chunk.is_empty() {
-            let href = HashRef {
-                hash: hash,
-                node: node,
-                leaf: leaf,
-                info: None,
-                persistent_ref: ChunkRef {
-                    blob_id: None,
-                    blob_name: vec![0],
-                    offset: 0,
-                    length: 0,
-                    packing: None,
-                    key: None,
-                },
-            };
-            thread::spawn(move || callback.call(()));
-            return href;
-        }
-
         let mut href = HashRef {
             hash: hash,
             node: node,
             leaf: leaf,
             info: info.cloned(),
             persistent_ref: ChunkRef {
-                blob_id: Some(self.blob_desc.id),
-                blob_name: self.blob_desc.name.clone(),
+                blob_id: Some(0),
+                blob_name: vec![0],
                 packing: None,
-                // updated by try_append:
+                // Updated by try_append.
                 offset: 0,
                 length: 0,
                 key: None,
             },
         };
 
-        if let Err(()) = self.blob.try_append(chunk, &mut href) {
-            self.flush();
-
+        if chunk.is_empty() {
+            // We are not going to store an empty chunk, so commit it ASAP.
+            thread::spawn(move || callback.call(()));
+        } else {
+            href.persistent_ref.blob_id = Some(self.blob_desc.id);
             href.persistent_ref.blob_name = self.blob_desc.name.clone();
-            self.blob.try_append(chunk, &mut href).unwrap();
+            if let Err(()) = self.blob.try_append(chunk, &mut href) {
+                self.flush();
+                href.persistent_ref.blob_id = Some(self.blob_desc.id);
+                href.persistent_ref.blob_name = self.blob_desc.name.clone();
+
+                self.blob.try_append(chunk, &mut href).unwrap();
+            }
+
+            // Queue the callback; we will trigger it when the blob has been pushed.
+            self.blob_refs.push(callback);
         }
-        self.blob_refs.push(callback);
 
         // Info is internal to the blob only.
         href.info = None;
-
         // To avoid unnecessary blocking, we reply with the ID *before* possibly flushing.
         href
     }
