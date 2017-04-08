@@ -237,7 +237,8 @@ impl<B: StoreBackend> Family<B> {
             if inside_non_dir {
                 // The remaining part of the path is inside a link or similar.
                 // This should not happen, as the path was canonical.
-                warn!("Ignoring components after non-dir path: {}", parent_path.display());
+                warn!("Ignoring components after non-dir path: {}",
+                      parent_path.display());
                 return;
             }
             parent_path.push(name);

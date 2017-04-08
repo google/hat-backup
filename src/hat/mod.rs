@@ -577,9 +577,7 @@ impl<B: StoreBackend> HatRc<B> {
                 }
                 db::SnapshotWorkStatus::CommitComplete => {
                     match snapshot.hash {
-                        Some(ref h) => {
-                            self.commit_finalize(snapshot.info, h)?
-                        }
+                        Some(ref h) => self.commit_finalize(snapshot.info, h)?,
                         None => {
                             // This should not happen.
                             return Err(From::from(format!("Snapshot {:?} is fully registered \
@@ -658,10 +656,10 @@ impl<B: StoreBackend> HatRc<B> {
         let top_ref = {
             let local_hash_index = self.hash_index.clone();
             family.commit(&|hash| {
-                let id = local_hash_index.get_id(hash).expect(
-                    &format!("Top hash: {:?}", hash.bytes));
-                local_hash_index.set_tag(id, tags::Tag::Reserved);
-            })?
+                    let id = local_hash_index.get_id(hash)
+                        .expect(&format!("Top hash: {:?}", hash.bytes));
+                    local_hash_index.set_tag(id, tags::Tag::Reserved);
+                })?
         };
 
         // Flush hashes so we can add GC data for them.

@@ -342,8 +342,8 @@ impl InternalIndex {
         let blob_ref_ = entry.persistent_ref.as_ref().map(|c| c.as_bytes_no_name());
         let childs_ = entry.childs.as_ref().map(|v| encode_childs(&v[..]));
 
-        let height_:i64 = From::from(entry.node);
-        let leaf_type_:i64 = From::from(entry.leaf);
+        let height_: i64 = From::from(entry.node);
+        let leaf_type_: i64 = From::from(entry.leaf);
 
         diesel::update(hashes.find(id_))
             .set((blob_id.eq(entry.persistent_ref.as_ref().and_then(|r| r.blob_id).unwrap_or(0)),

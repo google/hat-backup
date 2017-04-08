@@ -147,10 +147,7 @@ impl InternalHashIndex {
         queue.find_key(&hash.bytes).cloned()
     }
 
-    fn update_reserved(&self,
-                       id: i64,
-                       hash_entry: Entry,
-                       mut queue: &mut MutexGuard<Queue>) {
+    fn update_reserved(&self, id: i64, hash_entry: Entry, mut queue: &mut MutexGuard<Queue>) {
         let Entry { hash, node, leaf, childs, persistent_ref } = hash_entry;
         assert!(!hash.bytes.is_empty());
 
