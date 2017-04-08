@@ -140,12 +140,15 @@ impl<B: StoreBackend> HashTreeBackend for HashStoreBackend<B> {
             hash::ReserveResult::ReserveOk(id) => {
                 // We came first: this data-chunk is ours to process.
                 let local_hash_index = self.hash_index.clone();
-
+                let mut local_hash_entry = hash_entry.clone();
                 let callback = Box::new(move |href: hash::tree::HashRef| {
-                    local_hash_index.commit(&href.hash, href.persistent_ref);
+                    local_hash_entry.persistent_ref = Some(href.persistent_ref);
+                    local_hash_index.commit(id, local_hash_entry);
                 });
+
                 let href = self.blob_store
                     .store(chunk, hash_entry.hash.clone(), node, leaf, info, callback);
+
                 hash_entry.persistent_ref = Some(href.persistent_ref.clone());
                 self.hash_index.update_reserved(id, hash_entry);
                 Ok((id, href))

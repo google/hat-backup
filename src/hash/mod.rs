@@ -150,8 +150,7 @@ impl InternalHashIndex {
     fn update_reserved(&self,
                        id: i64,
                        hash_entry: Entry,
-                       mut queue: &mut MutexGuard<Queue>,
-                       mut index: &mut db::IndexGuard) {
+                       mut queue: &mut MutexGuard<Queue>) {
         let Entry { hash, node, leaf, childs, persistent_ref } = hash_entry;
         assert!(!hash.bytes.is_empty());
 
@@ -187,15 +186,13 @@ impl InternalHashIndex {
     }
 
     fn commit(&self,
-              hash: &Hash,
-              chunk_ref: blob::ChunkRef,
+              id: i64,
+              entry: Entry,
               mut queue: &mut MutexGuard<Queue>,
               mut index: &mut db::IndexGuard) {
-        let queue_entry = self.locate(hash, queue, index).expect("hash was committed");
-        queue.update_value(&hash.bytes, |old_qe| {
-            old_qe.persistent_ref = Some(chunk_ref);
-        });
-        queue.set_ready(&queue_entry.id);
+        self.update_reserved(id, entry, queue);
+
+        queue.set_ready(&id);
         self.insert_completed_in_order(&mut queue, &mut index);
     }
 }
@@ -291,16 +288,15 @@ impl HashIndex {
     /// references to the `Hash` to be created before it is committed).
     pub fn update_reserved(&self, id: i64, hash_entry: Entry) {
         assert!(!hash_entry.hash.bytes.is_empty());
-        let (mut queue, mut index) = self.0.lock();
-        self.0.update_reserved(id, hash_entry, &mut queue, &mut index);
+        let mut queue = self.0.queue_lock();
+        self.0.update_reserved(id, hash_entry, &mut queue);
     }
 
     /// A `Hash` is committed when it has been `finalized` in the external storage. `Commit`
     /// includes the persistent reference that the content is available at.
-    pub fn commit(&self, hash: &Hash, persistent_ref: blob::ChunkRef) {
-        assert!(!hash.bytes.is_empty());
+    pub fn commit(&self, id: i64, entry: Entry) {
         let (mut queue, mut index) = self.0.lock();
-        self.0.commit(hash, persistent_ref, &mut queue, &mut index);
+        self.0.commit(id, entry, &mut queue, &mut index);
     }
 
     /// List all hash entries.

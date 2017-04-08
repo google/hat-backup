@@ -482,16 +482,18 @@ impl<B: StoreBackend> HatRc<B> {
                 childs: child_ids,
             };
 
-            if let hash::ReserveResult::HashKnown(id) = hashes.reserve(&entry) {
-                if hashes.reserved_id(&entry.hash).is_none() {
-                    // This is a repeat hash that was already fully committed.
-                    return;
+            let id = match hashes.reserve(&entry) {
+                hash::ReserveResult::HashKnown(id) => {
+                    if hashes.reserved_id(&entry.hash).is_none() {
+                        // This is a repeat hash that was already fully committed.
+                        return;
+                    }
+                    id
                 }
-                // Update previously reserved hash.
-                hashes.update_reserved(id, entry.clone());
-            }
+                hash::ReserveResult::ReserveOk(id) => id,
+            };
             // Commit hash.
-            hashes.commit(&entry.hash, pref);
+            hashes.commit(id, entry.clone());
         }
 
         let mut dir_v = family::recover::DirVisitor::new();
