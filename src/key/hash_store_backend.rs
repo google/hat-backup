@@ -147,7 +147,7 @@ impl<B: StoreBackend> HashTreeBackend for HashStoreBackend<B> {
                 let href = self.blob_store
                     .store(chunk, hash_entry.hash.clone(), node, leaf, info, callback);
                 hash_entry.persistent_ref = Some(href.persistent_ref.clone());
-                self.hash_index.update_reserved(hash_entry);
+                self.hash_index.update_reserved(id, hash_entry);
                 Ok((id, href))
             }
         }

@@ -482,13 +482,13 @@ impl<B: StoreBackend> HatRc<B> {
                 childs: child_ids,
             };
 
-            if let hash::ReserveResult::HashKnown(..) = hashes.reserve(&entry) {
-                if hashes.reserved_id(&entry).is_none() {
+            if let hash::ReserveResult::HashKnown(id) = hashes.reserve(&entry) {
+                if hashes.reserved_id(&entry.hash).is_none() {
                     // This is a repeat hash that was already fully committed.
                     return;
                 }
                 // Update previously reserved hash.
-                hashes.update_reserved(entry.clone());
+                hashes.update_reserved(id, entry.clone());
             }
             // Commit hash.
             hashes.commit(&entry.hash, pref);

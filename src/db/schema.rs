@@ -26,6 +26,7 @@ table! {
         childs -> Nullable<Binary>,
         blob_id -> BigInt,
         blob_ref -> Nullable<Binary>,
+        ready -> Bool,
     }
 }
 
@@ -74,7 +75,7 @@ select_column_workaround!(family -> snapshots (id, name));
 joinable!(hashes -> blobs (blob_id));
 select_column_workaround!(blobs -> hashes (id, name, tag));
 select_column_workaround!(
-    hashes -> blobs (id, hash, tag, height, leaf_type, childs, blob_id, blob_ref));
+    hashes -> blobs (id, hash, tag, height, leaf_type, childs, blob_id, blob_ref, ready));
 
 
 // Rust models.
@@ -89,6 +90,7 @@ pub struct Hash {
     pub childs: Option<Vec<u8>>,
     pub blob_id: i64,
     pub blob_ref: Option<Vec<u8>>,
+    pub ready: bool,
 }
 
 #[derive(Insertable)]
@@ -102,6 +104,7 @@ pub struct NewHash<'a> {
     pub childs: Option<&'a [u8]>,
     pub blob_id: i64,
     pub blob_ref: Option<&'a [u8]>,
+    pub ready: bool,
 }
 
 #[derive(Queryable)]

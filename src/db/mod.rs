@@ -169,6 +169,8 @@ pub struct Entry {
     /// A reference to a location in the external persistent storage (a chunk reference) that
     /// contains the data for this entry (e.g. an object-name and a byte range).
     pub persistent_ref: Option<blob::ChunkRef>,
+
+    pub ready: bool,
 }
 
 #[derive(Clone)]
@@ -265,6 +267,7 @@ impl InternalIndex {
                     }
                 }),
                 persistent_ref: decode_chunk_ref(hash_.blob_ref.as_ref(), blob_),
+                ready: hash_.ready,
             }
         })
     }
@@ -299,6 +302,7 @@ impl InternalIndex {
             childs: childs_.as_ref().map(|v| &v[..]),
             blob_id: entry.persistent_ref.and_then(|r| r.blob_id).unwrap_or(0),
             blob_ref: blob_ref_.as_ref().map(|v| &v[..]),
+            ready: false,
         };
 
         diesel::insert(&new)
@@ -324,6 +328,32 @@ impl InternalIndex {
                     .expect("Error updating specific hash tag")
             }
         };
+    }
+
+    pub fn hash_delete_not_ready(&mut self) {
+        use self::schema::hashes::dsl::*;
+        diesel::delete(hashes.filter(ready.eq(false)))
+            .execute(&self.conn)
+            .expect("Failed to delete non-ready hashes");
+    }
+
+    pub fn hash_set_ready(&mut self, id_: i64, entry: &QueueEntry) {
+        use self::schema::hashes::dsl::*;
+        let blob_ref_ = entry.persistent_ref.as_ref().map(|c| c.as_bytes_no_name());
+        let childs_ = entry.childs.as_ref().map(|v| encode_childs(&v[..]));
+
+        let height_:i64 = From::from(entry.node);
+        let leaf_type_:i64 = From::from(entry.leaf);
+
+        diesel::update(hashes.find(id_))
+            .set((blob_id.eq(entry.persistent_ref.as_ref().and_then(|r| r.blob_id).unwrap_or(0)),
+                  blob_ref.eq(blob_ref_.as_ref().map(|v| &v[..])),
+                  ready.eq(true),
+                  height.eq(height_),
+                  leaf_type.eq(leaf_type_),
+                  childs.eq(childs_.as_ref().map(|v| &v[..]))))
+            .execute(&self.conn)
+            .expect("Failed to set hash ready");
     }
 
     pub fn hash_get_tag(&mut self, id_: i64) -> Option<tags::Tag> {
@@ -458,6 +488,7 @@ impl InternalIndex {
                     leaf: From::from(hash_.leaf_type),
                     childs: hash_.childs.as_ref().map(|p| decode_childs(p).unwrap()),
                     persistent_ref: decode_chunk_ref(hash_.blob_ref.as_ref(), blob_),
+                    ready: hash_.ready,
                 }
             })
             .collect()
