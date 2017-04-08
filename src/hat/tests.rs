@@ -198,6 +198,7 @@ fn snapshot_reuse_index() {
 
     // Commit.
     hat.commit(&mut fam, None).unwrap();
+    hat.data_flush().unwrap();
     let (deleted, live) = hat.gc().unwrap();
     assert_eq!(deleted, 0);
     assert!(live > 0);
@@ -238,6 +239,7 @@ fn recover() {
 
     hat.commit(&mut fam, None).unwrap();
     hat.meta_commit().unwrap();
+    hat.data_flush().unwrap();
 
     let (deleted, live1) = hat.gc().unwrap();
     assert_eq!(deleted, 0);
