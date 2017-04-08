@@ -230,10 +230,12 @@ impl<IT: io::Read, B: StoreBackend> MsgHandler<Msg<IT>, Reply<B>> for Store<B> {
                             let hash = hash::Hash { bytes: entry.data_hash.clone().unwrap() };
                             if self.hash_index.hash_exists(&hash) {
                                 // Short-circuit: We have the data.
+                                debug!("Skip entry: {:?}", entry.info.name);
                                 return reply_ok!(Reply::Id(entry.id.unwrap()));
                             }
                         } else if chunk_it_opt.is_none() && entry.data_hash.is_none() {
                             // Short-circuit: No data needed.
+                            debug!("Skip empty entry: {:?}", entry.info.name);
                             return reply_ok!(Reply::Id(entry.id.unwrap()));
                         }
                         // Our stored entry is incomplete.
@@ -242,7 +244,7 @@ impl<IT: io::Read, B: StoreBackend> MsgHandler<Msg<IT>, Reply<B>> for Store<B> {
                     Some(entry) => Entry { id: entry.id, ..org_entry },
                     None => org_entry,
                 };
-
+                debug!("Insert entry: {:?}", entry.info.name);
                 let entry = self.index.insert(entry)?;
 
                 // Setup hash tree structure
