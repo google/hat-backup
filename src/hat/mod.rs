@@ -448,7 +448,9 @@ impl<B: StoreBackend> HatRc<B> {
                                           blobs: &blob::BlobStore<B>,
                                           node: family::recover::Node) {
             let mut pref = node.href.persistent_ref.clone();
-            pref.blob_id = blobs.find(&pref.blob_name).map(|b| b.id);
+            pref.blob_id = Some(blobs.find(&pref.blob_name)
+                .map(|b| b.id)
+                .expect(&format!("unknown blob: {:?}", pref.blob_name)));
 
             fn entry(href: hash::tree::HashRef, childs: Option<Vec<i64>>) -> hash::Entry {
                 hash::Entry {
@@ -661,9 +663,6 @@ impl<B: StoreBackend> HatRc<B> {
                     local_hash_index.set_tag(id, tags::Tag::Reserved);
                 })?
         };
-
-        // Flush hashes so we can add GC data for them.
-        self.data_flush()?;
 
         // Tag 2:
         // We update the snapshot entry with the tree hash, which we then register.
