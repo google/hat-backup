@@ -154,17 +154,12 @@ impl InternalHashIndex {
         let Entry { hash, node, leaf, childs, persistent_ref } = hash_entry;
         assert!(!hash.bytes.is_empty());
 
-        let old_id = queue.find_key(&hash.bytes).cloned();
-        match old_id {
-            None => {
-                // FIXME(jos): avoid having to set the blob ref with update_reserved.
-                return;
-            }
-            Some(old) => {
-                assert_eq!(old, id);
-            }
+        if let Some(old_id) = queue.find_key(&hash.bytes) {
+            assert_eq!(*old_id, id);
+        } else {
+            unreachable!("Tried to update unreserved hash.");
         }
-        assert_eq!(old_id, Some(id));
+
 
         // If we didn't already commit and pop() the hash, update it:
         queue.update_value(&hash.bytes, |qe| {
