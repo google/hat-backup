@@ -275,7 +275,14 @@ impl<B: StoreBackend> BlobStore<B> {
     }
 
     pub fn find(&self, name: &[u8]) -> Option<BlobDesc> {
-        self.lock().blob_index.find(name)
+        if &name[..] == [0] {
+            Some(BlobDesc {
+                name: vec![0],
+                id: 0,
+            })
+        } else {
+            self.lock().blob_index.find(name)
+        }
     }
 
     /// Flush the current blob, independent of its size.
