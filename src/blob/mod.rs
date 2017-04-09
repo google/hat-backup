@@ -67,8 +67,15 @@ pub struct StoreInner<B> {
     backend: Arc<B>,
     blob_index: Arc<BlobIndex>,
     blob_desc: BlobDesc,
-    blob_refs: Vec<(HashRef, Box<FnBox<HashRef, ()>>)>,
+    blob_refs: Vec<(Box<FnBox<(), ()>>)>,
     blob: Blob,
+}
+
+impl<B> Drop for StoreInner<B> {
+    fn drop(&mut self) {
+        // Sanity check that we flushed this blob store before dropping it.
+        assert_eq!(0, self.blob.upperbound_len());
+    }
 }
 
 impl<B: StoreBackend> StoreInner<B> {
@@ -104,8 +111,8 @@ impl<B: StoreBackend> StoreInner<B> {
         self.blob_index.commit_done(&old_blob_desc);
 
         // Go through callbacks
-        while let Some((href, callback)) = self.blob_refs.pop() {
-            callback.call(href);
+        while let Some(callback) = self.blob_refs.pop() {
+            callback.call(());
         }
     }
 
@@ -115,56 +122,44 @@ impl<B: StoreBackend> StoreInner<B> {
              node: NodeType,
              leaf: LeafType,
              info: Option<&key::Info>,
-             callback: Box<FnBox<HashRef, ()>>)
+             callback: Box<FnBox<(), ()>>)
              -> HashRef {
-        if chunk.is_empty() {
-            let href = HashRef {
-                hash: hash,
-                node: node,
-                leaf: leaf,
-                info: None,
-                persistent_ref: ChunkRef {
-                    blob_id: None,
-                    blob_name: vec![0],
-                    offset: 0,
-                    length: 0,
-                    packing: None,
-                    key: None,
-                },
-            };
-            let local_href = href.clone();
-            thread::spawn(move || callback.call(local_href));
-            return href;
-        }
-
         let mut href = HashRef {
             hash: hash,
             node: node,
             leaf: leaf,
             info: info.cloned(),
             persistent_ref: ChunkRef {
-                blob_id: Some(self.blob_desc.id),
-                blob_name: self.blob_desc.name.clone(),
+                blob_id: Some(0),
+                blob_name: vec![0],
                 packing: None,
-                // updated by try_append:
+                // Updated by try_append.
                 offset: 0,
                 length: 0,
                 key: None,
             },
         };
 
-        if let Err(()) = self.blob.try_append(chunk, &mut href) {
-            self.flush();
-
+        if chunk.is_empty() {
+            // We are not going to store an empty chunk, so commit it ASAP.
+            thread::spawn(move || callback.call(()));
+        } else {
+            href.persistent_ref.blob_id = Some(self.blob_desc.id);
             href.persistent_ref.blob_name = self.blob_desc.name.clone();
-            self.blob.try_append(chunk, &mut href).unwrap();
+            if let Err(()) = self.blob.try_append(chunk, &mut href) {
+                self.flush();
+                href.persistent_ref.blob_id = Some(self.blob_desc.id);
+                href.persistent_ref.blob_name = self.blob_desc.name.clone();
+
+                self.blob.try_append(chunk, &mut href).unwrap();
+            }
+
+            // Queue the callback; we will trigger it when the blob has been pushed.
+            self.blob_refs.push(callback);
         }
 
         // Info is internal to the blob only.
         href.info = None;
-
-        self.blob_refs.push((href.clone(), callback));
-
         // To avoid unnecessary blocking, we reply with the ID *before* possibly flushing.
         href
     }
@@ -242,7 +237,7 @@ impl<B: StoreBackend> BlobStore<B> {
                  node: NodeType,
                  leaf: LeafType,
                  info: Option<&key::Info>,
-                 callback: Box<FnBox<HashRef, ()>>)
+                 callback: Box<FnBox<(), ()>>)
                  -> HashRef {
         let mut guard = self.lock();
         guard.store(chunk, hash, node, leaf, info, callback)
@@ -280,7 +275,14 @@ impl<B: StoreBackend> BlobStore<B> {
     }
 
     pub fn find(&self, name: &[u8]) -> Option<BlobDesc> {
-        self.lock().blob_index.find(name)
+        if &name[..] == [0] {
+            Some(BlobDesc {
+                name: vec![0],
+                id: 0,
+            })
+        } else {
+            self.lock().blob_index.find(name)
+        }
     }
 
     /// Flush the current blob, independent of its size.

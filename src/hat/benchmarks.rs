@@ -25,7 +25,7 @@ use util::FileIterator;
 
 fn setup_family() -> (HatRc<DevNullBackend>, Family<DevNullBackend>) {
     let backend = Arc::new(DevNullBackend);
-    let hat = setup_hat(backend);
+    let mut hat = setup_hat(backend);
 
     let family = "familyname".to_string();
     let fam = hat.open_family(family).unwrap();
@@ -96,7 +96,7 @@ impl io::Read for UniqueBlockReader {
 }
 
 fn insert_files(bench: &mut Bencher, filesize: i32, unique: bool) {
-    let (_, family) = setup_family();
+    let (hat, family) = setup_family();
 
     let mut filler = UniqueBlockFiller::new(0);
     let mut name = vec![0; 8];
@@ -116,6 +116,7 @@ fn insert_files(bench: &mut Bencher, filesize: i32, unique: bool) {
         family.snapshot_direct(entry(name.clone()), false, Some(file)).unwrap();
     });
 
+    hat.data_flush().unwrap();
     bench.bytes = filesize as u64;
 }
 

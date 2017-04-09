@@ -237,7 +237,8 @@ impl<B: StoreBackend> Family<B> {
             if inside_non_dir {
                 // The remaining part of the path is inside a link or similar.
                 // This should not happen, as the path was canonical.
-                warn!("Ignoring components after non-dir path: {}", parent_path.display());
+                warn!("Ignoring components after non-dir path: {}",
+                      parent_path.display());
                 return;
             }
             parent_path.push(name);
@@ -265,7 +266,7 @@ impl<B: StoreBackend> Family<B> {
         } else {
             Some(Box::new(move |()| contents) as Box<FnBox<(), _>>)
         };
-        match self.key_store_process[0].send_reply(key::Msg::Insert(file, f))? {
+        match self.key_store_process.iter().last().unwrap().send_reply(key::Msg::Insert(file, f))? {
             key::Reply::Id(id) => Ok(id),
             _ => Err(From::from("Unexpected reply from key store")),
         }
@@ -337,7 +338,7 @@ impl<B: StoreBackend> Family<B> {
     pub fn list_from_key_store(&self,
                                dir_id: Option<u64>)
                                -> Result<Vec<key::DirElem<B>>, HatError> {
-        match self.key_store_process[0].send_reply(key::Msg::ListDir(dir_id))? {
+        match self.key_store_process.iter().last().unwrap().send_reply(key::Msg::ListDir(dir_id))? {
             key::Reply::ListResult(ls) => Ok(ls),
             _ => Err(From::from("Unexpected result from key store")),
         }
@@ -418,6 +419,7 @@ impl<B: StoreBackend> Family<B> {
                         file_msg.borrow()
                             .init_content()
                             .set_data(hash_ref_root.as_reader())?;
+
                         top_hash_fn(&hash::Hash { bytes: hash_bytes });
                     } else {
                         drop(data_ref);  // May not use data reference without hash.

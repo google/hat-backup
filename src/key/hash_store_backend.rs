@@ -20,7 +20,7 @@ use hash;
 use hash::tree::HashTreeBackend;
 use key::MsgError;
 use key;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 pub struct HashStoreBackend<B> {
     hash_index: Arc<hash::HashIndex>,
@@ -125,6 +125,8 @@ impl<B: StoreBackend> HashTreeBackend for HashStoreBackend<B> {
 
         match self.hash_index.reserve(&hash_entry) {
             hash::ReserveResult::HashKnown(id) => {
+                debug!("Reuse hash {}, {}/{:?}: {}", id, leaf as i64, node, chunk.len());
+
                 // Someone came before us: piggyback on their result.
                 let pref = self.fetch_persistent_ref(&hash_entry.hash)
                     .expect("Could not find persistent ref for known hash");
@@ -138,16 +140,32 @@ impl<B: StoreBackend> HashTreeBackend for HashStoreBackend<B> {
                     }))
             }
             hash::ReserveResult::ReserveOk(id) => {
+                debug!("New hash {}, {}/{:?}: {}", id, leaf as i64, node, chunk.len());
+
                 // We came first: this data-chunk is ours to process.
                 let local_hash_index = self.hash_index.clone();
 
-                let callback = Box::new(move |href: hash::tree::HashRef| {
-                    local_hash_index.commit(&href.hash, href.persistent_ref);
+                let m = Arc::new(Mutex::new(()));
+                let guard = m.lock().unwrap();
+
+                let local_m = m.clone();
+                let callback = Box::new(move |()| {
+                    // The callback has to run *after* we called update_reserved in the outer body.
+                    let guard = local_m.lock().unwrap();
+                    local_hash_index.commit(id, None);
+                    drop(guard);
                 });
+
                 let href = self.blob_store
                     .store(chunk, hash_entry.hash.clone(), node, leaf, info, callback);
+
+                // Update the hash entry now to enable reuse before the hash is fully committed.
                 hash_entry.persistent_ref = Some(href.persistent_ref.clone());
-                self.hash_index.update_reserved(hash_entry);
+                self.hash_index.update_reserved(id, hash_entry);
+
+                // Allow callback to run, now that we have updated the entry it is going to commit.
+                drop(guard);
+
                 Ok((id, href))
             }
         }

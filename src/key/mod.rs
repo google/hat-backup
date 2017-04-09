@@ -230,10 +230,12 @@ impl<IT: io::Read, B: StoreBackend> MsgHandler<Msg<IT>, Reply<B>> for Store<B> {
                             let hash = hash::Hash { bytes: entry.data_hash.clone().unwrap() };
                             if self.hash_index.hash_exists(&hash) {
                                 // Short-circuit: We have the data.
+                                debug!("Skip entry: {:?}", entry.info.name);
                                 return reply_ok!(Reply::Id(entry.id.unwrap()));
                             }
                         } else if chunk_it_opt.is_none() && entry.data_hash.is_none() {
                             // Short-circuit: No data needed.
+                            debug!("Skip empty entry: {:?}", entry.info.name);
                             return reply_ok!(Reply::Id(entry.id.unwrap()));
                         }
                         // Our stored entry is incomplete.
@@ -242,14 +244,8 @@ impl<IT: io::Read, B: StoreBackend> MsgHandler<Msg<IT>, Reply<B>> for Store<B> {
                     Some(entry) => Entry { id: entry.id, ..org_entry },
                     None => org_entry,
                 };
-
+                debug!("Insert entry: {:?}", entry.info.name);
                 let entry = self.index.insert(entry)?;
-
-                // Send out the ID early to allow the client to continue its key discovery routine.
-                // The bounded input-channel will prevent the client from overflowing us.
-                assert!(entry.id.is_some());
-                reply(Ok(Reply::Id(entry.id.unwrap())));
-
 
                 // Setup hash tree structure
                 let mut tree = self.hash_tree_writer(blob::LeafType::FileChunk);
@@ -264,7 +260,7 @@ impl<IT: io::Read, B: StoreBackend> MsgHandler<Msg<IT>, Reply<B>> for Store<B> {
                                           None,
                                           None)?;
                     // Bail out before storing data that does not exist:
-                    return Ok(());
+                    return reply_ok!(Reply::Id(entry.id.unwrap()));
                 }
 
                 // Read and insert all file chunks:
@@ -305,7 +301,7 @@ impl<IT: io::Read, B: StoreBackend> MsgHandler<Msg<IT>, Reply<B>> for Store<B> {
                                       Some(hash_ref.hash.clone()),
                                       Some(hash_ref))?;
 
-                Ok(())
+                return reply_ok!(Reply::Id(entry.id.unwrap()));
             }
         }
     }

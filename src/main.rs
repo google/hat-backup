@@ -99,15 +99,19 @@ fn main() {
             let mut hat = hat::Hat::open_repository(PathBuf::from("repo"), backend, MAX_BLOB_SIZE)
                 .unwrap();
 
-            let family = hat.open_family(name.clone())
+            // Update the family index.
+            let mut family = hat.open_family(name.clone())
                 .expect(&format!("Could not open family '{}'", name));
-
             family.snapshot_dir(PathBuf::from(path));
-            family.flush().unwrap();
 
-            println!("Finalizing commit.");
-            hat.commit_by_name(name, None).unwrap();
+            // Commit the updated index.
+            hat.commit(&mut family, None).unwrap();
+
+            // Meta commit.
             hat.meta_commit().unwrap();
+
+            // Flush any remaining blobs.
+            hat.data_flush().unwrap();
         }
         ("checkout", Some(cmd)) => {
             let name = cmd.value_of("NAME").unwrap().to_owned();

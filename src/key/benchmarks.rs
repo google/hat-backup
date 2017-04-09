@@ -42,8 +42,8 @@ fn insert_1_key_x_128000_zeros(bench: &mut Bencher) {
             .unwrap();
     });
 
+    ks_p.send_reply(Msg::Flush).unwrap();
     bench.bytes = 128 * 1024;
-
 }
 
 #[bench]
@@ -73,6 +73,7 @@ fn insert_1_key_x_128000_unique(bench: &mut Bencher) {
             .unwrap();
     });
 
+    ks_p.send_reply(Msg::Flush).unwrap();
     bench.bytes = 128 * 1024;
 }
 
@@ -99,6 +100,7 @@ fn insert_1_key_x_16_x_128000_zeros(bench: &mut Bencher) {
         }
     });
 
+    ks_p.send_reply(Msg::Flush).unwrap();
     bench.bytes = 16 * (128 * 1024);
 }
 
@@ -157,6 +159,8 @@ fn insert_1_key_unchanged_empty(bench: &mut Bencher) {
         };
         ks_p.send_reply(Msg::Insert(entry.key_entry.clone(), None)).unwrap();
     });
+
+    ks_p.send_reply(Msg::Flush).unwrap();
 }
 
 #[bench]
@@ -190,6 +194,8 @@ fn insert_1_key_updated_empty(bench: &mut Bencher) {
         };
         ks_p.send_reply(Msg::Insert(entry.key_entry.clone(), None)).unwrap();
     });
+
+    ks_p.send_reply(Msg::Flush).unwrap();
 }
 
 #[bench]
@@ -207,4 +213,6 @@ fn insert_1_key_unique_empty(bench: &mut Bencher) {
         };
         ks_p.send_reply(Msg::Insert(entry.key_entry.clone(), None)).unwrap();
     });
+
+    ks_p.send_reply(Msg::Flush).unwrap();
 }

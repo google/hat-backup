@@ -2,11 +2,12 @@ CREATE TABLE IF NOT EXISTS hashes (
     id          INTEGER PRIMARY KEY,
     hash        BLOB,
     tag         INTEGER,
-    height	    INTEGER,
+    height      INTEGER,
     leaf_type   INTEGER,
-    childs	    BLOB,
-    blob_id	    INTEGER,
-    blob_ref    BLOB
+    childs      BLOB,
+    blob_id     INTEGER,
+    blob_ref    BLOB,
+    ready       BOOLEAN
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS Hashes_UniqueHash ON hashes(hash);

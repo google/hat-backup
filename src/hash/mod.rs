@@ -83,6 +83,14 @@ pub struct InternalHashIndex {
     queue: Mutex<Queue>,
 }
 
+impl Drop for InternalHashIndex {
+    fn drop(&mut self) {
+        // Sanity check that we flushed this hash index fully before dropping it.
+        // Blob store accumulates chunks for the next blob and needs flushing.
+        assert_eq!(0, self.queue.lock().unwrap().len());
+    }
+}
+
 impl InternalHashIndex {
     fn new(index: Arc<db::Index>) -> Result<InternalHashIndex, DieselError> {
         Ok(InternalHashIndex {
@@ -121,66 +129,62 @@ impl InternalHashIndex {
         assert!(!hash.bytes.is_empty());
 
         let my_id = index.hash_next_id();
-        assert!(queue.put_value(my_id,
-                       hash.bytes.clone(),
-                       db::QueueEntry {
-                           id: my_id,
-                           node: node,
-                           leaf: leaf,
-                           childs: childs.clone(),
-                           tag: None,
-                           persistent_ref: persistent_ref.clone(),
-                       })
-            .is_ok());
+        let qe = db::QueueEntry {
+            id: my_id,
+            node: node,
+            leaf: leaf,
+            childs: childs.clone(),
+            tag: None,
+            persistent_ref: persistent_ref.clone(),
+        };
+        index.hash_insert_new(my_id, hash.bytes.clone(), qe.clone());
+        assert!(queue.put_value(my_id, hash.bytes.clone(), qe).is_ok());
+
         my_id
     }
 
-    fn reserved_id(&self, hash_entry: &Entry, queue: &MutexGuard<Queue>) -> Option<i64> {
-        queue.find_key(&hash_entry.hash.bytes).cloned()
+    fn reserved_id(&self, hash: &Hash, queue: &MutexGuard<Queue>) -> Option<i64> {
+        queue.find_key(&hash.bytes).cloned()
     }
 
-    fn update_reserved(&self,
-                       hash_entry: Entry,
-                       mut queue: &mut MutexGuard<Queue>,
-                       mut index: &mut db::IndexGuard) {
-        let id_opt = self.reserved_id(&hash_entry, queue);
+    fn update_reserved(&self, id: i64, hash_entry: Entry, mut queue: &mut MutexGuard<Queue>) {
         let Entry { hash, node, leaf, childs, persistent_ref } = hash_entry;
         assert!(!hash.bytes.is_empty());
-        let old_entry = self.locate(&hash, queue, index).expect("hash was reserved");
+
+        if let Some(old_id) = queue.find_key(&hash.bytes) {
+            assert_eq!(*old_id, id);
+        } else {
+            unreachable!("Tried to update unreserved hash.");
+        }
+
 
         // If we didn't already commit and pop() the hash, update it:
-        if id_opt.is_some() {
-            assert_eq!(id_opt, Some(old_entry.id));
-            queue.update_value(&hash.bytes, |qe| {
-                qe.node = node;
-                qe.leaf = leaf;
-                qe.childs = childs;
-                qe.persistent_ref = persistent_ref;
-            });
-        }
+        queue.update_value(&hash.bytes, |qe| {
+            qe.node = node;
+            qe.leaf = leaf;
+            qe.childs = childs;
+            qe.persistent_ref = persistent_ref;
+        });
     }
 
     fn insert_completed_in_order(&self,
                                  mut queue: &mut MutexGuard<Queue>,
                                  mut index: &mut db::IndexGuard) {
-        while let Some((id_, hash_bytes, queue_entry)) = queue.pop_min_if_complete() {
+        while let Some((id_, _, queue_entry)) = queue.pop_min_if_complete() {
             assert_eq!(id_, queue_entry.id);
-            index.hash_insert_new(id_, hash_bytes, queue_entry);
+            index.hash_set_ready(id_, &queue_entry);
         }
         index.maybe_flush();
     }
 
     fn commit(&self,
-              hash: &Hash,
-              chunk_ref: blob::ChunkRef,
+              id: i64,
+              entry_opt: Option<Entry>,
               mut queue: &mut MutexGuard<Queue>,
               mut index: &mut db::IndexGuard) {
-        // Update persistent reference for ready hash
-        let queue_entry = self.locate(hash, queue, index).expect("hash was committed");
-        queue.update_value(&hash.bytes, |old_qe| {
-            old_qe.persistent_ref = Some(chunk_ref);
-        });
-        queue.set_ready(&queue_entry.id);
+        entry_opt.map(|e| self.update_reserved(id, e, queue));
+
+        queue.set_ready(&id);
         self.insert_completed_in_order(&mut queue, &mut index);
     }
 }
@@ -188,6 +192,7 @@ impl InternalHashIndex {
 
 impl HashIndex {
     pub fn new(index: Arc<db::Index>) -> Result<HashIndex, DieselError> {
+        index.lock().hash_delete_not_ready();
         Ok(HashIndex(InternalHashIndex::new(index)?))
     }
 
@@ -265,26 +270,25 @@ impl HashIndex {
     }
 
     /// Check whether an entry was previously reserved.
-    pub fn reserved_id(&self, hash_entry: &Entry) -> Option<i64> {
+    pub fn reserved_id(&self, hash: &Hash) -> Option<i64> {
         let queue = self.0.queue_lock();
-        self.0.reserved_id(hash_entry, &queue)
+        self.0.reserved_id(hash, &queue)
     }
 
     /// Update the info for a reserved `Hash`. The `Hash` remains reserved. This is used to update
     /// the persistent reference (external blob reference) as soon as it is available (to allow new
     /// references to the `Hash` to be created before it is committed).
-    pub fn update_reserved(&self, hash_entry: Entry) {
+    pub fn update_reserved(&self, id: i64, hash_entry: Entry) {
         assert!(!hash_entry.hash.bytes.is_empty());
-        let (mut queue, mut index) = self.0.lock();
-        self.0.update_reserved(hash_entry, &mut queue, &mut index);
+        let mut queue = self.0.queue_lock();
+        self.0.update_reserved(id, hash_entry, &mut queue);
     }
 
     /// A `Hash` is committed when it has been `finalized` in the external storage. `Commit`
     /// includes the persistent reference that the content is available at.
-    pub fn commit(&self, hash: &Hash, persistent_ref: blob::ChunkRef) {
-        assert!(!hash.bytes.is_empty());
+    pub fn commit(&self, id: i64, entry: Option<Entry>) {
         let (mut queue, mut index) = self.0.lock();
-        self.0.commit(hash, persistent_ref, &mut queue, &mut index);
+        self.0.commit(id, entry, &mut queue, &mut index);
     }
 
     /// List all hash entries.
@@ -300,12 +304,6 @@ impl HashIndex {
     /// API related to tagging, which is useful to indicate state during operation stages.
     /// It operates directly on the underlying IDs.
     pub fn set_tag(&self, id: i64, tag: tags::Tag) {
-        {
-            if let Some(ref mut q) = self.0.queue_lock().find_mut_value_of_priority(&id) {
-                q.tag = Some(tag);
-                return;
-            }
-        }
         self.0.index.lock().hash_set_tag(Some(id), tag);
     }
 
