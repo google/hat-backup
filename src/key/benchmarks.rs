@@ -177,6 +177,7 @@ fn insert_1_key_updated_empty(bench: &mut Bencher) {
             key_entry: Entry {
                 parent_id: None,
                 id: None,
+                node_id: None,
                 data_hash: None,
                 info: Info {
                     name: vec![1u8, 2, 3].to_vec(),

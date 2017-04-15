@@ -88,6 +88,10 @@ pub enum Msg<IT> {
     /// Returns `ListResult` with all the entries under the given parent.
     ListDir(Option<u64>),
 
+    /// Commit all reserved nodes and optionally execute recursive cleanup of part of the tree.
+    /// Returns `Ok`.
+    CommitReservedNodes(Option<Option<u64>>),
+
     /// Flush this key store and its dependencies.
     /// Returns `FlushOk`.
     Flush,
@@ -96,6 +100,7 @@ pub enum Msg<IT> {
 pub enum Reply<B> {
     Id(u64),
     ListResult(Vec<DirElem<B>>),
+    Ok,
     FlushOk,
 }
 
@@ -222,6 +227,14 @@ impl<IT: io::Read, B: StoreBackend> MsgHandler<Msg<IT>, Reply<B>> for Store<B> {
                 }
             }
 
+            Msg::CommitReservedNodes(clean_parent_opt) => {
+                self.index.commit_reserved_nodes()?;
+                if let Some(parent) = clean_parent_opt {
+                    self.index.cleanup_unused(parent)?;
+                }
+                return reply_ok!(Reply::Ok);
+            }
+
             Msg::Insert(org_entry, chunk_it_opt) => {
                 let entry = match self.index
                     .lookup(org_entry.parent_id, org_entry.info.name.clone())? {
@@ -231,21 +244,21 @@ impl<IT: io::Read, B: StoreBackend> MsgHandler<Msg<IT>, Reply<B>> for Store<B> {
                             if self.hash_index.hash_exists(&hash) {
                                 // Short-circuit: We have the data.
                                 debug!("Skip entry: {:?}", entry.info.name);
-                                return reply_ok!(Reply::Id(entry.id.unwrap()));
+                                self.index.mark_reserved(&entry)?;
+                                return reply_ok!(Reply::Id(entry.node_id.unwrap()));
                             }
                         } else if chunk_it_opt.is_none() && entry.data_hash.is_none() {
                             // Short-circuit: No data needed.
                             debug!("Skip empty entry: {:?}", entry.info.name);
-                            return reply_ok!(Reply::Id(entry.id.unwrap()));
+                            self.index.mark_reserved(&entry)?;
+                            return reply_ok!(Reply::Id(entry.node_id.unwrap()));
                         }
                         // Our stored entry is incomplete.
-                        Entry { id: entry.id, ..org_entry }
+                        Entry { node_id: entry.node_id, ..org_entry }
                     }
-                    Some(entry) => Entry { id: entry.id, ..org_entry },
+                    Some(entry) => Entry { node_id: entry.node_id, ..org_entry },
                     None => org_entry,
                 };
-                debug!("Insert entry: {:?}", entry.info.name);
-                let entry = self.index.insert(entry)?;
 
                 // Setup hash tree structure
                 let mut tree = self.hash_tree_writer(blob::LeafType::FileChunk);
@@ -254,13 +267,11 @@ impl<IT: io::Read, B: StoreBackend> MsgHandler<Msg<IT>, Reply<B>> for Store<B> {
                 let it_opt = chunk_it_opt.and_then(|open| open.call(()));
                 if it_opt.is_none() {
                     // No data is associated with this entry.
-                    self.index
-                        .update_data_hash(entry.id.unwrap(),
-                                          entry.info.modified_ts_secs,
-                                          None,
-                                          None)?;
+                    debug!("Insert entry: {:?}", entry.info.name);
+                    let entry = self.index.insert(entry, None)?;
+
                     // Bail out before storing data that does not exist:
-                    return reply_ok!(Reply::Id(entry.id.unwrap()));
+                    return reply_ok!(Reply::Id(entry.node_id.unwrap()));
                 }
 
                 // Read and insert all file chunks:
@@ -293,15 +304,11 @@ impl<IT: io::Read, B: StoreBackend> MsgHandler<Msg<IT>, Reply<B>> for Store<B> {
                 // Get top tree hash:
                 let hash_ref = tree.hash(Some(&entry.info))?;
 
-                // Update hash in key index.
                 // It is OK that this has is not yet valid, as we check hashes at snapshot time.
-                self.index
-                    .update_data_hash(entry.id.unwrap(),
-                                      entry.info.modified_ts_secs,
-                                      Some(hash_ref.hash.clone()),
-                                      Some(hash_ref))?;
+                debug!("Insert entry: {:?}", entry.info.name);
+                let entry = self.index.insert(entry, Some(&hash_ref))?;
 
-                return reply_ok!(Reply::Id(entry.id.unwrap()));
+                return reply_ok!(Reply::Id(entry.node_id.unwrap()));
             }
         }
     }
