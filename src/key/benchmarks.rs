@@ -176,7 +176,6 @@ fn insert_1_key_updated_empty(bench: &mut Bencher) {
             data: None,
             key_entry: Entry {
                 parent_id: None,
-                id: None,
                 node_id: None,
                 data_hash: None,
                 info: Info {
