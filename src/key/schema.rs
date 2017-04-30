@@ -12,13 +12,23 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use diesel::prelude::*;
+
 // Table schemas.
 
 table! {
-    keys {
-        id -> BigInt,
-        parent -> Nullable<BigInt>,
+    key_tree (node_id) {
+        node_id -> Nullable<BigInt>,
+        parent_id -> Nullable<BigInt>,
         name -> Binary,
+    }
+}
+
+table! {
+    key_data (node_id, committed) {
+        node_id -> Nullable<BigInt>,
+        committed -> Bool,
+        tag -> BigInt,
 
         created -> Nullable<BigInt>,
         modified -> Nullable<BigInt>,
@@ -33,14 +43,32 @@ table! {
     }
 }
 
+joinable!(key_data -> key_tree (node_id));
+select_column_workaround!(key_data -> key_tree (node_id, committed, tag, created, modified, accessed, permissions, user_id, group_id, hash, hash_ref));
+select_column_workaround!(key_tree -> key_data (node_id, parent_id, name));
 
 // Rust models.
 
 #[derive(Queryable)]
-pub struct Key {
-    pub id: i64,
-    pub parent: Option<i64>,
+pub struct KeyNode {
+    pub node_id: Option<i64>,
+    pub parent_id: Option<i64>,
     pub name: Vec<u8>,
+}
+
+#[derive(Insertable)]
+#[table_name="key_tree"]
+pub struct NewKeyNode<'a> {
+    pub node_id: Option<i64>,
+    pub parent_id: Option<i64>,
+    pub name: &'a [u8],
+}
+
+#[derive(Queryable)]
+pub struct KeyData {
+    pub node_id: Option<i64>,
+    pub committed: bool,
+    pub tag: i64,
 
     pub created: Option<i64>,
     pub modified: Option<i64>,
@@ -55,10 +83,11 @@ pub struct Key {
 }
 
 #[derive(Insertable)]
-#[table_name="keys"]
-pub struct NewKey<'a> {
-    pub parent: Option<i64>,
-    pub name: &'a [u8],
+#[table_name="key_data"]
+pub struct NewKeyData<'a> {
+    pub node_id: Option<i64>,
+    pub committed: bool,
+    pub tag: i64,
 
     pub created: Option<i64>,
     pub modified: Option<i64>,

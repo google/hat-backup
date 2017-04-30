@@ -125,7 +125,11 @@ impl<B: StoreBackend> HashTreeBackend for HashStoreBackend<B> {
 
         match self.hash_index.reserve(&hash_entry) {
             hash::ReserveResult::HashKnown(id) => {
-                debug!("Reuse hash {}, {}/{:?}: {}", id, leaf as i64, node, chunk.len());
+                debug!("Reuse hash {}, {}/{:?}: {}",
+                       id,
+                       leaf as i64,
+                       node,
+                       chunk.len());
 
                 // Someone came before us: piggyback on their result.
                 let pref = self.fetch_persistent_ref(&hash_entry.hash)
@@ -140,7 +144,11 @@ impl<B: StoreBackend> HashTreeBackend for HashStoreBackend<B> {
                     }))
             }
             hash::ReserveResult::ReserveOk(id) => {
-                debug!("New hash {}, {}/{:?}: {}", id, leaf as i64, node, chunk.len());
+                debug!("New hash {}, {}/{:?}: {}",
+                       id,
+                       leaf as i64,
+                       node,
+                       chunk.len());
 
                 // We came first: this data-chunk is ours to process.
                 let local_hash_index = self.hash_index.clone();

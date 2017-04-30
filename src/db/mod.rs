@@ -511,6 +511,7 @@ impl InternalIndex {
 
     pub fn maybe_flush(&mut self) {
         if self.flush_periodically && self.flush_timer.did_fire() {
+            debug!("SQL: hash db maybe_flush commit");
             self.flush();
         }
     }
@@ -520,6 +521,8 @@ impl InternalIndex {
     }
 
     pub fn flush(&mut self) {
+        debug!("SQL: hash db commit");
+
         let tm = self.conn.transaction_manager();
         tm.commit_transaction(&self.conn).unwrap();
         tm.begin_transaction(&self.conn).unwrap();

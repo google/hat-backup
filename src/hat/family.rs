@@ -178,7 +178,6 @@ fn parse_dir_data(chunk: &[u8], mut out: &mut Vec<walker::FileEntry>) -> Result<
             break;
         }
         let entry = key::Entry {
-            id: Some(f.get_id()),
             info: key::Info::read(f.get_info()?.borrow())?,
             data_hash: match f.get_content().which().unwrap() {
                 root_capnp::file::content::Data(r) => {
@@ -187,6 +186,7 @@ fn parse_dir_data(chunk: &[u8], mut out: &mut Vec<walker::FileEntry>) -> Result<
                 root_capnp::file::content::Directory(_) => None,
             },
             parent_id: None,
+            node_id: Some(f.get_id()),
         };
         let hash_ref = match f.get_content().which().unwrap() {
                 root_capnp::file::content::Data(r) => {
@@ -225,13 +225,14 @@ impl<B: StoreBackend> Family<B> {
     pub fn snapshot_dir(&self, dir: PathBuf) {
         let handler = InsertPathHandler::new(self.key_store_process.clone());
 
-        let mut parent = None;
         let mut parent_path = PathBuf::from("/");
 
         let dir = fs::canonicalize(dir).unwrap();
         info!("Committing: {}", dir.display());
         assert!(dir.is_absolute());
 
+        let mut bailout = false;
+        let mut parent = None;
         let mut inside_non_dir = false;
         for name in dir.iter().map(PathBuf::from).filter(|p| !p.has_root()) {
             if inside_non_dir {
@@ -239,7 +240,8 @@ impl<B: StoreBackend> Family<B> {
                 // This should not happen, as the path was canonical.
                 warn!("Ignoring components after non-dir path: {}",
                       parent_path.display());
-                return;
+                bailout = true;
+                break;
             }
             parent_path.push(name);
             if let Some(new_parent) = handler.handle_path(&parent, &parent_path) {
@@ -251,8 +253,19 @@ impl<B: StoreBackend> Family<B> {
             }
         }
 
-        if dir.is_dir() {
+        if !bailout && dir.is_dir() {
             handler.recurse(PathBuf::from(&dir), parent);
+
+            match self.key_store_process[0]
+                .send_reply(key::Msg::CommitReservedNodes(Some(parent))) {
+                Ok(key::Reply::Ok) => (),
+                _ => panic!("Unexpected reply from keystore"),
+            }
+        } else {
+            match self.key_store_process[0].send_reply(key::Msg::CommitReservedNodes(None)) {
+                Ok(key::Reply::Ok) => (),
+                _ => panic!("Unexpected reply from keystore"),
+            }
         }
     }
 
@@ -266,10 +279,16 @@ impl<B: StoreBackend> Family<B> {
         } else {
             Some(Box::new(move |()| contents) as Box<FnBox<(), _>>)
         };
-        match self.key_store_process.iter().last().unwrap().send_reply(key::Msg::Insert(file, f))? {
-            key::Reply::Id(id) => Ok(id),
-            _ => Err(From::from("Unexpected reply from key store")),
+        let ks = self.key_store_process.iter().last().unwrap();
+        let id = match ks.send_reply(key::Msg::Insert(file, f))? {
+            key::Reply::Id(id) => id,
+            _ => return Err(From::from("Unexpected reply from key store")),
+        };
+        match ks.send_reply(key::Msg::CommitReservedNodes(None)) {
+            Ok(key::Reply::Ok) => (),
+            _ => return Err(From::from("Unexpected reply from keystore")),
         }
+        Ok(id)
     }
 
     pub fn flush(&self) -> Result<(), HatError> {
@@ -307,7 +326,7 @@ impl<B: StoreBackend> Family<B> {
                 None => {
                     // This is a directory, recurse!
                     fs::create_dir_all(&path).unwrap();
-                    self.checkout_in_dir(path.clone(), entry.id)?;
+                    self.checkout_in_dir(path.clone(), entry.node_id)?;
                 }
                 Some(read_fn) => {
                     // This is a file, write it
@@ -400,7 +419,7 @@ impl<B: StoreBackend> Family<B> {
                     current_msg_is_empty = false;
                     let mut file_msg = files.borrow().get(idx as u32);
 
-                    file_msg.set_id(entry.id.unwrap_or(0));
+                    file_msg.set_id(entry.node_id.unwrap_or(0));
 
                     {
                         entry.info.populate_msg(file_msg.borrow().init_info().borrow());
@@ -427,7 +446,7 @@ impl<B: StoreBackend> Family<B> {
                         // This is a directory, recurse!
                         let mut inner_tree = self.key_store
                             .hash_tree_writer(blob::LeafType::TreeList);
-                        self.commit_to_tree(&mut inner_tree, entry.id, top_hash_fn)?;
+                        self.commit_to_tree(&mut inner_tree, entry.node_id, top_hash_fn)?;
                         // Store a reference for the sub-tree in our tree:
                         let dir_hash_ref = inner_tree.hash(Some(&entry.info))?;
 
