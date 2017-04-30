@@ -394,7 +394,7 @@ impl<B: StoreBackend> Family<B> {
         let mut top_tree = self.key_store.hash_tree_writer(blob::LeafType::TreeList);
         self.commit_to_tree(&mut top_tree, None, top_hash_fn)?;
 
-        let info = key::Info::new(self.name.clone().into_bytes(), None, true);
+        let info = key::Info::new(self.name.clone().into_bytes(), None);
         Ok(top_tree.hash(Some(&info))?)
     }
 
