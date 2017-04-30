@@ -41,6 +41,7 @@ fn try_a_few_times_then_panic<F>(mut f: F, msg: &str)
 }
 
 pub mod recover {
+    use blob;
     use hash;
     use hash::tree;
     use hat::walker;
@@ -152,7 +153,12 @@ pub mod recover {
                 href: href.clone(),
                 childs: None,
             });
-            true
+            // Only proceed to the leaf if it contains a tree list.
+            match href.leaf {
+                blob::LeafType::TreeList => true,
+                blob::LeafType::SnapshotList => false,
+                blob::LeafType::FileChunk => unreachable!("Opened a file with DirVisitor"),
+            }
         }
         fn leaf_leave(&mut self, chunk: Vec<u8>, _href: &tree::HashRef) -> bool {
             parse_dir_data(&chunk[..], &mut self.files).unwrap();

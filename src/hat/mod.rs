@@ -29,7 +29,7 @@ use std::path::PathBuf;
 use std::str;
 use std::sync::{Arc, mpsc};
 use tags;
-use util::{Process, FileIterator};
+use util::Process;
 use void::Void;
 use rustc_serialize::hex::ToHex;
 
@@ -314,7 +314,6 @@ impl<B: StoreBackend> HatRc<B> {
     pub fn meta_commit(&mut self) -> Result<(), HatError> {
         let all_snapshots = self.snapshot_index.list_all();
 
-        // FIXME(jos): Split into N-entries per append().
         let mut message = capnp::message::Builder::new_default();
         let mut all_root_ids = vec![];
 
@@ -341,12 +340,22 @@ impl<B: StoreBackend> HatRc<B> {
         let mut listing = Vec::new();
         capnp::serialize_packed::write_message(&mut listing, &message).unwrap();
 
-        let mut family = self.open_family(synthetic_roots_family()).unwrap();
-        family.snapshot_direct(key::Entry::new(None, From::from("root"), None),
-                             false,
-                             Some(FileIterator::from_bytes(listing)))?;
+        // FIXME(jos): Split into N-entries per append().
+        let mut tree = self.hash_tree_writer(blob::LeafType::SnapshotList);
+        tree.append(&listing[..])?;
 
-        self.commit(&mut family, None)?;
+        let top_ref = tree.hash(None)?;
+        let top_id = self.hash_index.get_id(&top_ref.hash).expect("Top hash missing");
+
+        // Create synthetic snapshot so GC can track the needed blobs and keep them alive.
+        self.hash_index.set_tag(top_id, tags::Tag::Reserved);
+        let snap_info = self.snapshot_index.reserve(synthetic_roots_family());
+        self.snapshot_index.update(&snap_info, &top_ref.hash, &top_ref);
+        self.meta_flush();
+
+        self.gc.register_final(&snap_info, top_id)?;
+        self.meta_flush();
+        self.commit_finalize(snap_info, &top_ref.hash)?;
 
         // Delete old root snapshots, but always keep the past 10.
         // FIXME(jos): Number of meta snapshots to keep to be configurable.
@@ -364,17 +373,16 @@ impl<B: StoreBackend> HatRc<B> {
         for b in blobs.into_iter() {
             info!("Inspecting blob: {}", b.name.to_hex());
             for r in self.blob_store.retrieve_refs(b)?.unwrap_or(vec![]) {
-                match (r.leaf, r.info.as_ref()) {
-                    (blob::LeafType::TreeList, Some(ref i)) if i.hat_snapshot_top &&
-                                                               i.name == b"__hat__roots__" => {
+                match r.leaf {
+                    blob::LeafType::SnapshotList => {
                         // FIXME(jos): Allow skipping first root in case it is not working.
-                        return Ok(Some(r.clone()));
+                        return Ok(Some(r));
                     }
                     // FIXME(jos): Recover file-listings stored after commit
-                    (blob::LeafType::TreeList, _) => {
+                    blob::LeafType::TreeList => {
                         warn!("Skipping directory listing: {}", r.hash.bytes.to_hex())
                     }
-                    (blob::LeafType::FileChunk, _) => {
+                    blob::LeafType::FileChunk => {
                         warn!("Skipping file contents: {}", r.hash.bytes.to_hex())
                     }
                 }
@@ -391,14 +399,7 @@ impl<B: StoreBackend> HatRc<B> {
         info!(".. from blob: {}",
               root_href.persistent_ref.blob_name.to_hex());
 
-        let family = self.open_family(synthetic_roots_family()).unwrap();
-        let list = family.fetch_dir_data(root_href.clone(), self.hash_backend())?;
-        assert_eq!(list.len(), 1);
-
-        let (entry, list_ref) = list.into_iter().next().unwrap();
-        assert_eq!(entry.info.name, b"root");
-
-        for msg in hash::tree::LeafIterator::new(self.hash_backend(), list_ref)?.unwrap() {
+        for msg in hash::tree::LeafIterator::new(self.hash_backend(), root_href.clone())?.unwrap() {
             let message_reader =
                 capnp::serialize_packed::read_message(&mut &msg[..],
                                                       capnp::message::ReaderOptions::new())
@@ -791,7 +792,7 @@ impl<B: StoreBackend> HatRc<B> {
     }
 
     pub fn deregister(&mut self, family: &Family<B>, snapshot_id: i64) -> Result<(), HatError> {
-        let (info, dir_hash, dir_ref) = match self.snapshot_index
+        let (info, top_hash, top_ref) = match self.snapshot_index
             .lookup(&family.name, snapshot_id) {
             Some((i, h, Some(r))) => (i, h, r),
             _ => {
@@ -807,7 +808,7 @@ impl<B: StoreBackend> HatRc<B> {
         self.flush_snapshot_index();
 
         let final_ref = self.hash_index
-            .get_id(&dir_hash)
+            .get_id(&top_hash)
             .expect("Snapshot hash does not exist");
 
         {
@@ -816,11 +817,25 @@ impl<B: StoreBackend> HatRc<B> {
 
             let listing = || {
                 let (id_sender, id_receiver) = mpsc::channel();
-                for hash in list_snapshot(&hash_backend, &family, dir_ref) {
-                    let hash = hash.expect("Invalid hash ref");
-                    match hash_index.get_id(&hash.hash) {
-                        Some(id) => id_sender.send(id).unwrap(),
-                        None => panic!("Unexpected reply from hash index."),
+                match top_ref.leaf {
+                    blob::LeafType::TreeList => {
+                        // Recursive tree structure.
+                        // We need all top hashes from all sub-trees.
+                        for hash in list_snapshot(&hash_backend, &family, top_ref) {
+                            let hash = hash.expect("Invalid hash ref");
+                            match hash_index.get_id(&hash.hash) {
+                                Some(id) => id_sender.send(id).unwrap(),
+                                None => panic!("Unexpected reply from hash index."),
+                            }
+                        }
+                    }
+                    blob::LeafType::SnapshotList => {
+                        // Only the top ref is needed for snapshot lists.
+                        id_sender.send(hash_index.get_id(&top_ref.hash).expect("Unknown top ref"))
+                            .unwrap();
+                    }
+                    blob::LeafType::FileChunk => {
+                        unreachable!("Called deregister directly on filechunk tree")
                     }
                 }
                 id_receiver
