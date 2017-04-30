@@ -101,7 +101,7 @@ impl<B: StoreBackend> HashTreeBackend for HashStoreBackend<B> {
         }
     }
 
-    fn fetch_childs(&self, hash: &hash::Hash) -> Option<Vec<i64>> {
+    fn fetch_childs(&self, hash: &hash::Hash) -> Option<Vec<u64>> {
         match self.hash_index.fetch_childs(hash) {
             Some(p) => p, // done
             None => None, // done
@@ -112,9 +112,9 @@ impl<B: StoreBackend> HashTreeBackend for HashStoreBackend<B> {
                     chunk: &[u8],
                     node: blob::NodeType,
                     leaf: blob::LeafType,
-                    childs: Option<Vec<i64>>,
+                    childs: Option<Vec<u64>>,
                     info: Option<&key::Info>)
-                    -> Result<(i64, hash::tree::HashRef), MsgError> {
+                    -> Result<(u64, hash::tree::HashRef), MsgError> {
         let mut hash_entry = hash::Entry {
             hash: hash::Hash::new(chunk),
             node: node,
@@ -127,7 +127,7 @@ impl<B: StoreBackend> HashTreeBackend for HashStoreBackend<B> {
             hash::ReserveResult::HashKnown(id) => {
                 debug!("Reuse hash {}, {}/{:?}: {}",
                        id,
-                       leaf as i64,
+                       leaf as u64,
                        node,
                        chunk.len());
 
@@ -146,7 +146,7 @@ impl<B: StoreBackend> HashTreeBackend for HashStoreBackend<B> {
             hash::ReserveResult::ReserveOk(id) => {
                 debug!("New hash {}, {}/{:?}: {}",
                        id,
-                       leaf as i64,
+                       leaf as u64,
                        node,
                        chunk.len());
 

@@ -58,7 +58,6 @@ pub struct Info {
     pub group_id: Option<u64>,
 
     pub byte_length: Option<u64>,
-    pub hat_snapshot_top: bool,
     pub hat_snapshot_ts: u64,
 }
 
@@ -68,7 +67,7 @@ impl Entry {
             node_id: None,
             parent_id: parent,
             data_hash: None,
-            info: Info::new(name, meta, false),
+            info: Info::new(name, meta),
         }
     }
 
@@ -80,7 +79,7 @@ impl Entry {
 }
 
 impl Info {
-    pub fn new(name: Vec<u8>, meta: Option<&fs::Metadata>, top: bool) -> Info {
+    pub fn new(name: Vec<u8>, meta: Option<&fs::Metadata>) -> Info {
         use std::os::linux::fs::MetadataExt;
 
         let created = meta.and_then(|m| FileTime::from_creation_time(m))
@@ -102,7 +101,6 @@ impl Info {
             group_id: meta.map(|m| m.st_gid() as u64),
 
             byte_length: meta.map(|m| m.len()),
-            hat_snapshot_top: top,
             hat_snapshot_ts: time::SystemTime::now()
                 .duration_since(time::UNIX_EPOCH)
                 .unwrap()
@@ -136,11 +134,6 @@ impl Info {
 
             byte_length: Some(msg.get_byte_length()),
 
-            hat_snapshot_top: match msg.get_tag().which()? {
-                root_capnp::file_info::tag::SnapshotTop(()) => true,
-                _ => false,
-            },
-
             hat_snapshot_ts: msg.get_hat_snapshot_timestamp(),
         })
     }
@@ -166,12 +159,6 @@ impl Info {
         match self.permissions {
             Some(ref p) => msg.borrow().get_permissions().set_mode(p.mode()),
             None => msg.borrow().get_permissions().set_none(()),
-        }
-
-        if self.hat_snapshot_top {
-            msg.borrow().get_tag().set_snapshot_top(());
-        } else {
-            msg.borrow().get_tag().set_none(());
         }
 
         msg.borrow().set_hat_snapshot_timestamp(self.hat_snapshot_ts);
@@ -327,7 +314,6 @@ impl InternalKeyIndex {
                     user_id: data.user_id.map(|x| x as u64),
                     group_id: data.group_id.map(|x| x as u64),
                     byte_length: None,
-                    hat_snapshot_top: false,
                     hat_snapshot_ts: 0,
                 },
             }))
@@ -376,7 +362,6 @@ impl InternalKeyIndex {
                          user_id: data.user_id.map(|x| x as u64),
                          group_id: data.group_id.map(|x| x as u64),
                          byte_length: None,
-                         hat_snapshot_top: false,
                          hat_snapshot_ts: 0,
                      },
                  },

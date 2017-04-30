@@ -39,7 +39,7 @@ impl SnapshotIndex {
     /// Lookup exact snapshot info from family and snapshot id.
     pub fn lookup(&mut self,
                   family_name: &str,
-                  snapshot_id: i64)
+                  snapshot_id: u64)
                   -> Option<(db::SnapshotInfo, hash::Hash, Option<hash::tree::HashRef>)> {
         self.index.lock().snapshot_lookup(family_name, snapshot_id)
     }
@@ -99,7 +99,7 @@ impl SnapshotIndex {
 
     /// Recover snapshot information.
     pub fn recover(&mut self,
-                   snapshot_id: i64,
+                   snapshot_id: u64,
                    family: &str,
                    msg: &str,
                    hash_ref: &hash::tree::HashRef,

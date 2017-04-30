@@ -17,7 +17,7 @@
 
 
 struct Snapshot {
-	id @0 :Int64;
+	id @0 :UInt64;
 
 	familyName @1: Text;
 	msg @2 :Text;
@@ -32,8 +32,8 @@ struct SnapshotList {
 struct ChunkRef {
 	blobName @0 :Data;
 
-	offset @1: Int64;
-	length @2: Int64;
+	offset @1: UInt64;
+	length @2: UInt64;
 
 	packing :union {
 		none @3 :Void;
@@ -49,14 +49,18 @@ struct ChunkRef {
 
 struct HashRef {
 	hash @0 :Data;
-	height @1 :Int64;
-	leafType @2 :Int64;
+	chunkRef @1 :ChunkRef;
+	height @2 :UInt64;
 
-	chunkRef @3 :ChunkRef;
+	leafType :union {
+	    chunk @3 :Void;
+	    treeList @4 :Void;
+	    snapshotList @5 :Void;
+	}
 
 	extra :union {
-	    none @4 :Void;
-	    info @5 :FileInfo;
+	    none @6 :Void;
+	    info @7 :FileInfo;
 	}
 }
 
@@ -69,12 +73,12 @@ struct HashIds {
 }
 
 struct UserGroup {
-    userId @0 :UInt64;
-    groupId @1 :UInt64;
+	userId @0 :UInt64;
+	groupId @1 :UInt64;
 }
 
 struct FileInfo {
-    name @0 :Data;
+	name @0 :Data;
 
 	createdTimestampSecs @1 :UInt64;
 	modifiedTimestampSecs @2 :UInt64;
@@ -92,17 +96,12 @@ struct FileInfo {
 	    mode @8 :UInt32;
 	}
 
-	hatSnapshotTimestamp @11 :UInt64;
-
-	tag :union {
-	    none @9 :Void;
-	    snapshotTop @10 :Void;
-	}
+	hatSnapshotTimestamp @9 :UInt64;
 }
 
 struct File {
 	id @0 :UInt64;
-    info @1 :FileInfo;
+	info @1 :FileInfo;
 
 	content :union {
 		data @2 :HashRef;

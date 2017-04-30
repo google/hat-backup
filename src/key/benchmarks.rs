@@ -187,7 +187,6 @@ fn insert_1_key_updated_empty(bench: &mut Bencher) {
                     user_id: None,
                     permissions: None,
                     byte_length: None,
-                    hat_snapshot_top: false,
                     hat_snapshot_ts: 0,
                 },
             },

@@ -30,22 +30,21 @@ pub enum Key {
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub enum NodeType {
-    Branch(i64),
+    Branch(u64),
     Leaf,
 }
 
-impl From<i64> for NodeType {
-    fn from(n: i64) -> NodeType {
+impl From<u64> for NodeType {
+    fn from(n: u64) -> NodeType {
         match n {
             0 => NodeType::Leaf,
-            _ if n > 0 => NodeType::Branch(n),
-            _ => unreachable!("Negative node height: {}", n),
+            _ => NodeType::Branch(n),
         }
     }
 }
 
-impl From<NodeType> for i64 {
-    fn from(t: NodeType) -> i64 {
+impl From<NodeType> for u64 {
+    fn from(t: NodeType) -> u64 {
         match t {
             NodeType::Branch(height) => height,
             NodeType::Leaf => 0,
@@ -55,25 +54,45 @@ impl From<NodeType> for i64 {
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub enum LeafType {
-    TreeList = 2,
     FileChunk = 1,
+    TreeList = 2,
+    SnapshotList = 3,
 }
 
-impl From<i64> for LeafType {
-    fn from(n: i64) -> LeafType {
+impl LeafType {
+    pub fn read_msg(which: root_capnp::hash_ref::leaf_type::Which) -> LeafType {
+        match which {
+            root_capnp::hash_ref::leaf_type::Chunk(()) => LeafType::FileChunk,
+            root_capnp::hash_ref::leaf_type::TreeList(()) => LeafType::TreeList,
+            root_capnp::hash_ref::leaf_type::SnapshotList(()) => LeafType::SnapshotList,
+        }
+    }
+    pub fn populate_msg(self, mut msg: root_capnp::hash_ref::leaf_type::Builder) {
+        match self {
+            LeafType::FileChunk => msg.set_chunk(()),
+            LeafType::TreeList => msg.set_tree_list(()),
+            LeafType::SnapshotList => msg.set_snapshot_list(()),
+        }
+    }
+}
+
+impl From<u64> for LeafType {
+    fn from(n: u64) -> LeafType {
         match n {
-            2 => LeafType::TreeList,
             1 => LeafType::FileChunk,
+            2 => LeafType::TreeList,
+            3 => LeafType::SnapshotList,
             _ => unreachable!("Corrupt LeafType tag: {}", n),
         }
     }
 }
 
-impl From<LeafType> for i64 {
-    fn from(t: LeafType) -> i64 {
+impl From<LeafType> for u64 {
+    fn from(t: LeafType) -> u64 {
         match t {
-            LeafType::TreeList => 2,
             LeafType::FileChunk => 1,
+            LeafType::TreeList => 2,
+            LeafType::SnapshotList => 3,
         }
     }
 }
@@ -129,8 +148,8 @@ impl ChunkRef {
     }
 
     pub fn populate_msg_no_name(&self, mut msg: root_capnp::chunk_ref::Builder) {
-        msg.set_offset(self.offset as i64);
-        msg.set_length(self.length as i64);
+        msg.set_offset(self.offset as u64);
+        msg.set_length(self.length as u64);
 
         if let Some(Key::XSalsa20Poly1305(ref salsa)) = self.key {
             msg.borrow().init_key().set_xsalsa20_poly1305(salsa.0.as_ref());
