@@ -60,6 +60,23 @@ pub enum LeafType {
     FileChunk = 1,
 }
 
+impl LeafType {
+    pub fn read_msg(which: root_capnp::hash_ref::leaf_type::Which) -> LeafType {
+        match which {
+            root_capnp::hash_ref::leaf_type::Chunk(()) => LeafType::FileChunk,
+            root_capnp::hash_ref::leaf_type::TreeList(()) => LeafType::TreeList,
+            root_capnp::hash_ref::leaf_type::SnapshotList(()) => LeafType::SnapshotList,
+        }
+    }
+    pub fn populate_msg(self, mut msg: root_capnp::hash_ref::leaf_type::Builder) {
+        match self {
+            LeafType::FileChunk => msg.set_chunk(()),
+            LeafType::TreeList => msg.set_tree_list(()),
+            LeafType::SnapshotList => msg.set_snapshot_list(()),
+        }
+    }
+}
+
 impl From<i64> for LeafType {
     fn from(n: i64) -> LeafType {
         match n {

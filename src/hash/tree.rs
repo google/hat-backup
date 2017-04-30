@@ -44,7 +44,10 @@ impl HashRef {
     pub fn populate_msg(&self, mut msg: root_capnp::hash_ref::Builder) {
         msg.set_hash(&self.hash.bytes[..]);
         msg.set_height(From::from(self.node));
-        msg.set_leaf_type(self.leaf as i64);
+        {
+            let mut leaf = msg.borrow().init_leaf_type();
+            self.leaf.populate_msg(leaf.borrow());
+        }
         {
             let mut chunk_ref = msg.borrow().init_chunk_ref();
             self.persistent_ref.populate_msg(chunk_ref.borrow());
@@ -63,7 +66,7 @@ impl HashRef {
         Ok(HashRef {
             hash: Hash { bytes: msg.get_hash()?.to_owned() },
             node: From::from(msg.get_height()),
-            leaf: From::from(msg.get_leaf_type()),
+            leaf: LeafType::read_msg(msg.get_leaf_type().which()?),
             persistent_ref: ChunkRef::read_msg(&msg.get_chunk_ref()?)?,
             info: match msg.get_extra().which()? {
                 root_capnp::hash_ref::extra::None(()) => None,

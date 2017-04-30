@@ -49,14 +49,18 @@ struct ChunkRef {
 
 struct HashRef {
 	hash @0 :Data;
-	height @1 :Int64;
-	leafType @2 :Int64;
+	chunkRef @1 :ChunkRef;
+	height @2 :Int64;
 
-	chunkRef @3 :ChunkRef;
+	leafType :union {
+	    chunk @3 :Void;
+	    treeList @4 :Void;
+	    snapshotList @5 :Void;
+	}
 
 	extra :union {
-	    none @4 :Void;
-	    info @5 :FileInfo;
+	    none @6 :Void;
+	    info @7 :FileInfo;
 	}
 }
 
