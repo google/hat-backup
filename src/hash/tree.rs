@@ -101,15 +101,15 @@ pub trait HashTreeBackend: Clone {
     type Err: fmt::Debug;
 
     fn fetch_chunk(&self, &Hash, Option<&ChunkRef>) -> Result<Option<Vec<u8>>, Self::Err>;
-    fn fetch_childs(&self, &Hash) -> Option<Vec<i64>>;
+    fn fetch_childs(&self, &Hash) -> Option<Vec<u64>>;
     fn fetch_persistent_ref(&self, &Hash) -> Option<ChunkRef>;
     fn insert_chunk(&self,
                     &[u8],
                     NodeType,
                     LeafType,
-                    Option<Vec<i64>>,
+                    Option<Vec<u64>>,
                     Option<&key::Info>)
-                    -> Result<(i64, HashRef), Self::Err>;
+                    -> Result<(u64, HashRef), Self::Err>;
 }
 
 
@@ -160,7 +160,7 @@ fn test_hash_refs_identity() {
         for i in 1..count + 1 {
             v.push(HashRef {
                 hash: Hash { bytes: hash.clone() },
-                node: NodeType::Branch(i as i64),
+                node: NodeType::Branch(i as u64),
                 leaf: LeafType::FileChunk,
                 info: None,
                 persistent_ref: chunk_ref.clone(),
@@ -191,7 +191,7 @@ pub struct SimpleHashTreeWriter<B> {
     backend: B,
     order: usize,
     leaf: LeafType,
-    levels: Vec<Vec<(i64, HashRef)>>, // Representation of rightmost path to root
+    levels: Vec<Vec<(u64, HashRef)>>, // Representation of rightmost path to root
 }
 
 
@@ -229,17 +229,17 @@ impl<B: HashTreeBackend> SimpleHashTreeWriter<B> {
     fn append_at(&mut self,
                  level: usize,
                  data: &[u8],
-                 childs: Option<Vec<i64>>,
+                 childs: Option<Vec<u64>>,
                  info: Option<&key::Info>)
                  -> Result<(), B::Err> {
         let (id, hash_ref) = self.backend
-            .insert_chunk(&data, From::from(level as i64), self.leaf, childs, info)?;
+            .insert_chunk(&data, From::from(level as u64), self.leaf, childs, info)?;
         self.append_hashref_at(level, id, hash_ref, info)
     }
 
     fn append_hashref_at(&mut self,
                          level: usize,
-                         id: i64,
+                         id: u64,
                          hashref: HashRef,
                          info: Option<&key::Info>)
                          -> Result<(), B::Err> {
@@ -247,7 +247,7 @@ impl<B: HashTreeBackend> SimpleHashTreeWriter<B> {
         self.grow_to(level);
 
         let new_level_len = {
-            let level: &mut Vec<(i64, HashRef)> =
+            let level: &mut Vec<(u64, HashRef)> =
                 self.levels.get_mut(level).expect("len() >= level");
             level.push((id, hashref));
             level.len()
@@ -267,7 +267,7 @@ impl<B: HashTreeBackend> SimpleHashTreeWriter<B> {
         let level_v = self.levels.swap_remove(level);
 
         // All data from this level (hashes and references):
-        let ids: Vec<i64> = level_v.iter().map(|&(id, _)| id).collect();
+        let ids: Vec<u64> = level_v.iter().map(|&(id, _)| id).collect();
         let data = hash_refs_to_bytes(&level_v.into_iter().map(|(_, hr)| hr).collect());
 
         self.append_at(level + 1, &data[..], Some(ids), info)

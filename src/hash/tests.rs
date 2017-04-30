@@ -26,7 +26,7 @@ use std::sync::{Arc, Mutex};
 
 #[derive(Clone)]
 pub struct MemoryBackend {
-    chunks: Arc<Mutex<BTreeMap<Vec<u8>, (NodeType, LeafType, Option<Vec<i64>>, Vec<u8>)>>>,
+    chunks: Arc<Mutex<BTreeMap<Vec<u8>, (NodeType, LeafType, Option<Vec<u64>>, Vec<u8>)>>>,
     seen_chunks: Arc<Mutex<BTreeSet<Vec<u8>>>>,
 }
 
@@ -58,7 +58,7 @@ impl HashTreeBackend for MemoryBackend {
         Ok(guarded_chunks.get(&hash.bytes).map(|&(_, _, _, ref chunk)| chunk.clone()))
     }
 
-    fn fetch_childs(&self, hash: &Hash) -> Option<Vec<i64>> {
+    fn fetch_childs(&self, hash: &Hash) -> Option<Vec<u64>> {
         let guarded_chunks = self.chunks.lock().unwrap();
         guarded_chunks.get(&hash.bytes).and_then(|&(_, _, ref childs, _)| childs.clone())
     }
@@ -84,9 +84,9 @@ impl HashTreeBackend for MemoryBackend {
                     chunk: &[u8],
                     node: NodeType,
                     leaf: LeafType,
-                    childs: Option<Vec<i64>>,
+                    childs: Option<Vec<u64>>,
                     _: Option<&key::Info>)
-                    -> Result<(i64, HashRef), Self::Err> {
+                    -> Result<(u64, HashRef), Self::Err> {
         let len = chunk.len();
         let mut guarded_seen = self.seen_chunks.lock().unwrap();
         guarded_seen.insert(chunk.to_vec());

@@ -64,7 +64,7 @@ pub struct Entry {
     pub leaf: blob::LeafType,
 
     /// An optional list of child hash ids.
-    pub childs: Option<Vec<i64>>,
+    pub childs: Option<Vec<u64>>,
 
     /// A reference to a location in the external persistent storage (a chunk reference) that
     /// contains the data for this entry (e.g. an object-name and a byte range).
@@ -72,11 +72,11 @@ pub struct Entry {
 }
 
 pub enum ReserveResult {
-    HashKnown(i64),
-    ReserveOk(i64),
+    HashKnown(u64),
+    ReserveOk(u64),
 }
 
-type Queue = UniquePriorityQueue<i64, Vec<u8>, db::QueueEntry>;
+type Queue = UniquePriorityQueue<u64, Vec<u8>, db::QueueEntry>;
 
 pub struct InternalHashIndex {
     index: Arc<db::Index>,
@@ -122,7 +122,7 @@ impl InternalHashIndex {
                hash_entry: &Entry,
                mut queue: &mut MutexGuard<Queue>,
                mut index: &mut db::IndexGuard)
-               -> i64 {
+               -> u64 {
         index.maybe_flush();
 
         let Entry { ref hash, node, leaf, ref childs, ref persistent_ref } = *hash_entry;
@@ -143,11 +143,11 @@ impl InternalHashIndex {
         my_id
     }
 
-    fn reserved_id(&self, hash: &Hash, queue: &MutexGuard<Queue>) -> Option<i64> {
+    fn reserved_id(&self, hash: &Hash, queue: &MutexGuard<Queue>) -> Option<u64> {
         queue.find_key(&hash.bytes).cloned()
     }
 
-    fn update_reserved(&self, id: i64, hash_entry: Entry, mut queue: &mut MutexGuard<Queue>) {
+    fn update_reserved(&self, id: u64, hash_entry: Entry, mut queue: &mut MutexGuard<Queue>) {
         let Entry { hash, node, leaf, childs, persistent_ref } = hash_entry;
         assert!(!hash.bytes.is_empty());
 
@@ -178,7 +178,7 @@ impl InternalHashIndex {
     }
 
     fn commit(&self,
-              id: i64,
+              id: u64,
               entry_opt: Option<Entry>,
               mut queue: &mut MutexGuard<Queue>,
               mut index: &mut db::IndexGuard) {
@@ -197,14 +197,14 @@ impl HashIndex {
     }
 
     /// Locate the local ID of this hash.
-    pub fn get_id(&self, hash: &Hash) -> Option<i64> {
+    pub fn get_id(&self, hash: &Hash) -> Option<u64> {
         assert!(!hash.bytes.is_empty());
         let (queue, mut index) = self.0.lock();
         self.0.locate(hash, &queue, &mut index).map(|entry| entry.id)
     }
 
     /// Locate hash entry from its ID.
-    pub fn get_hash(&self, id: i64) -> Option<db::Entry> {
+    pub fn get_hash(&self, id: u64) -> Option<db::Entry> {
         self.0.index.lock().hash_locate_by_id(id)
     }
 
@@ -216,7 +216,7 @@ impl HashIndex {
     }
 
     /// Locate the local childs of the `Hash`.
-    pub fn fetch_childs(&self, hash: &Hash) -> Option<Option<Vec<i64>>> {
+    pub fn fetch_childs(&self, hash: &Hash) -> Option<Option<Vec<u64>>> {
         assert!(!hash.bytes.is_empty());
         let (queue, mut index) = self.0.lock();
         self.0.locate(hash, &queue, &mut index).map(|queue_entry| queue_entry.childs)
@@ -270,7 +270,7 @@ impl HashIndex {
     }
 
     /// Check whether an entry was previously reserved.
-    pub fn reserved_id(&self, hash: &Hash) -> Option<i64> {
+    pub fn reserved_id(&self, hash: &Hash) -> Option<u64> {
         let queue = self.0.queue_lock();
         self.0.reserved_id(hash, &queue)
     }
@@ -278,7 +278,7 @@ impl HashIndex {
     /// Update the info for a reserved `Hash`. The `Hash` remains reserved. This is used to update
     /// the persistent reference (external blob reference) as soon as it is available (to allow new
     /// references to the `Hash` to be created before it is committed).
-    pub fn update_reserved(&self, id: i64, hash_entry: Entry) {
+    pub fn update_reserved(&self, id: u64, hash_entry: Entry) {
         assert!(!hash_entry.hash.bytes.is_empty());
         let mut queue = self.0.queue_lock();
         self.0.update_reserved(id, hash_entry, &mut queue);
@@ -286,7 +286,7 @@ impl HashIndex {
 
     /// A `Hash` is committed when it has been `finalized` in the external storage. `Commit`
     /// includes the persistent reference that the content is available at.
-    pub fn commit(&self, id: i64, entry: Option<Entry>) {
+    pub fn commit(&self, id: u64, entry: Option<Entry>) {
         let (mut queue, mut index) = self.0.lock();
         self.0.commit(id, entry, &mut queue, &mut index);
     }
@@ -297,13 +297,13 @@ impl HashIndex {
     }
 
     /// Permanently delete hash by its ID.
-    pub fn delete(&self, id: i64) {
+    pub fn delete(&self, id: u64) {
         self.0.index.lock().hash_delete(id)
     }
 
     /// API related to tagging, which is useful to indicate state during operation stages.
     /// It operates directly on the underlying IDs.
-    pub fn set_tag(&self, id: i64, tag: tags::Tag) {
+    pub fn set_tag(&self, id: u64, tag: tags::Tag) {
         self.0.index.lock().hash_set_tag(Some(id), tag);
     }
 
@@ -315,7 +315,7 @@ impl HashIndex {
 
     /// API related to tagging, which is useful to indicate state during operation stages.
     /// It operates directly on the underlying IDs.
-    pub fn get_tag(&self, id: i64) -> Option<tags::Tag> {
+    pub fn get_tag(&self, id: u64) -> Option<tags::Tag> {
         {
             if let Some(ref q) = self.0.queue_lock().find_mut_value_of_priority(&id) {
                 return q.tag;
@@ -326,19 +326,19 @@ impl HashIndex {
 
     /// API related to tagging, which is useful to indicate state during operation stages.
     /// It operates directly on the underlying IDs.
-    pub fn get_ids_by_tag(&self, tag: i64) -> Vec<i64> {
+    pub fn get_ids_by_tag(&self, tag: u64) -> Vec<u64> {
         self.0.index.lock().hash_list_ids_by_tag(tag)
     }
 
     /// API related to garbage collector metadata tied to (hash id, family id) pairs.
-    pub fn read_gc_data(&self, hash_id: i64, family_id: i64) -> db::GcData {
+    pub fn read_gc_data(&self, hash_id: u64, family_id: u64) -> db::GcData {
         self.0.index.lock().hash_read_gc_data(hash_id, family_id)
     }
 
     /// API related to garbage collector metadata tied to (hash id, family id) pairs.
     pub fn update_gc_data<F: db::UpdateFn>(&self,
-                                           hash_id: i64,
-                                           family_id: i64,
+                                           hash_id: u64,
+                                           family_id: u64,
                                            update_fn: F)
                                            -> db::GcData {
         self.0.index.lock().hash_update_gc_data(hash_id, family_id, update_fn)
@@ -346,7 +346,7 @@ impl HashIndex {
 
     /// API related to garbage collector metadata tied to (hash id, family id) pairs.
     pub fn update_family_gc_data<F: db::UpdateFn, I: Iterator<Item = F>>(&self,
-                                                                         family_id: i64,
+                                                                         family_id: u64,
                                                                          update_fns: I) {
         self.0.index.lock().hash_update_family_gc_data(family_id, update_fns)
     }

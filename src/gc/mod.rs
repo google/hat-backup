@@ -31,7 +31,7 @@ mod rc;
 pub use self::noop::GcNoop;
 pub use self::rc::GcRc;
 
-pub type Id = i64;
+pub type Id = u64;
 
 
 #[derive(PartialEq, Debug)]
@@ -293,9 +293,9 @@ pub fn gc_test<GC>(snapshots: Vec<Vec<u8>>)
     let mut infos = vec![];
     for (i, refs) in snapshots.iter().enumerate() {
         let info = SnapshotInfo {
-            unique_id: i as i64,
+            unique_id: i as u64,
             family_id: 1,
-            snapshot_id: i as i64,
+            snapshot_id: i as u64,
         };
         backend.insert_snapshot(&info, refs.iter().map(|i| *i as Id).collect());
         infos.push(info);
@@ -308,7 +308,7 @@ pub fn gc_test<GC>(snapshots: Vec<Vec<u8>>)
             .map(|id| backend.set_tag(*id as Id, tags::Tag::Reserved))
             .last();
 
-        let last_ref = *refs.iter().last().expect("len() >= 0") as i64;
+        let last_ref = *refs.iter().last().expect("len() >= 0") as u64;
         gc.register_final(&infos[i], last_ref).unwrap();
         gc.register_cleanup(&infos[i], last_ref).unwrap();
     }
@@ -318,7 +318,7 @@ pub fn gc_test<GC>(snapshots: Vec<Vec<u8>>)
         let (sender, receiver) = mpsc::channel();
         gc.list_unused_ids(sender).unwrap();
         receiver.iter()
-            .filter(|i: &i64| refs.contains(&(*i as u8)))
+            .filter(|i: &u64| refs.contains(&(*i as u8)))
             .map(|i| panic!("ID prematurely deleted by GC: {}", i))
             .last();
         // Deregister snapshot.

@@ -21,7 +21,7 @@ use tags;
 
 // This GC does not store per-family data.
 // Instead this constant family ID is always used.
-const DATA_FAMILY: i64 = 0;
+const DATA_FAMILY: u64 = 0;
 
 
 pub struct GcRc<B> {

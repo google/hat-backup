@@ -96,9 +96,9 @@ impl gc::GcBackend for GcBackend {
         Ok(entry.childs.unwrap())
     }
 
-    fn list_ids_by_tag(&self, tag: tags::Tag) -> Result<mpsc::Receiver<i64>, Self::Err> {
+    fn list_ids_by_tag(&self, tag: tags::Tag) -> Result<mpsc::Receiver<gc::Id>, Self::Err> {
         let (sender, receiver) = mpsc::channel();
-        self.hash_index.get_ids_by_tag(tag as i64).iter().map(|i| sender.send(*i)).last();
+        self.hash_index.get_ids_by_tag(tag as u64).iter().map(|i| sender.send(*i)).last();
 
         Ok(receiver)
     }
@@ -430,7 +430,7 @@ impl<B: StoreBackend> HatRc<B> {
             None => 1,
         };
 
-        self.snapshot_index.recover(next_id,
+        self.snapshot_index.recover(next_id as u64,
                                     &synthetic_roots_family(),
                                     "",
                                     &root_href,
@@ -453,7 +453,7 @@ impl<B: StoreBackend> HatRc<B> {
                 .map(|b| b.id)
                 .expect(&format!("unknown blob: {:?}", pref.blob_name)));
 
-            fn entry(href: hash::tree::HashRef, childs: Option<Vec<i64>>) -> hash::Entry {
+            fn entry(href: hash::tree::HashRef, childs: Option<Vec<u64>>) -> hash::Entry {
                 hash::Entry {
                     hash: href.hash,
                     persistent_ref: Some(href.persistent_ref),
@@ -783,7 +783,7 @@ impl<B: StoreBackend> HatRc<B> {
 
     pub fn deregister_by_name(&mut self,
                               family_name: String,
-                              snapshot_id: i64)
+                              snapshot_id: u64)
                               -> Result<(), HatError> {
         let family = self.open_family(family_name)?;
         self.deregister(&family, snapshot_id)?;
@@ -791,7 +791,7 @@ impl<B: StoreBackend> HatRc<B> {
         Ok(())
     }
 
-    pub fn deregister(&mut self, family: &Family<B>, snapshot_id: i64) -> Result<(), HatError> {
+    pub fn deregister(&mut self, family: &Family<B>, snapshot_id: u64) -> Result<(), HatError> {
         let (info, top_hash, top_ref) = match self.snapshot_index
             .lookup(&family.name, snapshot_id) {
             Some((i, h, Some(r))) => (i, h, r),
@@ -881,7 +881,7 @@ impl<B: StoreBackend> HatRc<B> {
         Ok(self.flush_snapshot_index())
     }
 
-    pub fn gc(&mut self) -> Result<(i64, i64), HatError> {
+    pub fn gc(&mut self) -> Result<(u64, u64), HatError> {
         // Remove unused hashes.
         let mut deleted_hashes = 0;
         let (sender, receiver) = mpsc::channel();
