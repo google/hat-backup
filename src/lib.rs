@@ -30,7 +30,7 @@ extern crate byteorder;
 extern crate capnp;
 extern crate sodiumoxide;
 extern crate libsodium_sys;
-extern crate rustc_serialize;
+extern crate hex;
 extern crate scoped_pool;
 extern crate void;
 extern crate filetime;
