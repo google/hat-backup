@@ -31,7 +31,7 @@ use std::sync::{Arc, mpsc};
 use tags;
 use util::Process;
 use void::Void;
-use rustc_serialize::hex::ToHex;
+use hex::ToHex;
 
 mod family;
 mod insert_path_handler;

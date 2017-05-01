@@ -15,7 +15,7 @@
 
 use backend::StoreBackend;
 use crypto::CipherText;
-use rustc_serialize::hex::{FromHex, ToHex};
+use hex::{FromHex, ToHex};
 use std::collections::BTreeMap;
 use std::fs;
 use std::io;
@@ -137,7 +137,7 @@ impl StoreBackend for FileBackend {
         for p in fs::read_dir(&self.root).map_err(es)? {
             if let Some(name) = p.map_err(es)?.path().file_name() {
                 name.to_str()
-                    .map(|s| s.from_hex().unwrap())
+                    .map(|s| Vec::from_hex(s).unwrap())
                     .map(|b| out.push(b.into_boxed_slice()));
             }
         }
