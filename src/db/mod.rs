@@ -28,6 +28,7 @@ use errors::DieselError;
 use hash;
 use root_capnp;
 use std::sync::{Mutex, MutexGuard};
+use std::path::Path;
 use tags;
 use time::Duration;
 use util::{Counter, InfoWriter, PeriodicTimer};
@@ -39,15 +40,15 @@ pub struct Index(Mutex<InternalIndex>);
 pub type IndexGuard<'a> = MutexGuard<'a, InternalIndex>;
 
 impl Index {
-    pub fn new(path: &str) -> Result<Index, DieselError> {
-        Ok(Index(Mutex::new(InternalIndex::new(path)?)))
+    pub fn new(migrations_dir: &Path, path: &str) -> Result<Index, DieselError> {
+        Ok(Index(Mutex::new(InternalIndex::new(migrations_dir, path)?)))
     }
     pub fn lock(&self) -> MutexGuard<InternalIndex> {
         self.0.lock().expect("Database mutex is poisoned")
     }
     #[cfg(test)]
     pub fn new_for_testing() -> Index {
-        Index(Mutex::new(InternalIndex::new(":memory:").unwrap()))
+        Index(Mutex::new(InternalIndex::new(Path::new("migrations"), ":memory:").unwrap()))
     }
 }
 
@@ -188,7 +189,7 @@ pub struct InternalIndex {
 
 
 impl InternalIndex {
-    fn new(path: &str) -> Result<InternalIndex, DieselError> {
+    fn new(migrations_dir: &Path, path: &str) -> Result<InternalIndex, DieselError> {
         let conn = SqliteConnection::establish(path)?;
 
         let mut idx = InternalIndex {
@@ -198,8 +199,9 @@ impl InternalIndex {
             flush_periodically: true,
         };
 
-        let dir = diesel::migrations::find_migrations_directory()?;
-        diesel::migrations::run_pending_migrations_in_directory(&idx.conn, &dir, &mut InfoWriter)?;
+        diesel::migrations::run_pending_migrations_in_directory(&idx.conn,
+                                                                &migrations_dir,
+                                                                &mut InfoWriter)?;
 
         {
             let tm = idx.conn.transaction_manager();

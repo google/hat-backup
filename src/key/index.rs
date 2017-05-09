@@ -32,6 +32,7 @@ use std::sync::{Mutex, MutexGuard};
 use super::schema;
 use time::Duration;
 use std::time;
+use std::path::Path;
 use util::{InfoWriter, PeriodicTimer};
 use tags::Tag;
 use root_capnp;
@@ -174,7 +175,7 @@ pub struct InternalKeyIndex {
 
 
 impl InternalKeyIndex {
-    fn new(path: &str) -> Result<InternalKeyIndex, DieselError> {
+    fn new(migrations_dir: &Path, path: &str) -> Result<InternalKeyIndex, DieselError> {
         let conn = SqliteConnection::establish(path)?;
 
         let ki = InternalKeyIndex {
@@ -188,8 +189,8 @@ impl InternalKeyIndex {
                 .execute(&ki.conn)?;
         }
 
-        let dir = diesel::migrations::find_migrations_directory()?;
-        diesel::migrations::run_pending_migrations_in_directory(&ki.conn, &dir, &mut InfoWriter)?;
+        diesel::migrations::run_pending_migrations_in_directory(
+            &ki.conn, &migrations_dir, &mut InfoWriter)?;
 
         {
             let tm = ki.conn.transaction_manager();
@@ -430,13 +431,13 @@ impl InternalKeyIndex {
 }
 
 impl KeyIndex {
-    pub fn new(path: &str) -> Result<KeyIndex, DieselError> {
-        InternalKeyIndex::new(path).map(|index| KeyIndex(Mutex::new(index)))
+    pub fn new(migration_dir: &Path, name: &str) -> Result<KeyIndex, DieselError> {
+        InternalKeyIndex::new(migration_dir, name).map(|index| KeyIndex(Mutex::new(index)))
     }
 
     #[cfg(test)]
     pub fn new_for_testing() -> Result<KeyIndex, DieselError> {
-        KeyIndex::new(":memory:")
+        KeyIndex::new(Path::new("migrations"), ":memory:")
     }
 
     fn lock(&self) -> MutexGuard<InternalKeyIndex> {
