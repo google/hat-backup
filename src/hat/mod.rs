@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-
+use crypto;
 use backend::StoreBackend;
 use blob;
 use capnp;
@@ -111,6 +111,7 @@ impl gc::GcBackend for GcBackend {
 
 
 pub struct Hat<B: StoreBackend, G: gc::Gc<GcBackend>> {
+    safe_keeper: crypto::keys::Keeper,
     repository_root: Option<PathBuf>,
     migrations_dir: PathBuf,
     families: Vec<Family<B>>,
@@ -208,6 +209,7 @@ impl<B: StoreBackend> HatRc<B> {
         let gc = gc::Gc::new(gc_backend);
 
         let mut hat = Hat {
+            safe_keeper: crypto::keys::Keeper::new("hat-master-key"),
             repository_root: Some(repository_root),
             migrations_dir: migrations_path,
             families: vec![],
@@ -220,6 +222,24 @@ impl<B: StoreBackend> HatRc<B> {
             blob_max_size: max_blob_size,
             gc: gc,
         };
+
+        let salt1 = vec![1, 2, 3, 4];
+        let salt2 = vec![0, 2, 3, 4];
+        let mut out1 = vec![0; 4];
+        let mut out2 = vec![0; 4];
+        hat.safe_keeper.fingerprint(&salt1[..], &mut out1, 4);
+        hat.safe_keeper.fingerprint(&salt2[..], &mut out2, 4);
+        println!("scrypt out1: {:?}", out1);
+        println!("scrypt out2: {:?}", out2);
+
+        let data = [0; 16];
+        let nonce = [0; 8];
+
+        let (sk, out) = crypto::keys::Keeper::symmetric_lock(&salt1, &data, &nonce);
+        println!("seal: {:?}", out);
+
+        let out = crypto::keys::Keeper::symmetric_unlock(&sk, &out, &data, &nonce);
+        println!("unseal: {:?}", out);
 
         // Resume any unfinished commands.
         hat.resume()?;
@@ -240,6 +260,7 @@ impl<B: StoreBackend> HatRc<B> {
         let gc = gc::Gc::new(gc_backend);
 
         let mut hat = Hat {
+            safe_keeper: crypto::keys::Keeper::new(&[]),
             repository_root: None,
             migrations_dir: PathBuf::from("migrations"),
             families: vec![],

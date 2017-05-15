@@ -20,6 +20,8 @@ use hash::tree::HashRef;
 use sodiumoxide::crypto::stream;
 use std::io;
 
+pub mod keys;
+
 pub struct PlainText(Vec<u8>);
 pub struct PlainTextRef<'a>(&'a [u8]);
 

@@ -26,11 +26,13 @@ extern crate test;
 extern crate time;
 
 // Rust crates.
+extern crate argon2rs;
 extern crate byteorder;
 extern crate capnp;
 extern crate sodiumoxide;
 extern crate libsodium_sys;
 extern crate hex;
+extern crate secstr;
 extern crate scoped_pool;
 extern crate void;
 extern crate filetime;
