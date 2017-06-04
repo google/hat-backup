@@ -61,20 +61,20 @@ fn main() {
                           --hat_migrations_dir=[DIR] 'Location of Hat SQL migrations'
                           --hat_cache_dir=[DIR] 'Location of Hat local state'")
         .subcommand(SubCommand::with_name("commit")
-            .about("Commit a new snapshot")
-            .args_from_usage(arg_template))
+                        .about("Commit a new snapshot")
+                        .args_from_usage(arg_template))
         .subcommand(SubCommand::with_name("checkout")
-            .about("Checkout a snapshot")
-            .args_from_usage(arg_template))
+                        .about("Checkout a snapshot")
+                        .args_from_usage(arg_template))
         .subcommand(SubCommand::with_name("recover").about("Recover list of commit'ed snapshots"))
         .subcommand(SubCommand::with_name("delete")
-            .about("Delete a snapshot")
-            .args_from_usage("<NAME> 'Name of the snapshot family'
+                        .about("Delete a snapshot")
+                        .args_from_usage("<NAME> 'Name of the snapshot family'
                                                         \
                               <ID> 'The snapshot id to delete'"))
         .subcommand(SubCommand::with_name("gc")
-            .about("Garbage collect: identify and remove unused data blocks.")
-            .args_from_usage("-p --pretend 'Do not modify any data'"))
+                        .about("Garbage collect: identify and remove unused data blocks.")
+                        .args_from_usage("-p --pretend 'Do not modify any data'"))
         .subcommand(SubCommand::with_name("resume").about("Resume previous failed command."))
         .get_matches();
 
@@ -85,7 +85,8 @@ fn main() {
     }
 
     let flag_or_env = |name: &str| {
-        matches.value_of(name)
+        matches
+            .value_of(name)
             .map(|x| x.to_string())
             .or_else(|| env::var_os(name.to_uppercase()).map(|s| s.into_string().unwrap()))
             .expect(&format!("{} required", name))
@@ -156,7 +157,8 @@ fn main() {
                 hat::Hat::open_repository(migrations_dir, cache_dir, backend, MAX_BLOB_SIZE)
                     .unwrap();
 
-            hat.deregister_by_name(name, id.parse::<u64>().unwrap()).unwrap();
+            hat.deregister_by_name(name, id.parse::<u64>().unwrap())
+                .unwrap();
         }
         ("gc", Some(_cmd)) => {
             let backend = Arc::new(backend::FileBackend::new(blob_dir()));

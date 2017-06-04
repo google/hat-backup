@@ -125,9 +125,6 @@ impl<'a> PlainTextRef<'a> {
                          -> CipherText {
         CipherText::new(authed::imp::seal(self.0, nonce, key))
     }
-    pub fn to_sealed_ciphertext(&self, pubkey: &sealed::desc::PublicKey) -> CipherText {
-        CipherText::new(sealed::imp::seal(self.0, pubkey))
-    }
 }
 
 impl PlainText {
@@ -230,13 +227,6 @@ impl<'a> CipherTextRef<'a> {
         Ok(PlainText::new(try!(authed::imp::open(&self.0, &nonce, &key)
            .map_err(|()| "crypto read failed: to_plaintext"))))
     }
-    pub fn to_sealed_plaintext(&self,
-                               pubkey: &sealed::desc::PublicKey,
-                               seckey: &sealed::desc::SecretKey)
-                               -> Result<PlainText, CryptoError> {
-        Ok(PlainText::new(try!(sealed::imp::open(&self.0, &pubkey, &seckey)
-            .map_err(|()| "crypto read failed: to_sealed_plaintext"))))
-    }
 
     pub fn strip_authentication(&self) -> Result<CipherTextRef, CryptoError> {
         let (rest, want) = self.split_from_right(authed::hash::DIGESTBYTES)?;
@@ -285,23 +275,29 @@ impl RefKey {
     }
 }
 
-pub struct FixedKey {
-    pubkey: sealed::desc::PublicKey,
-    seckey: Option<sealed::desc::SecretKey>,
+pub struct FixedKey<'k> {
+    keeper: &'k keys::Keeper,
 }
 
-impl FixedKey {
-    pub fn new(pubkey: sealed::desc::PublicKey,
-               seckey_opt: Option<sealed::desc::SecretKey>)
-               -> FixedKey {
-        FixedKey {
-            pubkey: pubkey,
-            seckey: seckey_opt,
-        }
+impl<'k> FixedKey<'k> {
+    pub fn new(keeper: &'k keys::Keeper) -> FixedKey<'k> {
+        FixedKey { keeper: keeper }
     }
 
-    pub fn light_seal(&self, pt: PlainTextRef) -> CipherText {
-        pt.to_sealed_ciphertext(&self.pubkey)
+    pub fn seal_blob_name(&self, pt: PlainTextRef) -> CipherText {
+        CipherText::new(self.keeper.naming_lock(pt.0))
+    }
+
+    pub fn unseal_blob_name(&self, ct: CipherTextRef) -> PlainText {
+        PlainText::new(self.keeper.naming_unlock(ct.0))
+    }
+
+    pub fn seal_blob_data(&self, pt: PlainTextRef) -> CipherText {
+        CipherText::new(self.keeper.data_lock(pt.0))
+    }
+
+    pub fn unseal_blob_data(&self, ct: CipherTextRef) -> PlainText {
+        PlainText::new(self.keeper.data_unlock(ct.0))
     }
 
     pub fn seal(&self, pt: PlainTextRef) -> CipherText {
@@ -319,7 +315,7 @@ impl FixedKey {
         assert_eq!(foot_pt.len(), sealed::desc::footer_plain_bytes());
 
         // Seal footer.
-        let foot_ct = self.light_seal(foot_pt.as_ref());
+        let foot_ct = self.seal_blob_data(foot_pt.as_ref());
         assert_eq!(foot_ct.len(), sealed::desc::footer_cipher_bytes());
 
         // Append sealed footer to symmetric cipher text.
@@ -328,33 +324,31 @@ impl FixedKey {
         ct
     }
 
-    pub fn light_unseal<'a>(&self, ct: CipherTextRef<'a>) -> Result<PlainText, CryptoError> {
-        let seckey = self.seckey.as_ref().expect("unseal requires access to read-key");
-        Ok(ct.to_sealed_plaintext(&self.pubkey, &seckey)?)
-    }
-
     pub fn unseal<'a>(&self,
                       ct: CipherTextRef<'a>)
                       -> Result<(CipherTextRef<'a>, PlainText), CryptoError> {
         // Read sealed ciphertext length and unseal it.
         let (rest, foot_ct) = ct.split_from_right(sealed::desc::footer_cipher_bytes())?;
-        let foot_pt = self.light_unseal(foot_ct)?;
+        let foot_pt = self.unseal_blob_data(foot_ct);
         assert_eq!(foot_pt.len(), sealed::desc::footer_plain_bytes());
 
         // Read length as LittleEndian and inner key.
-        let (foot_len, inner_key) = foot_pt.as_ref()
+        let (foot_len, inner_key) = foot_pt
+            .as_ref()
             .split_from_right(::crypto::authed::desc::KEYBYTES)?;
 
         // Parse length of inner symmetric cipher text.
-        let ct_len = foot_len.read_i64()
+        let ct_len = foot_len
+            .read_i64()
             .map_err(|_| "crypto read failed: unseal")?;
         assert!(ct_len > 0);
 
         // Read and unseal inner symmetric cipher text.
         let (rest, ct_and_nonce) = rest.split_from_right(ct_len as usize)?;
-        let (ct, nonce) = ct_and_nonce.split_from_right(::crypto::authed::desc::NONCEBYTES)?;
+        let (ct, nonce) = ct_and_nonce
+            .split_from_right(::crypto::authed::desc::NONCEBYTES)?;
         Ok((rest,
             ct.to_plaintext(&::crypto::authed::desc::Nonce::from_slice(nonce.0).unwrap(),
-                              &::crypto::authed::desc::Key::from_slice(inner_key.0).unwrap())?))
+                            &::crypto::authed::desc::Key::from_slice(inner_key.0).unwrap())?))
     }
 }

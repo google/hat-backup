@@ -34,52 +34,37 @@ pub struct BlobDesc {
 pub struct InternalBlobIndex {
     index: Arc<db::Index>,
     next_id: Arc<Mutex<i64>>,
-    name_key: Arc<crypto::FixedKey>,
+    keys: Arc<crypto::keys::Keeper>,
 }
 
 pub struct BlobIndex(InternalBlobIndex);
 
 
 impl InternalBlobIndex {
-    pub fn new(index: Arc<db::Index>) -> Result<InternalBlobIndex, DieselError> {
-        // TODO(jos): Plug an actual crypto key through somehow.
-        let pubkey = crypto::sealed::desc::PublicKey::from_slice(&[215, 136, 80, 128, 158, 109,
-                                                                   227, 141, 219, 63, 118, 91,
-                                                                   123, 97, 1, 97, 65, 237, 62,
-                                                                   171, 83, 159, 200, 11, 68,
-                                                                   138, 40, 82, 24, 47, 187, 29])
-            .unwrap();
-        let seckey = crypto::sealed::desc::SecretKey::from_slice(&[94, 13, 181, 81, 97, 87, 76,
-                                                                   37, 53, 92, 120, 232, 17, 126,
-                                                                   234, 78, 12, 23, 141, 61, 40,
-                                                                   10, 136, 127, 103, 192, 255,
-                                                                   193, 142, 154, 101, 35])
-            .unwrap();
-        let name_key = crypto::FixedKey::new(pubkey, Some(seckey));
-
-
+    pub fn new(keys: Arc<crypto::keys::Keeper>,
+               index: Arc<db::Index>)
+               -> Result<InternalBlobIndex, DieselError> {
         let bi = InternalBlobIndex {
             index: index,
             next_id: Arc::new(Mutex::new(0)),
-            name_key: Arc::new(name_key),
+            keys: keys,
         };
         bi.refresh_next_id();
         Ok(bi)
     }
 
     fn name_of_id(&self, id: i64) -> Vec<u8> {
-        return self.name_key
-            .light_seal(crypto::PlainText::from_i64(id).as_ref())
-            .to_vec();
+        return crypto::FixedKey::new(&self.keys)
+                   .seal_blob_name(crypto::PlainText::from_i64(id).as_ref())
+                   .to_vec();
     }
 
     fn id_of_name(&self, name: &[u8]) -> Result<i64, String> {
-        return Ok(self.name_key
-            .light_unseal(crypto::CipherTextRef::new(name))
-            .unwrap()
-            .as_ref()
-            .read_i64()
-            .unwrap());
+        return Ok(crypto::FixedKey::new(&self.keys)
+                      .unseal_blob_name(crypto::CipherTextRef::new(name))
+                      .as_ref()
+                      .read_i64()
+                      .unwrap());
     }
 
     fn new_blob_desc(&self) -> BlobDesc {
@@ -107,15 +92,12 @@ impl InternalBlobIndex {
     fn recover(&self, name: Vec<u8>) -> BlobDesc {
         let wanted_id = self.id_of_name(&name).unwrap();
         if let Some(id) = {
-            self.index.lock().blob_id_from_name(&name[..])
-        } {
+               self.index.lock().blob_id_from_name(&name[..])
+           } {
             assert_eq!(id, wanted_id);
 
             // Blob exists.
-            return BlobDesc {
-                name: name,
-                id: id,
-            };
+            return BlobDesc { name: name, id: id };
         }
 
         let blob = BlobDesc {
@@ -134,8 +116,10 @@ impl InternalBlobIndex {
 }
 
 impl BlobIndex {
-    pub fn new(index: Arc<db::Index>) -> Result<BlobIndex, DieselError> {
-        InternalBlobIndex::new(index).map(|bi| BlobIndex(bi))
+    pub fn new(keys: Arc<crypto::keys::Keeper>,
+               index: Arc<db::Index>)
+               -> Result<BlobIndex, DieselError> {
+        InternalBlobIndex::new(keys, index).map(|bi| BlobIndex(bi))
     }
 
     /// Reserve an internal `BlobDesc` for a new blob.
@@ -165,9 +149,9 @@ impl BlobIndex {
     pub fn find(&self, name: &[u8]) -> Option<BlobDesc> {
         if let Some(id) = self.0.index.lock().blob_id_from_name(&name) {
             Some(BlobDesc {
-                name: name.to_vec(),
-                id: id,
-            })
+                     name: name.to_vec(),
+                     id: id,
+                 })
         } else {
             None
         }

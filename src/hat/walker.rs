@@ -60,13 +60,14 @@ impl<B> Walker<B>
     where B: hash::tree::HashTreeBackend
 {
     pub fn new(backend: B, root_hash: hash::tree::HashRef) -> Result<Walker<B>, B::Err> {
-        let tree = hash::tree::Walker::new(backend.clone(), root_hash)?.unwrap();
+        let tree = hash::tree::Walker::new(backend.clone(), root_hash)?
+            .unwrap();
         Ok(Walker {
-            backend: backend,
-            tree: tree,
-            child: None,
-            stack: VecDeque::new(),
-        })
+               backend: backend,
+               tree: tree,
+               child: None,
+               stack: VecDeque::new(),
+           })
     }
 
     pub fn resume_child<FV, DV>(&mut self,
@@ -79,10 +80,10 @@ impl<B> Walker<B>
               DV: hash::tree::Visitor
     {
         Ok(match self.child.as_mut() {
-            Some(&mut Child::File(ref mut tree)) => tree.resume(file_v)?,
-            Some(&mut Child::Dir(ref mut walker)) => walker.resume(file_v, dir_v)?,
-            None => false,
-        })
+               Some(&mut Child::File(ref mut tree)) => tree.resume(file_v)?,
+               Some(&mut Child::Dir(ref mut walker)) => walker.resume(file_v, dir_v)?,
+               None => false,
+           })
     }
 
     pub fn resume<FV, DV>(&mut self,
@@ -100,9 +101,8 @@ impl<B> Walker<B>
 
         self.child = match self.stack.pop_front() {
             Some(StackItem::File(f)) => {
-                Some(Child::File(hash::tree::Walker::new(self.backend.clone(), f.hash_ref)
-                    ?
-                    .unwrap()))
+                Some(Child::File(hash::tree::Walker::new(self.backend.clone(), f.hash_ref)?
+                                     .unwrap()))
             }
             Some(StackItem::Dir(f)) => {
                 Some(Child::Dir(Box::new(Walker::new(self.backend.clone(), f.hash_ref).unwrap())))

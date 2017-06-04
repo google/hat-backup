@@ -113,7 +113,9 @@ fn insert_files(bench: &mut Bencher, filesize: i32, unique: bool) {
         }
 
         let file = FileIterator::from_reader(Box::new(file_reader.clone()));
-        family.snapshot_direct(entry(name.clone()), false, Some(file)).unwrap();
+        family
+            .snapshot_direct(entry(name.clone()), false, Some(file))
+            .unwrap();
     });
 
     hat.data_flush().unwrap();

@@ -134,17 +134,20 @@ impl<B: StoreBackend> Store<B> {
 
     #[cfg(test)]
     pub fn new_for_testing(backend: Arc<B>, max_blob_size: usize) -> Result<Store<B>, DieselError> {
+        use crypto;
         use db;
+
+        let keys = Arc::new(crypto::keys::Keeper::new_for_testing());
         let db_p = Arc::new(db::Index::new_for_testing());
         let ki_p = Arc::new(index::KeyIndex::new_for_testing()?);
         let hi_p = Arc::new(hash::HashIndex::new(db_p.clone())?);
-        let blob_index = Arc::new(blob::BlobIndex::new(db_p)?);
-        let bs_p = Arc::new(blob::BlobStore::new(blob_index, backend, max_blob_size));
+        let blob_index = Arc::new(blob::BlobIndex::new(keys.clone(), db_p)?);
+        let bs_p = Arc::new(blob::BlobStore::new(keys, blob_index, backend, max_blob_size));
         Ok(Store {
-            index: ki_p,
-            hash_index: hi_p,
-            blob_store: bs_p,
-        })
+               index: ki_p,
+               hash_index: hi_p,
+               blob_store: bs_p,
+           })
     }
 
     pub fn flush(&mut self) -> Result<(), MsgError> {
@@ -205,19 +208,22 @@ impl<IT: io::Read, B: StoreBackend> MsgHandler<Msg<IT>, Reply<B>> for Store<B> {
                     Ok(entries) => {
                         let mut my_entries: Vec<DirElem<B>> = Vec::with_capacity(entries.len());
                         for (entry, hash_ref_opt) in entries {
-                            let hash_ref = hash_ref_opt.or_else(|| {
-                                entry.data_hash.as_ref().and_then(|bytes| {
+                            let hash_ref =
+                                hash_ref_opt.or_else(|| {
+                                                         entry.data_hash.as_ref().and_then(|bytes| {
                                     let h = hash::Hash { bytes: bytes.clone() };
                                     self.hash_index.fetch_hash_ref(&h).expect("Unknown hash")
                                 })
-                            });
-                            let open_fn = hash_ref.as_ref().map(|r| {
-                                HashTreeReaderInitializer {
-                                    hash_ref: r.clone(),
-                                    hash_index: self.hash_index.clone(),
-                                    blob_store: self.blob_store.clone(),
-                                }
-                            });
+                                                     });
+                            let open_fn = hash_ref
+                                .as_ref()
+                                .map(|r| {
+                                         HashTreeReaderInitializer {
+                                             hash_ref: r.clone(),
+                                             hash_index: self.hash_index.clone(),
+                                             blob_store: self.blob_store.clone(),
+                                         }
+                                     });
 
                             my_entries.push((entry, hash_ref, open_fn));
                         }
@@ -237,7 +243,7 @@ impl<IT: io::Read, B: StoreBackend> MsgHandler<Msg<IT>, Reply<B>> for Store<B> {
 
             Msg::Insert(org_entry, chunk_it_opt) => {
                 let entry = match self.index
-                    .lookup(org_entry.parent_id, org_entry.info.name.clone())? {
+                          .lookup(org_entry.parent_id, org_entry.info.name.clone())? {
                     Some(ref entry) if org_entry.data_looks_unchanged(entry) => {
                         if chunk_it_opt.is_some() && entry.data_hash.is_some() {
                             let hash = hash::Hash { bytes: entry.data_hash.clone().unwrap() };
@@ -254,9 +260,17 @@ impl<IT: io::Read, B: StoreBackend> MsgHandler<Msg<IT>, Reply<B>> for Store<B> {
                             return reply_ok!(Reply::Id(entry.node_id.unwrap()));
                         }
                         // Our stored entry is incomplete.
-                        Entry { node_id: entry.node_id, ..org_entry }
+                        Entry {
+                            node_id: entry.node_id,
+                            ..org_entry
+                        }
                     }
-                    Some(entry) => Entry { node_id: entry.node_id, ..org_entry },
+                    Some(entry) => {
+                        Entry {
+                            node_id: entry.node_id,
+                            ..org_entry
+                        }
+                    }
                     None => org_entry,
                 };
 
@@ -297,9 +311,10 @@ impl<IT: io::Read, B: StoreBackend> MsgHandler<Msg<IT>, Reply<B>> for Store<B> {
                 }
 
                 // Warn the user if we did not read the expected size:
-                entry.info.byte_length.map(|s| {
-                    file_size_warning(&entry.info.name, s, file_len);
-                });
+                entry
+                    .info
+                    .byte_length
+                    .map(|s| { file_size_warning(&entry.info.name, s, file_len); });
 
                 // Get top tree hash:
                 let hash_ref = tree.hash(Some(&entry.info))?;

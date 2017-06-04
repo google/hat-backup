@@ -87,21 +87,19 @@ impl<Msg, Reply, E> Process<Msg, Reply, E>
     {
         let (sender, receiver) = mpsc::sync_channel::<(Msg, mpsc::Sender<Result<Reply, E>>)>(10);
 
-        thread::spawn(move || {
-            while let Ok((msg, rep)) = receiver.recv() {
-                let mut did_reply = false;
-                let ret = handler.handle(msg, |r| {
-                    did_reply = true;
-                    rep.send(r).expect("Message reply ignored");
-                });
-                match (ret, did_reply) {
-                    (Ok(()), true) => (),
-                    (Ok(()), false) => panic!("Handler returned without replying"),
-                    (Err(e), true) => panic!("Encountered unrecoverable error: {:?}", e),
-                    (Err(e), false) => rep.send(Err(e)).expect("Message reply ignored"),
-                }
-            }
-        });
+        thread::spawn(move || while let Ok((msg, rep)) = receiver.recv() {
+                          let mut did_reply = false;
+                          let ret = handler.handle(msg, |r| {
+                did_reply = true;
+                rep.send(r).expect("Message reply ignored");
+            });
+                          match (ret, did_reply) {
+                              (Ok(()), true) => (),
+                              (Ok(()), false) => panic!("Handler returned without replying"),
+                              (Err(e), true) => panic!("Encountered unrecoverable error: {:?}", e),
+                              (Err(e), false) => rep.send(Err(e)).expect("Message reply ignored"),
+                          }
+                      });
 
         Process { sender: sender }
     }
@@ -112,7 +110,9 @@ impl<Msg, Reply, E> Process<Msg, Reply, E>
     pub fn send_reply(&self, msg: Msg) -> Result<Reply, E> {
         let (sender, receiver) = mpsc::channel();
 
-        self.sender.send((msg, sender)).expect("Could not send message; process looks dead");
+        self.sender
+            .send((msg, sender))
+            .expect("Could not send message; process looks dead");
         receiver.recv().expect("Could not read reply")
     }
 }

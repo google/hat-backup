@@ -18,13 +18,14 @@ use hash::Hash;
 use hash::tree::HashRef;
 
 use std::mem;
+use std::sync::Arc;
 
 use super::BlobError;
 use super::ChunkRef;
 
 
 pub struct Blob {
-    master_key: crypto::FixedKey,
+    keys: Arc<crypto::keys::Keeper>,
     chunks: CipherText,
     footer: Vec<u8>,
     overhead: usize,
@@ -32,25 +33,9 @@ pub struct Blob {
 }
 
 impl Blob {
-    pub fn new(max_len: usize) -> Blob {
-        // TODO(jos): Plug an actual crypto key through somehow.
-        let pubkey = crypto::sealed::desc::PublicKey::from_slice(&[215, 136, 80, 128, 158, 109,
-                                                                   227, 141, 219, 63, 118, 91,
-                                                                   123, 97, 1, 97, 65, 237, 62,
-                                                                   171, 83, 159, 200, 11, 68,
-                                                                   138, 40, 82, 24, 47, 187, 29])
-            .unwrap();
-        let seckey = crypto::sealed::desc::SecretKey::from_slice(&[94, 13, 181, 81, 97, 87, 76,
-                                                                   37, 53, 92, 120, 232, 17, 126,
-                                                                   234, 78, 12, 23, 141, 61, 40,
-                                                                   10, 136, 127, 103, 192, 255,
-                                                                   193, 142, 154, 101, 35])
-            .unwrap();
-
-        let master_key = crypto::FixedKey::new(pubkey, Some(seckey));
-
+    pub fn new(keys: Arc<crypto::keys::Keeper>, max_len: usize) -> Blob {
         Blob {
-            master_key: master_key,
+            keys: keys,
             chunks: CipherText::empty(),
             footer: Vec::with_capacity(max_len / 2),
             overhead: crypto::sealed::desc::overhead() + crypto::authed::hash::DIGESTBYTES,
@@ -60,7 +45,8 @@ impl Blob {
 
     pub fn read_chunk(blob: &[u8], hash: &Hash, cref: &ChunkRef) -> Result<Vec<u8>, BlobError> {
         let ct = crypto::CipherTextRef::new(blob);
-        Ok(crypto::RefKey::unseal(hash, cref, ct.strip_authentication()?)?.into_vec())
+        Ok(crypto::RefKey::unseal(hash, cref, ct.strip_authentication()?)?
+               .into_vec())
     }
 
     pub fn upperbound_len(&self) -> usize {
@@ -103,7 +89,7 @@ impl Blob {
         }
 
         let footer_overhead = self.footer.len() + self.overhead;
-        let footer = self.master_key.seal(PlainTextRef::new(&self.footer[..]));
+        let footer = crypto::FixedKey::new(&self.keys).seal(PlainTextRef::new(&self.footer[..]));
         self.footer.truncate(0);
 
         assert!(self.chunks.len() + footer_overhead <= self.max_len);
@@ -124,7 +110,8 @@ impl Blob {
 
     pub fn refs_from_bytes(&self, bytes: &[u8]) -> Result<Vec<HashRef>, BlobError> {
         let ct = CipherTextRef::new(bytes);
-        let (_rest, footer_vec) = self.master_key.unseal(ct.strip_authentication()?)?;
+        let (_rest, footer_vec) = crypto::FixedKey::new(&self.keys)
+            .unseal(ct.strip_authentication()?)?;
         let mut footer_pos = footer_vec.as_bytes();
 
         let mut hrefs = Vec::new();

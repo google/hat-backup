@@ -55,12 +55,16 @@ impl HashTreeBackend for MemoryBackend {
             None => Cow::Borrowed(hash),
         };
         let guarded_chunks = self.chunks.lock().unwrap();
-        Ok(guarded_chunks.get(&hash.bytes).map(|&(_, _, _, ref chunk)| chunk.clone()))
+        Ok(guarded_chunks
+               .get(&hash.bytes)
+               .map(|&(_, _, _, ref chunk)| chunk.clone()))
     }
 
     fn fetch_childs(&self, hash: &Hash) -> Option<Vec<u64>> {
         let guarded_chunks = self.chunks.lock().unwrap();
-        guarded_chunks.get(&hash.bytes).and_then(|&(_, _, ref childs, _)| childs.clone())
+        guarded_chunks
+            .get(&hash.bytes)
+            .and_then(|&(_, _, ref childs, _)| childs.clone())
     }
 
     fn fetch_persistent_ref(&self, hash: &Hash) -> Option<ChunkRef> {
@@ -68,13 +72,13 @@ impl HashTreeBackend for MemoryBackend {
         match guarded_chunks.get(&hash.bytes) {
             Some(&(_, _, _, ref chunk)) => {
                 Some(ChunkRef {
-                    blob_id: None,
-                    blob_name: hash.bytes.clone(),
-                    offset: 0,
-                    length: chunk.len(),
-                    packing: None,
-                    key: None,
-                })
+                         blob_id: None,
+                         blob_name: hash.bytes.clone(),
+                         offset: 0,
+                         length: chunk.len(),
+                         packing: None,
+                         key: None,
+                     })
             }
             None => None,
         }
@@ -190,8 +194,11 @@ fn identity_append1() {
 
 #[test]
 fn identity_append5() {
-    let blocks: Vec<Vec<u8>> =
-        vec![b"foo".to_vec(), b"bar".to_vec(), b"baz".to_vec(), b"qux".to_vec(), b"norf".to_vec()];
+    let blocks: Vec<Vec<u8>> = vec![b"foo".to_vec(),
+                                    b"bar".to_vec(),
+                                    b"baz".to_vec(),
+                                    b"qux".to_vec(),
+                                    b"norf".to_vec()];
 
     let backend = MemoryBackend::new();
     let mut ht = SimpleHashTreeWriter::new(LeafType::FileChunk, 4, backend.clone());

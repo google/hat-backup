@@ -16,25 +16,28 @@ use libsodium_sys;
 use secstr;
 use argon2rs;
 
+struct PublicKey(secstr::SecStr);
+struct SecretKey(secstr::SecStr);
+
 pub struct Keeper {
     universal_key: secstr::SecStr,
     fingerprint_key: Option<secstr::SecStr>,
 
-    data_key_pk: Option<secstr::SecStr>,
-    data_key_sk: Option<secstr::SecStr>,
+    data_key_pk: Option<PublicKey>,
+    data_key_sk: Option<SecretKey>,
 
-    naming_key_pk: Option<secstr::SecStr>,
-    naming_key_sk: Option<secstr::SecStr>,
+    naming_key_pk: Option<PublicKey>,
+    naming_key_sk: Option<SecretKey>,
 
-    access_key_pk: Option<secstr::SecStr>,
-    access_key_sk: Option<secstr::SecStr>,
+    access_key_pk: Option<PublicKey>,
+    access_key_sk: Option<SecretKey>,
 }
 
 impl Keeper {
     pub fn new(universal: &str) -> Keeper {
         let app: &str = "hat-backup:universal-key";
-        let mut keeper = Keeper{
-            universal_key: Keeper::strengthen(universal, app, 64),
+        let mut keeper = Keeper {
+            universal_key: Keeper::strengthen(universal, app),
             fingerprint_key: None,
             data_key_pk: None,
             data_key_sk: None,
@@ -43,38 +46,51 @@ impl Keeper {
             naming_key_pk: None,
             naming_key_sk: None,
         };
-
-        // Generate key used for fingerprinting.
-        keeper.fingerprint_key = Some(keeper.from_nonce("hat:fingerprint-key".as_bytes(), 64));
-
-        // Generate data key.
-        let (pk, sk) = keeper.x25519_key_pair_from_nonce("hat:DATA-key-x25519".as_bytes());
-        keeper.data_key_pk = Some(pk);
-        keeper.data_key_sk = Some(sk);
-
-        // Generate naming key.
-        let (pk, sk) = keeper.x25519_key_pair_from_nonce("hat:NAMING-key-x25519".as_bytes());
-        keeper.naming_key_pk = Some(pk);
-        keeper.naming_key_sk = Some(sk);
-
-        // Generate access key.
-        let (pk, sk) = keeper.x25519_key_pair_from_nonce("hat:ACCESS-key-x25519".as_bytes());
-        keeper.access_key_pk = Some(pk);
-        keeper.access_key_sk = Some(sk);
-
+        keeper.init();
         keeper
     }
 
-    fn internal_strengthen(log_n: u64, phrase: &str, salt: &str, outlen: usize) -> secstr::SecStr {
-        let n = 2 << log_n;
-        let r = 8;
-        let p = 1;
-
-        secstr::SecStr::new(argon2rs::argon2d_simple(phrase, salt).to_vec())
+    #[cfg(test)]
+    pub fn new_for_testing() -> Keeper {
+        let mut keeper = Keeper {
+            universal_key: secstr::SecStr::new(vec![0; 32]),
+            fingerprint_key: None,
+            data_key_pk: None,
+            data_key_sk: None,
+            access_key_pk: None,
+            access_key_sk: None,
+            naming_key_pk: None,
+            naming_key_sk: None,
+        };
+        keeper.init();
+        keeper
     }
 
-    fn strengthen(phrase: &str, salt: &str, outlen: usize) -> secstr::SecStr {
-        Keeper::internal_strengthen(14, phrase, salt, outlen)
+    fn init(&mut self) {
+        // Generate key used for fingerprinting.
+        self.fingerprint_key = Some(self.from_nonce("hat:FINGERPRINT-key".as_bytes(), 64));
+
+        // Generate data key.
+        // Required for reading blob data without a direct reference.
+        let (pk, sk) = self.x25519_key_pair_from_nonce("hat:DATA-key-x25519".as_bytes());
+        self.data_key_pk = Some(pk);
+        self.data_key_sk = Some(sk);
+
+        // Generate access key.
+        // Required for reading any blob data (with direct reference or with data key).
+        let (pk, sk) = self.x25519_key_pair_from_nonce("hat:ACCESS-key-x25519".as_bytes());
+        self.access_key_pk = Some(pk);
+        self.access_key_sk = Some(sk);
+
+        // Generate naming key.
+        // Required for reading blob names.
+        let (pk, sk) = self.x25519_key_pair_from_nonce("hat:NAMING-key-x25519".as_bytes());
+        self.naming_key_pk = Some(pk);
+        self.naming_key_sk = Some(sk);
+    }
+
+    fn strengthen(phrase: &str, salt: &str) -> secstr::SecStr {
+        secstr::SecStr::new(argon2rs::argon2d_simple(phrase, salt).to_vec())
     }
 
     pub fn from_nonce(&self, nonce: &[u8], outlen: usize) -> secstr::SecStr {
@@ -83,7 +99,7 @@ impl Keeper {
         out
     }
 
-    fn x25519_key_pair_from_nonce(&self, nonce: &[u8]) -> (secstr::SecStr, secstr::SecStr) {
+    fn x25519_key_pair_from_nonce(&self, nonce: &[u8]) -> (PublicKey, SecretKey) {
         let mut pk = secstr::SecStr::new(vec![0; 32]);
         let mut sk = secstr::SecStr::new(vec![0; 32]);
 
@@ -96,27 +112,30 @@ impl Keeper {
         };
         assert_eq!(ret, 0);
 
-        (pk, sk)
+        (PublicKey(pk), SecretKey(sk))
     }
 
-    fn asymmetric_lock(pk: &secstr::SecStr, msg: &[u8]) -> Vec<u8> {
+    fn asymmetric_lock(pk: &PublicKey, msg: &[u8]) -> Vec<u8> {
         let mut out = vec![0; msg.len() + libsodium_sys::crypto_box_SEALBYTES];
         let ret = unsafe {
-            libsodium_sys::crypto_box_seal(
-                out.as_mut_ptr(), msg.as_ptr(), msg.len() as u64,
-                pk.unsecure().as_ptr() as *const [u8; 32])
+            libsodium_sys::crypto_box_seal(out.as_mut_ptr(),
+                                           msg.as_ptr(),
+                                           msg.len() as u64,
+                                           pk.0.unsecure().as_ptr() as *const [u8; 32])
         };
         assert_eq!(0, ret);
 
         out
     }
 
-    fn asymmetric_unlock(pk: &secstr::SecStr, sk: &secstr::SecStr, ciphertext: &[u8]) -> Vec<u8> {
+    fn asymmetric_unlock(pk: &PublicKey, sk: &SecretKey, ciphertext: &[u8]) -> Vec<u8> {
         let mut out = vec![0; ciphertext.len() - libsodium_sys::crypto_box_SEALBYTES];
         let ret = unsafe {
-            libsodium_sys::crypto_box_seal_open(
-                out.as_mut_ptr(), ciphertext.as_ptr(), ciphertext.len() as u64,
-                pk.unsecure().as_ptr() as *const [u8; 32], sk.unsecure().as_ptr() as *const [u8; 32])
+            libsodium_sys::crypto_box_seal_open(out.as_mut_ptr(),
+                                                ciphertext.as_ptr(),
+                                                ciphertext.len() as u64,
+                                                pk.0.unsecure().as_ptr() as *const [u8; 32],
+                                                sk.0.unsecure().as_ptr() as *const [u8; 32])
         };
         assert_eq!(0, ret);
 
@@ -130,28 +149,45 @@ impl Keeper {
 
     pub fn data_unlock(&self, ciphertext: &[u8]) -> Vec<u8> {
         Keeper::asymmetric_unlock(self.data_key_pk.as_ref().expect("need data public key"),
-                                  self.data_key_sk.as_ref().expect("need data private key"),
+                                  self.data_key_sk
+                                      .as_ref()
+                                      .expect("need data private key"),
                                   ciphertext)
     }
 
     pub fn access_lock(&self, msg: &[u8]) -> Vec<u8> {
-        Keeper::asymmetric_lock(self.access_key_pk.as_ref().expect("need access publick key"), msg)
+        Keeper::asymmetric_lock(self.access_key_pk
+                                    .as_ref()
+                                    .expect("need access publick key"),
+                                msg)
     }
 
 
     pub fn access_unlock(&self, ciphertext: &[u8]) -> Vec<u8> {
-        Keeper::asymmetric_unlock(self.access_key_pk.as_ref().expect("need access public key"),
-                                  self.access_key_sk.as_ref().expect("need access private key"),
+        Keeper::asymmetric_unlock(self.access_key_pk
+                                      .as_ref()
+                                      .expect("need access public key"),
+                                  self.access_key_sk
+                                      .as_ref()
+                                      .expect("need access private key"),
                                   ciphertext)
     }
 
     pub fn naming_lock(&self, msg: &[u8]) -> Vec<u8> {
-        Keeper::asymmetric_lock(self.naming_key_pk.as_ref().expect("need naming public key"), msg)
+        Keeper::asymmetric_lock(self.naming_key_pk
+                                    .as_ref()
+                                    .expect("need naming public key"),
+                                msg)
     }
 
     pub fn naming_unlock(&self, ciphertext: &[u8]) -> Vec<u8> {
-        Keeper::asymmetric_unlock(self.naming_key_pk.as_ref().expect("need naming public key"),
-                                  self.naming_key_sk.as_ref().expect("need naming private key"), ciphertext)
+        Keeper::asymmetric_unlock(self.naming_key_pk
+                                      .as_ref()
+                                      .expect("need naming public key"),
+                                  self.naming_key_sk
+                                      .as_ref()
+                                      .expect("need naming private key"),
+                                  ciphertext)
     }
 
     fn keyed_fingerprint(sk: &secstr::SecStr, msg: &[u8], out: &mut [u8], outlen: usize) {
@@ -159,9 +195,12 @@ impl Keeper {
         let sk_len = sk.unsecure().len();
 
         let ret = unsafe {
-            libsodium_sys::crypto_generichash_blake2b(out.as_mut_ptr(), outlen,
-                                                      msg.as_ptr(), msg.len() as u64,
-                                                      sk.unsecure().as_ptr(), sk_len)
+            libsodium_sys::crypto_generichash_blake2b(out.as_mut_ptr(),
+                                                      outlen,
+                                                      msg.as_ptr(),
+                                                      msg.len() as u64,
+                                                      sk.unsecure().as_ptr(),
+                                                      sk_len)
         };
         assert_eq!(ret, 0);
     }
@@ -169,7 +208,9 @@ impl Keeper {
     pub fn fingerprint(&self, msg: &[u8], out: &mut [u8], outlen: usize) {
         assert!(outlen <= out.len());
 
-        let key = self.fingerprint_key.as_ref().expect("need fingerprint key");
+        let key = self.fingerprint_key
+            .as_ref()
+            .expect("need fingerprint key");
         Keeper::keyed_fingerprint(&key, msg, out, outlen);
     }
 
@@ -182,12 +223,16 @@ impl Keeper {
         let mut out_len = 0;
 
         let ret = unsafe {
-            libsodium_sys::crypto_aead_chacha20poly1305_encrypt(
-                out.as_mut_ptr(), &mut out_len,
-                msg.as_ptr(), msg.len() as u64,
-                data.as_ptr(), data.len() as u64,
-                &[0u8; 0], nonce.as_ptr() as *const [u8; 8],
-                sk.unsecure().as_ptr() as *const [u8; 32])
+            libsodium_sys::crypto_aead_chacha20poly1305_encrypt(out.as_mut_ptr(),
+                                                                &mut out_len,
+                                                                msg.as_ptr(),
+                                                                msg.len() as u64,
+                                                                data.as_ptr(),
+                                                                data.len() as u64,
+                                                                &[0u8; 0],
+                                                                nonce.as_ptr() as *const [u8; 8],
+                                                                sk.unsecure().as_ptr() as
+                                                                *const [u8; 32])
         };
         assert_eq!(0, ret);
         assert_eq!(out_len, out.len() as u64);
@@ -195,18 +240,26 @@ impl Keeper {
         (sk, out)
     }
 
-    pub fn symmetric_unlock(sk: &secstr::SecStr, ciphertext: &[u8], data: &[u8], nonce: &[u8; 8]) -> Vec<u8> {
-        let mut out = vec![0u8; ciphertext.len() - libsodium_sys::crypto_aead_chacha20poly1305_ABYTES];
+    pub fn symmetric_unlock(sk: &secstr::SecStr,
+                            ciphertext: &[u8],
+                            data: &[u8],
+                            nonce: &[u8; 8])
+                            -> Vec<u8> {
+        let mut out =
+            vec![0u8; ciphertext.len() - libsodium_sys::crypto_aead_chacha20poly1305_ABYTES];
         let mut out_len = 0;
 
         let ret = unsafe {
-            libsodium_sys::crypto_aead_chacha20poly1305_decrypt(
-                out.as_mut_ptr(), &mut out_len,
-                &mut [0u8; 0],
-                ciphertext.as_ptr(), ciphertext.len() as u64,
-                data.as_ptr(), data.len() as u64,
-                nonce.as_ptr() as *const [u8; 8],
-                sk.unsecure().as_ptr() as *const [u8; 32])
+            libsodium_sys::crypto_aead_chacha20poly1305_decrypt(out.as_mut_ptr(),
+                                                                &mut out_len,
+                                                                &mut [0u8; 0],
+                                                                ciphertext.as_ptr(),
+                                                                ciphertext.len() as u64,
+                                                                data.as_ptr(),
+                                                                data.len() as u64,
+                                                                nonce.as_ptr() as *const [u8; 8],
+                                                                sk.unsecure().as_ptr() as
+                                                                *const [u8; 32])
         };
         assert_eq!(0, ret);
         assert_eq!(out_len, out.len() as u64);

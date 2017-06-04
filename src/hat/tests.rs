@@ -59,10 +59,7 @@ fn snapshot_files<B: StoreBackend>(family: &Family<B>,
             e.parent_id = parent.clone();
 
             parent = dirs.entry((parent, current))
-                .or_insert_with(|| {
-                    Some(family.snapshot_direct(e, true, None)
-                        .unwrap())
-                })
+                .or_insert_with(|| Some(family.snapshot_direct(e, true, None).unwrap()))
                 .clone();
             current = parts.next().unwrap();
         }
@@ -70,7 +67,8 @@ fn snapshot_files<B: StoreBackend>(family: &Family<B>,
             // We have a file to insert.
             let mut e = entry(current.bytes().collect());
             e.parent_id = parent.clone();
-            family.snapshot_direct(e, false, Some(FileIterator::from_bytes(contents)))?;
+            family
+                .snapshot_direct(e, false, Some(FileIterator::from_bytes(contents)))?;
         }
     }
     Ok(())
@@ -100,7 +98,7 @@ fn basic_snapshot<B: StoreBackend>(fam: &Family<B>) {
                         ("a/", vec![]),
                         ("b/", vec![]),
                         ("c/", vec![])])
-        .unwrap();
+            .unwrap();
 }
 
 #[test]

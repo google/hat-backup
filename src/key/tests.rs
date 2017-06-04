@@ -105,9 +105,9 @@ fn rng_filesystem(size: usize) -> FileSystem {
             };
 
             files.push(FileSystem {
-                file: new_root,
-                filelist: create_files(child_size as usize),
-            });
+                           file: new_root,
+                           filelist: create_files(child_size as usize),
+                       });
             child_size += dist_factor;
         }
         files
@@ -141,16 +141,17 @@ fn rng_filesystem(size: usize) -> FileSystem {
 
 fn insert_and_update_fs<B: StoreBackend>(fs: &mut FileSystem, ks_p: &StoreProcess<EntryStub, B>) {
     let local_file = fs.file.clone();
-    fs.file.key_entry.node_id = match ks_p.send_reply(Msg::Insert(fs.file.key_entry.clone(),
-                                if fs.file.data.is_some() {
-                                    Some(Box::new(move |()| Some(local_file)))
-                                } else {
-                                    None
-                                }))
-        .unwrap() {
-        Reply::Id(id) => Some(id),
-        _ => panic!("unexpected reply from key store"),
-    };
+    fs.file.key_entry.node_id =
+        match ks_p.send_reply(Msg::Insert(fs.file.key_entry.clone(),
+                                          if fs.file.data.is_some() {
+                                              Some(Box::new(move |()| Some(local_file)))
+                                          } else {
+                                              None
+                                          }))
+                  .unwrap() {
+            Reply::Id(id) => Some(id),
+            _ => panic!("unexpected reply from key store"),
+        };
 
     for f in fs.filelist.iter_mut() {
         f.file.key_entry.parent_id = fs.file.key_entry.node_id;
@@ -159,7 +160,8 @@ fn insert_and_update_fs<B: StoreBackend>(fs: &mut FileSystem, ks_p: &StoreProces
 }
 
 fn verify_filesystem<B: StoreBackend>(fs: &FileSystem, ks_p: &StoreProcess<EntryStub, B>) -> usize {
-    let listing = match ks_p.send_reply(Msg::ListDir(fs.file.key_entry.node_id)).unwrap() {
+    let listing = match ks_p.send_reply(Msg::ListDir(fs.file.key_entry.node_id))
+              .unwrap() {
         Reply::ListResult(ls) => ls,
         _ => panic!("Unexpected result from key store."),
     };
@@ -204,7 +206,7 @@ fn verify_filesystem<B: StoreBackend>(fs: &FileSystem, ks_p: &StoreProcess<Entry
                     }
                 }
 
-                break;  // Proceed to check next file
+                break; // Proceed to check next file
             }
         }
         assert_eq!(true, found);

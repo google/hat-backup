@@ -152,7 +152,9 @@ impl ChunkRef {
         msg.set_length(self.length as u64);
 
         if let Some(Key::XSalsa20Poly1305(ref salsa)) = self.key {
-            msg.borrow().init_key().set_xsalsa20_poly1305(salsa.0.as_ref());
+            msg.borrow()
+                .init_key()
+                .set_xsalsa20_poly1305(salsa.0.as_ref());
         } else {
             msg.borrow().init_key().set_none(());
         }
@@ -166,22 +168,22 @@ impl ChunkRef {
 
     pub fn read_msg(msg: &root_capnp::chunk_ref::Reader) -> Result<ChunkRef, capnp::Error> {
         Ok(ChunkRef {
-            blob_id: None,
-            blob_name: msg.get_blob_name()?.to_owned(),
-            offset: msg.get_offset() as usize,
-            length: msg.get_length() as usize,
-            packing: match msg.get_packing().which()? {
-                root_capnp::chunk_ref::packing::None(()) => None,
-                root_capnp::chunk_ref::packing::Gzip(()) => Some(Packing::GZip),
-                root_capnp::chunk_ref::packing::Snappy(()) => Some(Packing::Snappy),
-            },
-            key: match msg.get_key().which()? {
-                root_capnp::chunk_ref::key::None(()) => None,
-                root_capnp::chunk_ref::key::Xsalsa20Poly1305(res) => {
+               blob_id: None,
+               blob_name: msg.get_blob_name()?.to_owned(),
+               offset: msg.get_offset() as usize,
+               length: msg.get_length() as usize,
+               packing: match msg.get_packing().which()? {
+                   root_capnp::chunk_ref::packing::None(()) => None,
+                   root_capnp::chunk_ref::packing::Gzip(()) => Some(Packing::GZip),
+                   root_capnp::chunk_ref::packing::Snappy(()) => Some(Packing::Snappy),
+               },
+               key: match msg.get_key().which()? {
+                   root_capnp::chunk_ref::key::None(()) => None,
+                   root_capnp::chunk_ref::key::Xsalsa20Poly1305(res) => {
                     Some(Key::XSalsa20Poly1305(xsalsa20poly1305::Key::from_slice(res?)
                         .expect("Incorrect key-size")))
                 }
-            },
-        })
+               },
+           })
     }
 }

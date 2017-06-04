@@ -39,12 +39,13 @@ fn append_known_16x128_kb(bench: &mut Bencher) {
     let bytes = vec![0u8; 128*1024];
 
     bench.iter(|| {
-        let mut ht = SimpleHashTreeWriter::new(LeafType::FileChunk, 8, MemoryBackend::new());
-        for _ in 0i32..16 {
-            ht.append(&bytes[..]).unwrap();
-        }
-        ht.hash(None).unwrap();
-    });
+                   let mut ht =
+                       SimpleHashTreeWriter::new(LeafType::FileChunk, 8, MemoryBackend::new());
+                   for _ in 0i32..16 {
+                       ht.append(&bytes[..]).unwrap();
+                   }
+                   ht.hash(None).unwrap();
+               });
 
     bench.bytes = 128 * 1024 * 16;
 }

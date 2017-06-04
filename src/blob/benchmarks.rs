@@ -48,11 +48,11 @@ fn insert_128_kb_chunks(bench: &mut Bencher) {
     let mut href = dummy_hashref();
     let chunk = [0u8; CHUNKSIZE];
     bench.iter(|| {
-        if let Err(()) = b.try_append(&chunk[..], &mut href) {
+                   if let Err(()) = b.try_append(&chunk[..], &mut href) {
             b = Blob::new(BLOBSIZE);
             b.try_append(&chunk[..], &mut href).unwrap();
         }
-    });
+               });
     bench.bytes = CHUNKSIZE as u64;
 }
 
@@ -62,10 +62,10 @@ fn insert_256_kb_chunks(bench: &mut Bencher) {
     let mut b = Blob::new(BLOBSIZE);
     let mut href = dummy_hashref();
     bench.iter(|| {
-        if let Err(()) = b.try_append(&chunk[..], &mut href) {
+                   if let Err(()) = b.try_append(&chunk[..], &mut href) {
             b.to_ciphertext();
             b.try_append(&chunk[..], &mut href).unwrap();
         }
-    });
+               });
     bench.bytes = 2 * CHUNKSIZE as u64;
 }

@@ -64,15 +64,15 @@ impl HashRef {
 
     pub fn read_msg(msg: &root_capnp::hash_ref::Reader) -> Result<HashRef, capnp::Error> {
         Ok(HashRef {
-            hash: Hash { bytes: msg.get_hash()?.to_owned() },
-            node: From::from(msg.get_height()),
-            leaf: LeafType::read_msg(msg.get_leaf_type().which()?),
-            persistent_ref: ChunkRef::read_msg(&msg.get_chunk_ref()?)?,
-            info: match msg.get_extra().which()? {
-                root_capnp::hash_ref::extra::None(()) => None,
-                root_capnp::hash_ref::extra::Info(st) => Some(key::Info::read(st?)?),
-            },
-        })
+               hash: Hash { bytes: msg.get_hash()?.to_owned() },
+               node: From::from(msg.get_height()),
+               leaf: LeafType::read_msg(msg.get_leaf_type().which()?),
+               persistent_ref: ChunkRef::read_msg(&msg.get_chunk_ref()?)?,
+               info: match msg.get_extra().which()? {
+                   root_capnp::hash_ref::extra::None(()) => None,
+                   root_capnp::hash_ref::extra::Info(st) => Some(key::Info::read(st?)?),
+               },
+           })
     }
 
     pub fn from_bytes(bytes: &mut &[u8]) -> Result<HashRef, capnp::Error> {
@@ -135,8 +135,10 @@ fn hash_refs_from_bytes(bytes: &[u8]) -> Option<Vec<HashRef>> {
 
     let reader = capnp::serialize_packed::read_message(&mut &bytes[..],
                                                        capnp::message::ReaderOptions::new())
+            .unwrap();
+    let msg = reader
+        .get_root::<root_capnp::hash_ref_list::Reader>()
         .unwrap();
-    let msg = reader.get_root::<root_capnp::hash_ref_list::Reader>().unwrap();
 
     for ref_ in msg.get_hash_refs().unwrap().iter() {
         out.push(HashRef::read_msg(&ref_).unwrap());
@@ -159,12 +161,12 @@ fn test_hash_refs_identity() {
         let mut v = vec![];
         for i in 1..count + 1 {
             v.push(HashRef {
-                hash: Hash { bytes: hash.clone() },
-                node: NodeType::Branch(i as u64),
-                leaf: LeafType::FileChunk,
-                info: None,
-                persistent_ref: chunk_ref.clone(),
-            });
+                       hash: Hash { bytes: hash.clone() },
+                       node: NodeType::Branch(i as u64),
+                       leaf: LeafType::FileChunk,
+                       info: None,
+                       persistent_ref: chunk_ref.clone(),
+                   });
         }
         let bytes = hash_refs_to_bytes(&v);
         assert_eq!(hash_refs_from_bytes(&bytes), Some(v));
@@ -232,8 +234,9 @@ impl<B: HashTreeBackend> SimpleHashTreeWriter<B> {
                  childs: Option<Vec<u64>>,
                  info: Option<&key::Info>)
                  -> Result<(), B::Err> {
-        let (id, hash_ref) = self.backend
-            .insert_chunk(&data, From::from(level as u64), self.leaf, childs, info)?;
+        let (id, hash_ref) =
+            self.backend
+                .insert_chunk(&data, From::from(level as u64), self.leaf, childs, info)?;
         self.append_hashref_at(level, id, hash_ref, info)
     }
 
@@ -292,7 +295,9 @@ impl<B: HashTreeBackend> SimpleHashTreeWriter<B> {
 
         // Unless only root has data, collapse all levels up to top level (which is handled next)
         let top_level = self.top_level().expect("levels.len() > 0");
-        (first_non_empty_level_idx..top_level).map(|l| self.collapse_level(l, None)).last();
+        (first_non_empty_level_idx..top_level)
+            .map(|l| self.collapse_level(l, None))
+            .last();
 
         // Collapse top level if possible
         let top_level = self.top_level().expect("levels.len() > 0");
@@ -302,7 +307,10 @@ impl<B: HashTreeBackend> SimpleHashTreeWriter<B> {
 
         // After this point, only root exists and root has exactly one entry:
         assert_eq!(self.levels.last().map(|x| x.len()), Some(1));
-        let &(_, ref hashref) = self.levels.last().and_then(|x| x.last()).expect("asserted");
+        let &(_, ref hashref) = self.levels
+            .last()
+            .and_then(|x| x.last())
+            .expect("asserted");
 
         Ok(hashref.clone())
     }
@@ -342,9 +350,9 @@ impl<B> Walker<B>
 {
     pub fn new(backend: B, root_hash: HashRef) -> Result<Option<Walker<B>>, B::Err> {
         Ok(Some(Walker {
-            backend: backend,
-            stack: vec![StackItem::Enter(root_hash)],
-        }))
+                    backend: backend,
+                    stack: vec![StackItem::Enter(root_hash)],
+                }))
     }
 
     pub fn resume<V>(&mut self, visitor: &mut V) -> Result<bool, B::Err>
@@ -374,7 +382,8 @@ impl<B> Walker<B>
                 Some(ref hash) => assert!(hash != &node.hash),
             }
             let fetch_chunk = |backend: &B, child: &HashRef| {
-                backend.fetch_chunk(&child.hash, Some(&child.persistent_ref))
+                backend
+                    .fetch_chunk(&child.hash, Some(&child.persistent_ref))
                     .map(|opt| opt.expect("Invalid hash ref"))
             };
 
@@ -393,7 +402,8 @@ impl<B> Walker<B>
                     if visitor.branch_enter(&node, &new_childs) {
                         self.stack.push(StackItem::LeaveBranch(node));
                         new_childs.reverse();
-                        self.stack.extend(new_childs.into_iter().map(StackItem::Enter));
+                        self.stack
+                            .extend(new_childs.into_iter().map(StackItem::Enter));
                     }
                 }
             }
@@ -413,12 +423,13 @@ impl<B> LeafIterator<B>
     where B: HashTreeBackend
 {
     pub fn new(backend: B, root_ref: HashRef) -> Result<Option<LeafIterator<B>>, B::Err> {
-        Ok(Walker::new(backend, root_ref)?.map(|w| {
-            LeafIterator {
-                walker: w,
-                visitor: LeafVisitor { leafs: VecDeque::new() },
-            }
-        }))
+        Ok(Walker::new(backend, root_ref)?
+               .map(|w| {
+                        LeafIterator {
+                            walker: w,
+                            visitor: LeafVisitor { leafs: VecDeque::new() },
+                        }
+                    }))
     }
 }
 

@@ -14,6 +14,7 @@
 
 use backend::{MemoryBackend, StoreBackend};
 use blob::{Blob, BlobError, BlobIndex, BlobStore, ChunkRef, Key, NodeType, LeafType};
+use crypto;
 use db;
 use hash;
 use quickcheck;
@@ -26,9 +27,10 @@ fn identity() {
     fn prop(chunks: Vec<Vec<u8>>) -> bool {
         let backend = Arc::new(MemoryBackend::new());
 
+        let keys = Arc::new(crypto::keys::Keeper::new_for_testing());
         let db = Arc::new(db::Index::new_for_testing());
-        let blob_index = Arc::new(BlobIndex::new(db).unwrap());
-        let bs_p = BlobStore::new(blob_index, backend.clone(), 1024);
+        let blob_index = Arc::new(BlobIndex::new(keys.clone(), db).unwrap());
+        let bs_p = BlobStore::new(keys, blob_index, backend.clone(), 1024);
 
         let mut ids = Vec::new();
         for chunk in chunks.iter() {
@@ -71,9 +73,10 @@ fn identity_with_excessive_flushing() {
     fn prop(chunks: Vec<Vec<u8>>) -> bool {
         let backend = Arc::new(MemoryBackend::new());
 
+        let keys = Arc::new(crypto::keys::Keeper::new_for_testing());
         let db = Arc::new(db::Index::new_for_testing());
-        let blob_index = Arc::new(BlobIndex::new(db).unwrap());
-        let bs_p = BlobStore::new(blob_index, backend.clone(), 1024);
+        let blob_index = Arc::new(BlobIndex::new(keys.clone(), db).unwrap());
+        let bs_p = BlobStore::new(keys, blob_index, backend.clone(), 1024);
 
         let mut ids = Vec::new();
         for chunk in chunks.iter() {
@@ -150,7 +153,8 @@ fn blob_reuse() {
     };
     let mut c2 = c1.clone();
 
-    let mut b = Blob::new(1000);
+    let keys = Arc::new(crypto::keys::Keeper::new_for_testing());
+    let mut b = Blob::new(keys, 1000);
     b.try_append(&[1, 2, 3], &mut c1).unwrap();
     b.try_append(&[4, 5, 6], &mut c2).unwrap();
 
@@ -180,7 +184,8 @@ fn blob_reuse() {
 fn blob_identity() {
     fn prop(chunks: Vec<Vec<u8>>) -> bool {
         let max_size = 10000;
-        let mut b = Blob::new(max_size);
+        let keys = Arc::new(crypto::keys::Keeper::new_for_testing());
+        let mut b = Blob::new(keys, max_size);
         let mut n = 0;
         for chunk in chunks.iter() {
             let mut cref = hash::tree::HashRef {
@@ -214,7 +219,8 @@ fn blob_identity() {
 
         assert_eq!(max_size, out.len());
 
-        let hrefs = Blob::new(max_size).refs_from_bytes(&out).unwrap();
+        let keys = Arc::new(crypto::keys::Keeper::new_for_testing());
+        let hrefs = Blob::new(keys, max_size).refs_from_bytes(&out).unwrap();
         assert_eq!(n, hrefs.len());
 
         // Check recovered ChunkRefs.
@@ -236,7 +242,8 @@ fn random_input_fails() {
     use sodiumoxide::crypto::secretbox::xsalsa20poly1305;
 
     fn prop(data: Vec<u8>, hash: Vec<u8>) -> bool {
-        let blob = Blob::new(128000);
+        let keys = Arc::new(crypto::keys::Keeper::new_for_testing());
+        let blob = Blob::new(keys, 128000);
         if let Ok(_) = blob.refs_from_bytes(&data[..]) {
             return false;
         }
@@ -292,7 +299,8 @@ fn empty_blocks_blob_ciphertext(blob: &mut Blob, blocksize: usize) -> Vec<u8> {
 fn blob_ciphertext_uniqueblocks() {
     // If every inserted block gets a unique (nonce, key) combination, they should produce unique
     // blocks in the out-coming ciphertext (by high enough probability to assert it).
-    let mut blob = Blob::new(1024 * 1024);
+    let keys = Arc::new(crypto::keys::Keeper::new_for_testing());
+    let mut blob = Blob::new(keys, 1024 * 1024);
     let mut blocks = HashSet::new();
 
     for _ in 1..10 {
@@ -306,7 +314,8 @@ fn blob_ciphertext_uniqueblocks() {
 
 #[test]
 fn blob_ciphertext_authed_allbytes() {
-    let mut blob = Blob::new(1024);
+    let keys = Arc::new(crypto::keys::Keeper::new_for_testing());
+    let mut blob = Blob::new(keys, 1024);
     let mut bytes = empty_blocks_blob_ciphertext(&mut blob, 1);
 
     fn verify(blob: &Blob, bs: &[u8]) -> Result<Vec<Vec<u8>>, BlobError> {

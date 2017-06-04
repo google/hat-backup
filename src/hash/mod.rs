@@ -94,9 +94,9 @@ impl Drop for InternalHashIndex {
 impl InternalHashIndex {
     fn new(index: Arc<db::Index>) -> Result<InternalHashIndex, DieselError> {
         Ok(InternalHashIndex {
-            index: index,
-            queue: Mutex::new(UniquePriorityQueue::new()),
-        })
+               index: index,
+               queue: Mutex::new(UniquePriorityQueue::new()),
+           })
     }
 
     pub fn queue_lock(&self) -> MutexGuard<Queue> {
@@ -125,7 +125,13 @@ impl InternalHashIndex {
                -> u64 {
         index.maybe_flush();
 
-        let Entry { ref hash, node, leaf, ref childs, ref persistent_ref } = *hash_entry;
+        let Entry {
+            ref hash,
+            node,
+            leaf,
+            ref childs,
+            ref persistent_ref,
+        } = *hash_entry;
         assert!(!hash.bytes.is_empty());
 
         let my_id = index.hash_next_id();
@@ -148,7 +154,13 @@ impl InternalHashIndex {
     }
 
     fn update_reserved(&self, id: u64, hash_entry: Entry, mut queue: &mut MutexGuard<Queue>) {
-        let Entry { hash, node, leaf, childs, persistent_ref } = hash_entry;
+        let Entry {
+            hash,
+            node,
+            leaf,
+            childs,
+            persistent_ref,
+        } = hash_entry;
         assert!(!hash.bytes.is_empty());
 
         if let Some(old_id) = queue.find_key(&hash.bytes) {
@@ -200,7 +212,9 @@ impl HashIndex {
     pub fn get_id(&self, hash: &Hash) -> Option<u64> {
         assert!(!hash.bytes.is_empty());
         let (queue, mut index) = self.0.lock();
-        self.0.locate(hash, &queue, &mut index).map(|entry| entry.id)
+        self.0
+            .locate(hash, &queue, &mut index)
+            .map(|entry| entry.id)
     }
 
     /// Locate hash entry from its ID.
@@ -219,7 +233,9 @@ impl HashIndex {
     pub fn fetch_childs(&self, hash: &Hash) -> Option<Option<Vec<u64>>> {
         assert!(!hash.bytes.is_empty());
         let (queue, mut index) = self.0.lock();
-        self.0.locate(hash, &queue, &mut index).map(|queue_entry| queue_entry.childs)
+        self.0
+            .locate(hash, &queue, &mut index)
+            .map(|queue_entry| queue_entry.childs)
     }
 
     /// Locate the persistent reference (external blob reference) for this `Hash`.
@@ -241,12 +257,12 @@ impl HashIndex {
             Some(ref queue_entry) if queue_entry.persistent_ref.is_none() => Err(RetryError),
             Some(queue_entry) => {
                 Ok(Some(tree::HashRef {
-                    hash: hash.clone(),
-                    node: queue_entry.node,
-                    leaf: queue_entry.leaf,
-                    info: None,
-                    persistent_ref: queue_entry.persistent_ref.expect("persistent_ref"),
-                }))
+                            hash: hash.clone(),
+                            node: queue_entry.node,
+                            leaf: queue_entry.leaf,
+                            info: None,
+                            persistent_ref: queue_entry.persistent_ref.expect("persistent_ref"),
+                        }))
             }
             None => Ok(None),
         }
@@ -332,7 +348,10 @@ impl HashIndex {
 
     /// API related to garbage collector metadata tied to (hash id, family id) pairs.
     pub fn read_gc_data(&self, hash_id: u64, family_id: u64) -> db::GcData {
-        self.0.index.lock().hash_read_gc_data(hash_id, family_id)
+        self.0
+            .index
+            .lock()
+            .hash_read_gc_data(hash_id, family_id)
     }
 
     /// API related to garbage collector metadata tied to (hash id, family id) pairs.
@@ -341,14 +360,20 @@ impl HashIndex {
                                            family_id: u64,
                                            update_fn: F)
                                            -> db::GcData {
-        self.0.index.lock().hash_update_gc_data(hash_id, family_id, update_fn)
+        self.0
+            .index
+            .lock()
+            .hash_update_gc_data(hash_id, family_id, update_fn)
     }
 
     /// API related to garbage collector metadata tied to (hash id, family id) pairs.
     pub fn update_family_gc_data<F: db::UpdateFn, I: Iterator<Item = F>>(&self,
                                                                          family_id: u64,
                                                                          update_fns: I) {
-        self.0.index.lock().hash_update_family_gc_data(family_id, update_fns)
+        self.0
+            .index
+            .lock()
+            .hash_update_family_gc_data(family_id, update_fns)
     }
 
     /// Manual commit. This also disables automatic periodic commit.

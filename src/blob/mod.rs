@@ -17,6 +17,7 @@
 
 use backend::StoreBackend;
 use capnp;
+use crypto;
 use errors;
 use hash::Hash;
 use hash::tree::HashRef;
@@ -79,13 +80,17 @@ impl<B> Drop for StoreInner<B> {
 }
 
 impl<B: StoreBackend> StoreInner<B> {
-    fn new(index: Arc<BlobIndex>, backend: Arc<B>, max_blob_size: usize) -> StoreInner<B> {
+    fn new(keys: Arc<crypto::keys::Keeper>,
+           index: Arc<BlobIndex>,
+           backend: Arc<B>,
+           max_blob_size: usize)
+           -> StoreInner<B> {
         let mut bs = StoreInner {
             backend: backend,
             blob_index: index,
             blob_desc: Default::default(),
             blob_refs: Vec::new(),
-            blob: Blob::new(max_blob_size),
+            blob: Blob::new(keys, max_blob_size),
         };
         bs.reserve_new_blob();
         bs
@@ -198,11 +203,12 @@ impl<B: StoreBackend> StoreInner<B> {
     }
 
     fn tag(&mut self, chunk: ChunkRef, tag: tags::Tag) {
-        self.blob_index.tag(&BlobDesc {
-                                id: chunk.blob_id.unwrap_or(0),
-                                name: chunk.blob_name,
-                            },
-                            tag);
+        self.blob_index
+            .tag(&BlobDesc {
+                      id: chunk.blob_id.unwrap_or(0),
+                      name: chunk.blob_name,
+                  },
+                 tag);
     }
 
     fn tag_all(&mut self, tag: tags::Tag) {
@@ -220,8 +226,12 @@ impl<B: StoreBackend> StoreInner<B> {
 }
 
 impl<B: StoreBackend> BlobStore<B> {
-    pub fn new(index: Arc<BlobIndex>, backend: Arc<B>, max_blob_size: usize) -> BlobStore<B> {
-        BlobStore(Arc::new(Mutex::new(StoreInner::new(index, backend, max_blob_size))))
+    pub fn new(keys: Arc<crypto::keys::Keeper>,
+               index: Arc<BlobIndex>,
+               backend: Arc<B>,
+               max_blob_size: usize)
+               -> BlobStore<B> {
+        BlobStore(Arc::new(Mutex::new(StoreInner::new(keys, index, backend, max_blob_size))))
     }
 
     fn lock(&self) -> MutexGuard<StoreInner<B>> {
@@ -277,9 +287,9 @@ impl<B: StoreBackend> BlobStore<B> {
     pub fn find(&self, name: &[u8]) -> Option<BlobDesc> {
         if &name[..] == [0] {
             Some(BlobDesc {
-                name: vec![0],
-                id: 0,
-            })
+                     name: vec![0],
+                     id: 0,
+                 })
         } else {
             self.lock().blob_index.find(name)
         }
