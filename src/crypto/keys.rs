@@ -171,7 +171,6 @@ impl Keeper {
                                 msg)
     }
 
-
     pub fn access_unlock(&self, ciphertext: &[u8]) -> Vec<u8> {
         Keeper::asymmetric_unlock(self.access_key_pk
                                       .as_ref()
@@ -201,15 +200,15 @@ impl Keeper {
 
     fn keyed_fingerprint(sk: &secstr::SecStr, msg: &[u8], out: &mut [u8], outlen: usize) {
         assert!(outlen <= out.len());
-        let sk_len = sk.unsecure().len();
 
+        let sk_ref = sk.unsecure();
         let ret = unsafe {
             libsodium_sys::crypto_generichash_blake2b(out.as_mut_ptr(),
                                                       outlen,
                                                       msg.as_ptr(),
                                                       msg.len() as u64,
-                                                      sk.unsecure().as_ptr(),
-                                                      sk_len)
+                                                      sk_ref.as_ptr(),
+                                                      sk_ref.len())
         };
         assert_eq!(ret, 0);
     }
