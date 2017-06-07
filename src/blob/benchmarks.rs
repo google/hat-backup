@@ -18,6 +18,8 @@ use crypto;
 use hash::Hash;
 use hash::tree::HashRef;
 
+use std::sync::Arc;
+
 use test::Bencher;
 
 
@@ -25,10 +27,9 @@ const BLOBSIZE: usize = 5 * 1024 * 1024;
 const CHUNKSIZE: usize = 128 * 1024;
 
 
-fn dummy_hashref() -> HashRef {
-    let keys = crypto::keys::Keeper::new_for_testing();
+fn dummy_hashref(keys: &crypto::keys::Keeper) -> HashRef {
     HashRef {
-        hash: Hash::new(&keys, &[]),
+        hash: Hash::new(keys, &[]),
         node: NodeType::Leaf,
         leaf: LeafType::FileChunk,
         persistent_ref: ChunkRef {
@@ -46,12 +47,13 @@ fn dummy_hashref() -> HashRef {
 
 #[bench]
 fn insert_128_kb_chunks(bench: &mut Bencher) {
-    let mut b = Blob::new(BLOBSIZE);
-    let mut href = dummy_hashref();
+    let keys = Arc::new(crypto::keys::Keeper::new_for_testing());
+    let mut b = Blob::new(keys.clone(), BLOBSIZE);
+    let mut href = dummy_hashref(&keys);
     let chunk = [0u8; CHUNKSIZE];
     bench.iter(|| {
                    if let Err(()) = b.try_append(&chunk[..], &mut href) {
-            b = Blob::new(BLOBSIZE);
+            b = Blob::new(keys.clone(), BLOBSIZE);
             b.try_append(&chunk[..], &mut href).unwrap();
         }
                });
@@ -60,9 +62,10 @@ fn insert_128_kb_chunks(bench: &mut Bencher) {
 
 #[bench]
 fn insert_256_kb_chunks(bench: &mut Bencher) {
+    let keys = Arc::new(crypto::keys::Keeper::new_for_testing());
     let chunk = vec![0u8; 2 * CHUNKSIZE];
-    let mut b = Blob::new(BLOBSIZE);
-    let mut href = dummy_hashref();
+    let mut b = Blob::new(keys.clone(), BLOBSIZE);
+    let mut href = dummy_hashref(&keys);
     bench.iter(|| {
                    if let Err(()) = b.try_append(&chunk[..], &mut href) {
             b.to_ciphertext();
