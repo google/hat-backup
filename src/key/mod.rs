@@ -168,8 +168,9 @@ impl<B: StoreBackend> Store<B> {
     pub fn hash_tree_writer(&mut self,
                             leaf: blob::LeafType)
                             -> SimpleHashTreeWriter<HashStoreBackend<B>> {
-        let backend = HashStoreBackend::new(
-            self.hash_index.clone(), self.blob_store.clone(), self.keys.clone());
+        let backend = HashStoreBackend::new(self.hash_index.clone(),
+                                            self.blob_store.clone(),
+                                            self.keys.clone());
         SimpleHashTreeWriter::new(leaf, 8, backend)
     }
 }

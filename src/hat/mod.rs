@@ -308,9 +308,10 @@ impl<B: StoreBackend> HatRc<B> {
                                                    self.blob_index.clone(),
                                                    self.backend.clone(),
                                                    self.blob_max_size));
-            kss.push(
-                Process::new(
-                    key::Store::new(ki_p.clone(), self.hash_index.clone(), bs, self.keys.clone())));
+            kss.push(Process::new(key::Store::new(ki_p.clone(),
+                                                  self.hash_index.clone(),
+                                                  bs,
+                                                  self.keys.clone())));
         }
 
         let ks = key::Store::new(ki_p.clone(),
