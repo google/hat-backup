@@ -90,7 +90,16 @@ impl Keeper {
     }
 
     fn strengthen(phrase: &str, salt: &str) -> secstr::SecStr {
-        secstr::SecStr::new(argon2rs::argon2d_simple(phrase, salt).to_vec())
+        let passes = 5;
+        let threads = 2;
+        let kib = 16 * 1024;
+
+        let argon2 = argon2rs::Argon2::new(passes, threads, kib, argon2rs::Variant::Argon2d)
+            .unwrap();
+
+        let mut out = vec![0; 64];
+        argon2.hash(&mut out[..], phrase.as_bytes(), salt.as_bytes(), &[], &[]);
+        secstr::SecStr::new(out)
     }
 
     pub fn from_nonce(&self, nonce: &[u8], outlen: usize) -> secstr::SecStr {
