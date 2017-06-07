@@ -14,6 +14,7 @@
 
 
 use blob::{ChunkRef, NodeType, LeafType};
+use crypto;
 use hash::Hash;
 use hash::tree::*;
 use key;
@@ -97,7 +98,8 @@ impl HashTreeBackend for MemoryBackend {
 
         let mut guarded_chunks = self.chunks.lock().unwrap();
 
-        let hash = Hash::new(chunk);
+        let keys = crypto::keys::Keeper::new_for_testing();
+        let hash = Hash::new(&keys, chunk);
         guarded_chunks.insert(hash.bytes.clone(), (node, leaf, childs, chunk.to_vec()));
 
         Ok((0,

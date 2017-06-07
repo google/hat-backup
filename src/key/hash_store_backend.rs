@@ -83,7 +83,7 @@ impl<B: StoreBackend> HashTreeBackend for HashStoreBackend<B> {
         };
 
         Ok(data_opt.and_then(|data| {
-            let actual_hash = hash::Hash::new(&data[..]);
+            let actual_hash = hash::Hash::new(&self.keys, &data[..]);
             if *hash == actual_hash {
                 Some(data)
             } else {
@@ -121,7 +121,7 @@ impl<B: StoreBackend> HashTreeBackend for HashStoreBackend<B> {
                     info: Option<&key::Info>)
                     -> Result<(u64, hash::tree::HashRef), MsgError> {
         let mut hash_entry = hash::Entry {
-            hash: hash::Hash::new(chunk),
+            hash: hash::Hash::new(&self.keys, chunk),
             node: node,
             leaf: leaf,
             childs: childs,

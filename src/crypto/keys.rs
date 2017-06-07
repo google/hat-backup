@@ -104,7 +104,7 @@ impl Keeper {
 
     pub fn from_nonce(&self, nonce: &[u8], outlen: usize) -> secstr::SecStr {
         let mut out = secstr::SecStr::new(vec![0; outlen]);
-        Keeper::keyed_fingerprint(&self.universal_key, &nonce[..], out.unsecure_mut(), outlen);
+        Keeper::keyed_fingerprint(&self.universal_key, &nonce[..], out.unsecure_mut());
         out
     }
 
@@ -198,8 +198,8 @@ impl Keeper {
                                   ciphertext)
     }
 
-    fn keyed_fingerprint(sk: &secstr::SecStr, msg: &[u8], out: &mut [u8], outlen: usize) {
-        assert!(outlen <= out.len());
+    fn keyed_fingerprint(sk: &secstr::SecStr, msg: &[u8], out: &mut [u8]) {
+        let outlen = out.len();
 
         let sk_ref = sk.unsecure();
         let ret = unsafe {
@@ -213,13 +213,11 @@ impl Keeper {
         assert_eq!(ret, 0);
     }
 
-    pub fn fingerprint(&self, msg: &[u8], out: &mut [u8], outlen: usize) {
-        assert!(outlen <= out.len());
-
+    pub fn fingerprint(&self, msg: &[u8], out: &mut [u8]) {
         let key = self.fingerprint_key
             .as_ref()
             .expect("need fingerprint key");
-        Keeper::keyed_fingerprint(&key, msg, out, outlen);
+        Keeper::keyed_fingerprint(&key, msg, out);
     }
 
     pub fn symmetric_lock(msg: &[u8], data: &[u8], nonce: &[u8; 8]) -> (secstr::SecStr, Vec<u8>) {

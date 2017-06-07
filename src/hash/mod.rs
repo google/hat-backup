@@ -45,8 +45,11 @@ pub struct Hash {
 
 impl Hash {
     /// Computes `hash(text)` and stores this digest as the `bytes` field in a new `Hash` structure.
-    pub fn new(text: &[u8]) -> Hash {
-        Hash { bytes: crypto::authed::hash::new(text) }
+    pub fn new(keys: &crypto::keys::Keeper, text: &[u8]) -> Hash {
+        let mut hash = Hash{bytes: vec![0; 64]};
+        keys.fingerprint(text, &mut hash.bytes[..]);
+
+        hash
     }
 }
 

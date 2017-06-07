@@ -14,6 +14,7 @@
 
 
 use blob::{Blob, ChunkRef, NodeType, LeafType};
+use crypto;
 use hash::Hash;
 use hash::tree::HashRef;
 
@@ -25,8 +26,9 @@ const CHUNKSIZE: usize = 128 * 1024;
 
 
 fn dummy_hashref() -> HashRef {
+    let keys = crypto::keys::Keeper::new_for_testing();
     HashRef {
-        hash: Hash::new(&[]),
+        hash: Hash::new(&keys, &[]),
         node: NodeType::Leaf,
         leaf: LeafType::FileChunk,
         persistent_ref: ChunkRef {

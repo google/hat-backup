@@ -231,7 +231,7 @@ impl<B: StoreBackend> HatRc<B> {
             blob_max_size: max_blob_size,
             gc: gc,
         };
-        
+
         // Resume any unfinished commands.
         hat.resume()?;
 

@@ -30,12 +30,12 @@ fn identity() {
         let keys = Arc::new(crypto::keys::Keeper::new_for_testing());
         let db = Arc::new(db::Index::new_for_testing());
         let blob_index = Arc::new(BlobIndex::new(keys.clone(), db).unwrap());
-        let bs_p = BlobStore::new(keys, blob_index, backend.clone(), 1024);
+        let bs_p = BlobStore::new(keys.clone(), blob_index, backend.clone(), 1024);
 
         let mut ids = Vec::new();
         for chunk in chunks.iter() {
             ids.push((bs_p.store(&chunk[..],
-                                 hash::Hash::new(chunk),
+                                 hash::Hash::new(&keys, chunk),
                                  NodeType::Leaf,
                                  LeafType::FileChunk,
                                  None,
@@ -76,12 +76,12 @@ fn identity_with_excessive_flushing() {
         let keys = Arc::new(crypto::keys::Keeper::new_for_testing());
         let db = Arc::new(db::Index::new_for_testing());
         let blob_index = Arc::new(BlobIndex::new(keys.clone(), db).unwrap());
-        let bs_p = BlobStore::new(keys, blob_index, backend.clone(), 1024);
+        let bs_p = BlobStore::new(keys.clone(), blob_index, backend.clone(), 1024);
 
         let mut ids = Vec::new();
         for chunk in chunks.iter() {
             ids.push((bs_p.store(&chunk[..],
-                                 hash::Hash::new(chunk),
+                                 hash::Hash::new(&keys, chunk),
                                  NodeType::Leaf,
                                  LeafType::FileChunk,
                                  None,
@@ -137,8 +137,10 @@ fn blobid_identity() {
 
 #[test]
 fn blob_reuse() {
+    let keys = Arc::new(crypto::keys::Keeper::new_for_testing());
+
     let mut c1 = hash::tree::HashRef {
-        hash: hash::Hash::new(&[]),
+        hash: hash::Hash::new(&keys, &[]),
         node: NodeType::Leaf,
         leaf: LeafType::FileChunk,
         info: None,
@@ -153,7 +155,6 @@ fn blob_reuse() {
     };
     let mut c2 = c1.clone();
 
-    let keys = Arc::new(crypto::keys::Keeper::new_for_testing());
     let mut b = Blob::new(keys, 1000);
     b.try_append(&[1, 2, 3], &mut c1).unwrap();
     b.try_append(&[4, 5, 6], &mut c2).unwrap();
@@ -185,11 +186,11 @@ fn blob_identity() {
     fn prop(chunks: Vec<Vec<u8>>) -> bool {
         let max_size = 10000;
         let keys = Arc::new(crypto::keys::Keeper::new_for_testing());
-        let mut b = Blob::new(keys, max_size);
+        let mut b = Blob::new(keys.clone(), max_size);
         let mut n = 0;
         for chunk in chunks.iter() {
             let mut cref = hash::tree::HashRef {
-                hash: hash::Hash::new(&[]),
+                hash: hash::Hash::new(&keys, &[]),
                 node: NodeType::Leaf,
                 leaf: LeafType::FileChunk,
                 info: None,
@@ -271,10 +272,11 @@ fn random_input_fails() {
 }
 
 fn empty_blocks_blob_ciphertext(blob: &mut Blob, blocksize: usize) -> Vec<u8> {
+    let keys = Arc::new(crypto::keys::Keeper::new_for_testing());
     let block = vec![0u8; blocksize];
     loop {
         let mut cref = hash::tree::HashRef {
-            hash: hash::Hash::new(&block[..]),
+            hash: hash::Hash::new(&keys, &block[..]),
             node: NodeType::Leaf,
             leaf: LeafType::FileChunk,
             info: None,
