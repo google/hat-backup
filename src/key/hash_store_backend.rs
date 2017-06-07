@@ -15,6 +15,7 @@
 
 use backend::StoreBackend;
 use blob;
+use crypto;
 use errors::RetryError;
 use hash;
 use hash::tree::HashTreeBackend;
@@ -25,23 +26,27 @@ use std::sync::{Arc, Mutex};
 pub struct HashStoreBackend<B> {
     hash_index: Arc<hash::HashIndex>,
     blob_store: Arc<blob::BlobStore<B>>,
+    keys: Arc<crypto::keys::Keeper>,
 }
 impl<B> Clone for HashStoreBackend<B> {
     fn clone(&self) -> HashStoreBackend<B> {
         HashStoreBackend {
             hash_index: self.hash_index.clone(),
             blob_store: self.blob_store.clone(),
+            keys: self.keys.clone(),
         }
     }
 }
 
 impl<B: StoreBackend> HashStoreBackend<B> {
     pub fn new(hash_index: Arc<hash::HashIndex>,
-               blob_store: Arc<blob::BlobStore<B>>)
+               blob_store: Arc<blob::BlobStore<B>>,
+               keys: Arc<crypto::keys::Keeper>)
                -> HashStoreBackend<B> {
         HashStoreBackend {
             hash_index: hash_index,
             blob_store: blob_store,
+            keys: keys,
         }
     }
 

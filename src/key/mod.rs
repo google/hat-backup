@@ -17,6 +17,7 @@
 
 use backend::StoreBackend;
 use blob;
+use crypto;
 use errors::{DieselError, RetryError};
 use hash;
 use hash::tree::{LeafIterator, SimpleHashTreeWriter};
@@ -68,11 +69,12 @@ pub struct HashTreeReaderInitializer<B> {
     hash_ref: hash::tree::HashRef,
     hash_index: Arc<hash::HashIndex>,
     blob_store: Arc<blob::BlobStore<B>>,
+    keys: Arc<crypto::keys::Keeper>,
 }
 
 impl<B: StoreBackend> HashTreeReaderInitializer<B> {
     pub fn init(self) -> Result<Option<LeafIterator<HashStoreBackend<B>>>, MsgError> {
-        let backend = HashStoreBackend::new(self.hash_index, self.blob_store);
+        let backend = HashStoreBackend::new(self.hash_index, self.blob_store, self.keys.clone());
         LeafIterator::new(backend, self.hash_ref.clone())
     }
 }
@@ -108,6 +110,7 @@ pub struct Store<B> {
     index: Arc<index::KeyIndex>,
     hash_index: Arc<hash::HashIndex>,
     blob_store: Arc<blob::BlobStore<B>>,
+    keys: Arc<crypto::keys::Keeper>,
 }
 impl<B> Clone for Store<B> {
     fn clone(&self) -> Store<B> {
@@ -115,6 +118,7 @@ impl<B> Clone for Store<B> {
             index: self.index.clone(),
             hash_index: self.hash_index.clone(),
             blob_store: self.blob_store.clone(),
+            keys: self.keys.clone(),
         }
     }
 }
@@ -123,12 +127,14 @@ impl<B> Clone for Store<B> {
 impl<B: StoreBackend> Store<B> {
     pub fn new(index: Arc<index::KeyIndex>,
                hash_index: Arc<hash::HashIndex>,
-               blob_store: Arc<blob::BlobStore<B>>)
+               blob_store: Arc<blob::BlobStore<B>>,
+               keys: Arc<crypto::keys::Keeper>)
                -> Store<B> {
         Store {
             index: index,
             hash_index: hash_index,
             blob_store: blob_store,
+            keys: keys,
         }
     }
 
@@ -147,6 +153,7 @@ impl<B: StoreBackend> Store<B> {
                index: ki_p,
                hash_index: hi_p,
                blob_store: bs_p,
+               keys: Arc::new(crypto::keys::Keeper::new_for_testing()),
            })
     }
 
@@ -161,7 +168,8 @@ impl<B: StoreBackend> Store<B> {
     pub fn hash_tree_writer(&mut self,
                             leaf: blob::LeafType)
                             -> SimpleHashTreeWriter<HashStoreBackend<B>> {
-        let backend = HashStoreBackend::new(self.hash_index.clone(), self.blob_store.clone());
+        let backend = HashStoreBackend::new(
+            self.hash_index.clone(), self.blob_store.clone(), self.keys.clone());
         SimpleHashTreeWriter::new(leaf, 8, backend)
     }
 }
@@ -222,6 +230,7 @@ impl<IT: io::Read, B: StoreBackend> MsgHandler<Msg<IT>, Reply<B>> for Store<B> {
                                              hash_ref: r.clone(),
                                              hash_index: self.hash_index.clone(),
                                              blob_store: self.blob_store.clone(),
+                                             keys: self.keys.clone(),
                                          }
                                      });
 
