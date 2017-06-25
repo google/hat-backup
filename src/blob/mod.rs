@@ -40,7 +40,7 @@ pub mod tests;
 mod benchmarks;
 
 
-pub use self::blob::Blob;
+pub use self::blob::{Blob, BlobReader};
 pub use self::chunk::{ChunkRef, Key, NodeType, LeafType, Packing};
 pub use self::index::{BlobDesc, BlobIndex};
 
@@ -65,6 +65,7 @@ error_type! {
 pub struct BlobStore<B>(Arc<Mutex<StoreInner<B>>>);
 
 pub struct StoreInner<B> {
+    keys: Arc<crypto::keys::Keeper>,
     backend: Arc<B>,
     blob_index: Arc<BlobIndex>,
     blob_desc: BlobDesc,
@@ -86,6 +87,7 @@ impl<B: StoreBackend> StoreInner<B> {
            max_blob_size: usize)
            -> StoreInner<B> {
         let mut bs = StoreInner {
+            keys: keys.clone(),
             backend: backend,
             blob_index: index,
             blob_desc: Default::default(),
@@ -174,7 +176,9 @@ impl<B: StoreBackend> StoreInner<B> {
             return Ok(Some(Vec::new()));
         }
         match self.backend.retrieve(&cref.blob_name[..]) {
-            Ok(Some(blob)) => Ok(Some(Blob::read_chunk(&blob, hash, cref)?)),
+            Ok(Some(blob)) => Ok(Some(
+                BlobReader::new(self.keys.clone(), crypto::CipherTextRef::new(&blob[..]))?
+                    .read_chunk(hash, cref)?)),
             Ok(None) => Ok(None),
             Err(e) => Err(e.into()),
         }
@@ -184,7 +188,8 @@ impl<B: StoreBackend> StoreInner<B> {
         match self.backend.retrieve(&blob.name[..])? {
             None => Ok(None),
             Some(ct) => {
-                let hrefs = self.blob.refs_from_bytes(&ct)?;
+                let hrefs = BlobReader::new(self.keys.clone(),
+                                            crypto::CipherTextRef::new(&ct[..]))?.refs()?;
                 if hrefs.len() == 0 {
                     Ok(None)
                 } else {

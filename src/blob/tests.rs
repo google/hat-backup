@@ -13,7 +13,7 @@
 // limitations under the License
 
 use backend::{MemoryBackend, StoreBackend};
-use blob::{Blob, BlobError, BlobIndex, BlobStore, ChunkRef, Key, NodeType, LeafType};
+use blob::{Blob, BlobReader, BlobError, BlobIndex, BlobStore, ChunkRef, Key, NodeType, LeafType};
 use crypto;
 use db;
 use hash;
@@ -155,16 +155,16 @@ fn blob_reuse() {
     };
     let mut c2 = c1.clone();
 
-    let mut b = Blob::new(keys, 1000);
+    let mut b = Blob::new(keys.clone(), 1000);
     b.try_append(&[1, 2, 3], &mut c1).unwrap();
     b.try_append(&[4, 5, 6], &mut c2).unwrap();
 
     let out = b.to_ciphertext().unwrap().to_vec();
-
+    let reader = BlobReader::new(keys.clone(), crypto::CipherTextRef::new(&out[..])).unwrap();
     assert_eq!(vec![1, 2, 3],
-               Blob::read_chunk(&out, &c1.hash, &c1.persistent_ref).unwrap());
+               reader.read_chunk(&c1.hash, &c1.persistent_ref).unwrap());
     assert_eq!(vec![4, 5, 6],
-               Blob::read_chunk(&out, &c2.hash, &c2.persistent_ref).unwrap());
+               reader.read_chunk(&c2.hash, &c2.persistent_ref).unwrap());
 
     let mut c3 = c2.clone();
 
@@ -173,12 +173,13 @@ fn blob_reuse() {
     b.try_append(&[1, 2], &mut c3).unwrap();
 
     let out = b.to_ciphertext().unwrap().to_vec();
+    let reader = BlobReader::new(keys.clone(), crypto::CipherTextRef::new(&out[..])).unwrap();
     assert_eq!(vec![1, 2],
-               Blob::read_chunk(&out, &c1.hash, &c1.persistent_ref).unwrap());
+               reader.read_chunk(&c1.hash, &c1.persistent_ref).unwrap());
     assert_eq!(vec![1, 2],
-               Blob::read_chunk(&out, &c2.hash, &c2.persistent_ref).unwrap());
+               reader.read_chunk(&c2.hash, &c2.persistent_ref).unwrap());
     assert_eq!(vec![1, 2],
-               Blob::read_chunk(&out, &c3.hash, &c3.persistent_ref).unwrap());
+               reader.read_chunk(&c3.hash, &c3.persistent_ref).unwrap());
 }
 
 #[test]
@@ -221,13 +222,14 @@ fn blob_identity() {
         assert_eq!(max_size, out.len());
 
         let keys = Arc::new(crypto::keys::Keeper::new_for_testing());
-        let hrefs = Blob::new(keys, max_size).refs_from_bytes(&out).unwrap();
+        let reader = BlobReader::new(keys.clone(), crypto::CipherTextRef::new(&out[..])).unwrap();
+        let hrefs = reader.refs().unwrap();
         assert_eq!(n, hrefs.len());
 
         // Check recovered ChunkRefs.
         for (i, href) in hrefs.into_iter().enumerate() {
             assert!(chunks[i].len() < href.persistent_ref.length);
-            let chunk = Blob::read_chunk(&out, &href.hash, &href.persistent_ref).unwrap();
+            let chunk = reader.read_chunk(&href.hash, &href.persistent_ref).unwrap();
             assert_eq!(chunks[i].len(), chunk.len());
             assert_eq!(&chunks[i], &chunk);
         }
@@ -244,28 +246,9 @@ fn random_input_fails() {
 
     fn prop(data: Vec<u8>, hash: Vec<u8>) -> bool {
         let keys = Arc::new(crypto::keys::Keeper::new_for_testing());
-        let blob = Blob::new(keys, 128000);
-        if let Ok(_) = blob.refs_from_bytes(&data[..]) {
+        if let Ok(_) = BlobReader::new(keys.clone(), crypto::CipherTextRef::new(&data[..])) {
             return false;
         }
-        let key = vec![0; 32];
-        let hash = hash::Hash { bytes: hash };
-        let mut cref = ChunkRef {
-            blob_id: None,
-            blob_name: Vec::new(),
-            offset: 0,
-            length: 0,
-            packing: None,
-            key: Some(Key::XSalsa20Poly1305(xsalsa20poly1305::Key::from_slice(&key[..]).unwrap())),
-        };
-
-        for l in 0..data.len() {
-            cref.length = l;
-            if let Ok(_) = Blob::read_chunk(&data[..], &hash, &cref) {
-                return false;
-            }
-        }
-
         return true;
     }
     quickcheck::quickcheck(prop as fn(Vec<u8>, Vec<u8>) -> bool);
@@ -317,13 +300,14 @@ fn blob_ciphertext_uniqueblocks() {
 #[test]
 fn blob_ciphertext_authed_allbytes() {
     let keys = Arc::new(crypto::keys::Keeper::new_for_testing());
-    let mut blob = Blob::new(keys, 1024);
+    let mut blob = Blob::new(keys.clone(), 1024);
     let mut bytes = empty_blocks_blob_ciphertext(&mut blob, 1);
 
-    fn verify(blob: &Blob, bs: &[u8]) -> Result<Vec<Vec<u8>>, BlobError> {
+    fn verify(keys: &Arc<crypto::keys::Keeper>, bs: &[u8]) -> Result<Vec<Vec<u8>>, BlobError> {
         let mut vs = vec![];
-        for r in blob.refs_from_bytes(bs)? {
-            vs.push(Blob::read_chunk(&bs, &r.hash, &r.persistent_ref)?);
+        let reader = BlobReader::new(keys.clone(), crypto::CipherTextRef::new(&bs[..]))?;
+        for r in reader.refs()? {
+            vs.push(reader.read_chunk(&r.hash, &r.persistent_ref)?);
         }
         Ok(vs)
     };
@@ -346,10 +330,10 @@ fn blob_ciphertext_authed_allbytes() {
     };
 
     // Blob is valid.
-    let vs = verify(&blob, &bytes[..]).unwrap();
+    let vs = verify(&keys, &bytes[..]).unwrap();
     for i in 0..bytes.len() {
-        assert!(with_modified(&mut bytes[..], i, 1, |bs| verify(&blob, bs)).is_err());
+        assert!(with_modified(&mut bytes[..], i, 1, |bs| verify(&keys, bs)).is_err());
     }
     // We did not corrupt the blob.
-    assert_eq!(vs, verify(&blob, &bytes[..]).unwrap());
+    assert_eq!(vs, verify(&keys, &bytes[..]).unwrap());
 }
