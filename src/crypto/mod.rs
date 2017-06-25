@@ -19,6 +19,7 @@ use hash::Hash;
 use hash::tree::HashRef;
 use sodiumoxide::crypto::stream;
 use std::io;
+use std::mem;
 
 pub mod keys;
 
@@ -44,31 +45,14 @@ pub mod authed {
         pub fn mix_keys(access_key: &super::desc::Key,
                         other_key: &super::desc::Key)
                         -> super::desc::Key {
-            let hash = super::hash::new_with_key(&access_key[..], &other_key[..]);
-            super::desc::Key::from_slice(&hash[..super::desc::KEYBYTES]).unwrap()
+            let mut mixed_key = [0u8; super::hash::DIGESTBYTES];
+            ::crypto::keys::keyed_fingerprint(&access_key[..], &other_key[..], &mut mixed_key[..]);
+            super::desc::Key::from_slice(&mixed_key[..super::desc::KEYBYTES]).unwrap()
         }
     }
 
     pub mod hash {
-        use libsodium_sys::crypto_generichash_blake2b;
         pub use libsodium_sys::crypto_generichash_blake2b_BYTES_MAX as DIGESTBYTES;
-
-        pub fn new(text: &[u8]) -> Vec<u8> {
-            new_with_key(&[], text)
-        }
-
-        pub fn new_with_key(key: &[u8], text: &[u8]) -> Vec<u8> {
-            let mut digest = vec![0; DIGESTBYTES];
-            unsafe {
-                crypto_generichash_blake2b(digest.as_mut_ptr(),
-                                           digest.len(),
-                                           text.as_ptr(),
-                                           text.len() as u64,
-                                           key.as_ptr(),
-                                           key.len());
-            }
-            digest
-        }
     }
 }
 
@@ -193,6 +177,13 @@ impl CipherText {
         self.len += other.len();
         self.chunks.append(&mut other.chunks);
     }
+    fn collapse(&mut self) {
+        if self.chunks.len() > 1 {
+            let v = self.chunks.concat();
+            mem::replace(&mut self.chunks, vec![v]);
+            assert_eq!(self.chunks[0].len(), self.len);
+        }
+    }
     pub fn len(&self) -> usize {
         self.len
     }
@@ -215,10 +206,18 @@ impl CipherText {
         out
     }
 
-    pub fn append_authentication(&mut self) {
-        let v = self.to_vec();
-        let h = authed::hash::new(&v[..]);
-        self.append(CipherText::new(h));
+    pub fn append_authentication(&mut self, keys: &keys::Keeper) {
+        self.collapse();
+        assert_eq!(self.chunks.len(), 1);
+
+        let blob = &mut self.chunks[0];
+        let blob_len = blob.len();
+        blob.resize(blob_len + authed::hash::DIGESTBYTES, 0u8);
+        {
+            let (data, hash) = blob.split_at_mut(blob_len);
+            keys.blob_authentication(&data[..], &mut hash[..]);
+        }
+        self.len = blob.len();
     }
 
     pub fn slices(&self) -> Vec<&[u8]> {
@@ -256,9 +255,12 @@ impl<'a> CipherTextRef<'a> {
            .map_err(|()| "crypto read failed: to_plaintext"))))
     }
 
-    pub fn strip_authentication(&self) -> Result<CipherTextRef, CryptoError> {
+    pub fn strip_authentication(&self, keys: &keys::Keeper) -> Result<CipherTextRef, CryptoError> {
         let (rest, want) = self.split_from_right(authed::hash::DIGESTBYTES)?;
-        let got = authed::hash::new(rest.0);
+
+        let mut got = vec![0u8; authed::hash::DIGESTBYTES];
+        keys.blob_authentication(&rest.0[..], &mut got[..]);
+
         if want.0 == &got[..] {
             Ok(rest)
         } else {

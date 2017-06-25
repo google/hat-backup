@@ -99,7 +99,7 @@ impl Blob {
         let mut out = mem::replace(&mut self.chunks, CipherText::empty());
         out.random_pad_upto(self.max_len - footer_overhead);
         out.append(footer);
-        out.append_authentication();
+        out.append_authentication(&self.keys);
 
         assert_eq!(out.len(), self.max_len);
 
@@ -122,7 +122,7 @@ impl<'b> BlobReader<'b> {
     pub fn new(keys: Arc<crypto::keys::Keeper>,
                blob: CipherTextRef<'b>)
                -> Result<BlobReader<'b>, crypto::CryptoError> {
-        let rest = blob.strip_authentication()?;
+        let rest = blob.strip_authentication(&keys)?;
         let (access_key, footer_ct, rest) = crypto::FixedKey::new(&keys).unseal_access_ctx(rest)?;
 
         // TODO(jos): Figure out how to make the borrow checker happy without this.

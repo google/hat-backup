@@ -13,7 +13,7 @@
 // limitations under the License
 
 use backend::{MemoryBackend, StoreBackend};
-use blob::{Blob, BlobReader, BlobError, BlobIndex, BlobStore, ChunkRef, Key, NodeType, LeafType};
+use blob::{Blob, BlobReader, BlobError, BlobIndex, BlobStore, ChunkRef, NodeType, LeafType};
 use crypto;
 use db;
 use hash;
@@ -244,16 +244,11 @@ fn blob_identity() {
 
 #[test]
 fn random_input_fails() {
-    use sodiumoxide::crypto::secretbox::xsalsa20poly1305;
-
-    fn prop(data: Vec<u8>, hash: Vec<u8>) -> bool {
+    fn prop(data: Vec<u8>) -> bool {
         let keys = Arc::new(crypto::keys::Keeper::new_for_testing());
-        if let Ok(_) = BlobReader::new(keys.clone(), crypto::CipherTextRef::new(&data[..])) {
-            return false;
-        }
-        return true;
+        BlobReader::new(keys, crypto::CipherTextRef::new(&data[..])).is_err()
     }
-    quickcheck::quickcheck(prop as fn(Vec<u8>, Vec<u8>) -> bool);
+    quickcheck::quickcheck(prop as fn(Vec<u8>) -> bool);
 }
 
 fn empty_blocks_blob_ciphertext(blob: &mut Blob, blocksize: usize) -> Vec<u8> {

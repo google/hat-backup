@@ -19,9 +19,24 @@ use argon2rs;
 struct PublicKey(secstr::SecStr);
 struct SecretKey(secstr::SecStr);
 
+pub fn keyed_fingerprint(sk: &[u8], msg: &[u8], out: &mut [u8]) {
+    let outlen = out.len();
+
+    let ret = unsafe {
+        libsodium_sys::crypto_generichash_blake2b(out.as_mut_ptr(),
+                                                  outlen,
+                                                  msg.as_ptr(),
+                                                  msg.len() as u64,
+                                                  sk.as_ptr(),
+                                                  sk.len())
+    };
+    assert_eq!(ret, 0);
+}
+
 pub struct Keeper {
     universal_key: secstr::SecStr,
     fingerprint_key: Option<secstr::SecStr>,
+    blob_authentication_key: Option<secstr::SecStr>,
 
     data_key_pk: Option<PublicKey>,
     data_key_sk: Option<SecretKey>,
@@ -39,6 +54,7 @@ impl Keeper {
         let mut keeper = Keeper {
             universal_key: Keeper::strengthen(universal, app),
             fingerprint_key: None,
+            blob_authentication_key: None,
             data_key_pk: None,
             data_key_sk: None,
             access_key_pk: None,
@@ -55,6 +71,7 @@ impl Keeper {
         let mut keeper = Keeper {
             universal_key: secstr::SecStr::new(vec![0; 32]),
             fingerprint_key: None,
+            blob_authentication_key: None,
             data_key_pk: None,
             data_key_sk: None,
             access_key_pk: None,
@@ -69,6 +86,10 @@ impl Keeper {
     fn init(&mut self) {
         // Generate key used for fingerprinting.
         self.fingerprint_key = Some(self.from_nonce("hat:FINGERPRINT-key".as_bytes(), 64));
+
+        // Generate key for authenticating blob data.
+        self.blob_authentication_key =
+            Some(self.from_nonce("hat:BLOB-AUTHENTICATION-key".as_bytes(), 64));
 
         // Generate data key.
         // Required for reading blob data without a direct reference.
@@ -104,7 +125,9 @@ impl Keeper {
 
     pub fn from_nonce(&self, nonce: &[u8], outlen: usize) -> secstr::SecStr {
         let mut out = secstr::SecStr::new(vec![0; outlen]);
-        Keeper::keyed_fingerprint(&self.universal_key, &nonce[..], out.unsecure_mut());
+        keyed_fingerprint(&self.universal_key.unsecure(),
+                          &nonce[..],
+                          out.unsecure_mut());
         out
     }
 
@@ -198,26 +221,18 @@ impl Keeper {
                                   ciphertext)
     }
 
-    fn keyed_fingerprint(sk: &secstr::SecStr, msg: &[u8], out: &mut [u8]) {
-        let outlen = out.len();
-
-        let sk_ref = sk.unsecure();
-        let ret = unsafe {
-            libsodium_sys::crypto_generichash_blake2b(out.as_mut_ptr(),
-                                                      outlen,
-                                                      msg.as_ptr(),
-                                                      msg.len() as u64,
-                                                      sk_ref.as_ptr(),
-                                                      sk_ref.len())
-        };
-        assert_eq!(ret, 0);
-    }
-
     pub fn fingerprint(&self, msg: &[u8], out: &mut [u8]) {
         let key = self.fingerprint_key
             .as_ref()
             .expect("need fingerprint key");
-        Keeper::keyed_fingerprint(&key, msg, out);
+        keyed_fingerprint(key.unsecure(), msg, out);
+    }
+
+    pub fn blob_authentication(&self, blob: &[u8], out: &mut [u8]) {
+        let key = self.blob_authentication_key
+            .as_ref()
+            .expect("need blob authentication key");
+        keyed_fingerprint(key.unsecure(), blob, &mut out[..])
     }
 
     pub fn symmetric_lock(msg: &[u8], data: &[u8], nonce: &[u8; 8]) -> (secstr::SecStr, Vec<u8>) {
