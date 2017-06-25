@@ -19,7 +19,6 @@ path = "src/main.rs"
 capnpc = "*"
 
 [dependencies]
-argon2rs = "*"
 arrayref = "*"
 byteorder = "*"
 capnp = "*"
@@ -38,6 +37,9 @@ void = "1"
 scoped-pool = "*"
 filetime = "*"
 
+[dependencies.argon2rs]
+features = ["simd"]
+version = "*"
 
 [dependencies.diesel]
 default-features = false
