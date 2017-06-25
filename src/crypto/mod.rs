@@ -41,7 +41,9 @@ pub mod authed {
     pub mod imp {
         pub use sodiumoxide::crypto::secretbox::xsalsa20poly1305::{gen_key, gen_nonce, open, seal};
 
-        pub fn mix_keys(access_key: &super::desc::Key, other_key: &super::desc::Key) -> super::desc::Key {
+        pub fn mix_keys(access_key: &super::desc::Key,
+                        other_key: &super::desc::Key)
+                        -> super::desc::Key {
             let hash = super::hash::new_with_key(&access_key[..], &other_key[..]);
             super::desc::Key::from_slice(&hash[..super::desc::KEYBYTES]).unwrap()
         }
@@ -270,7 +272,10 @@ pub struct RefKey {}
 
 
 impl RefKey {
-    pub fn seal(href: &mut HashRef, access_key: &::crypto::authed::desc::Key, pt: PlainTextRef) -> CipherText {
+    pub fn seal(href: &mut HashRef,
+                access_key: &::crypto::authed::desc::Key,
+                pt: PlainTextRef)
+                -> CipherText {
         let partial_key = authed::imp::gen_key();
         href.persistent_ref.key = Some(wrap_key(partial_key.clone()));
 
@@ -378,16 +383,20 @@ impl<'k> FixedKey<'k> {
         ct
     }
 
-    pub fn unseal_access_ctx<'a>(&self, ct: CipherTextRef<'a>) -> Result<(::crypto::authed::desc::Key, CipherText, CipherTextRef<'a>), CryptoError>{
+    pub fn unseal_access_ctx<'a>
+        (&self,
+         ct: CipherTextRef<'a>)
+         -> Result<(::crypto::authed::desc::Key, CipherText, CipherTextRef<'a>), CryptoError> {
         // Read sealed ciphertext length and unseal it.
         let (rest, access_ct) = ct.split_from_right(sealed::desc::access_cipher_bytes())?;
         let mut access_pt = self.unseal_blob_access(access_ct).into_vec();
         assert_eq!(access_pt.len(), sealed::desc::access_plain_bytes());
 
-        let access_key = access_pt
-            .split_off(sealed::desc::access_plain_bytes() - ::crypto::authed::desc::KEYBYTES);
+        let access_key = access_pt.split_off(sealed::desc::access_plain_bytes() -
+                                             ::crypto::authed::desc::KEYBYTES);
         Ok((::crypto::authed::desc::Key::from_slice(&access_key[..]).unwrap(),
-            CipherText::new(access_pt), rest))
+            CipherText::new(access_pt),
+            rest))
     }
 
     pub fn unseal<'a>(&self,

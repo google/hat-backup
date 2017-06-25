@@ -85,11 +85,13 @@ impl Blob {
         }
 
         // Generate a new access key for the next blob to use.
-        let access_key = mem::replace(&mut self.access_key, crypto::FixedKey::new_access_partial_key());
+        let access_key = mem::replace(&mut self.access_key,
+                                      crypto::FixedKey::new_access_partial_key());
 
         let footer_overhead = self.footer.len() + self.overhead;
-        let footer = crypto::FixedKey::new(&self.keys)
-            .seal(&access_key, PlainTextRef::new(&self.footer[..]));
+        let footer =
+            crypto::FixedKey::new(&self.keys).seal(&access_key,
+                                                   PlainTextRef::new(&self.footer[..]));
         self.footer.truncate(0);
 
         assert!(self.chunks.len() + footer_overhead <= self.max_len);
@@ -107,7 +109,6 @@ impl Blob {
 
         Some(out)
     }
-
 }
 
 pub struct BlobReader<'b> {
@@ -117,25 +118,28 @@ pub struct BlobReader<'b> {
     blob: CipherTextRef<'b>,
 }
 
-impl <'b> BlobReader<'b> {
-    pub fn new(keys: Arc<crypto::keys::Keeper>, blob: CipherTextRef<'b>) -> Result<BlobReader<'b>, crypto::CryptoError> {
+impl<'b> BlobReader<'b> {
+    pub fn new(keys: Arc<crypto::keys::Keeper>,
+               blob: CipherTextRef<'b>)
+               -> Result<BlobReader<'b>, crypto::CryptoError> {
         let rest = blob.strip_authentication()?;
         let (access_key, footer_ct, rest) = crypto::FixedKey::new(&keys).unseal_access_ctx(rest)?;
 
         // TODO(jos): Figure out how to make the borrow checker happy without this.
         let rest_of_blob = blob.slice(0, rest.len());
 
-        Ok(BlobReader{
-            keys: keys,
-            access_key: access_key,
-            footer_ct: footer_ct.to_vec(),
-            blob: rest_of_blob,
-        })
+        Ok(BlobReader {
+               keys: keys,
+               access_key: access_key,
+               footer_ct: footer_ct.to_vec(),
+               blob: rest_of_blob,
+           })
     }
 
     pub fn refs(&self) -> Result<Vec<HashRef>, BlobError> {
-        let (_rest, footer_vec) = crypto::FixedKey::new(&self.keys)
-            .unseal(CipherTextRef::new(&self.footer_ct[..]), self.blob.as_ref())?;
+        let (_rest, footer_vec) =
+            crypto::FixedKey::new(&self.keys)
+                .unseal(CipherTextRef::new(&self.footer_ct[..]), self.blob.as_ref())?;
         let mut footer_pos = footer_vec.as_bytes();
 
         let mut hrefs = Vec::new();
@@ -152,6 +156,6 @@ impl <'b> BlobReader<'b> {
 
     pub fn read_chunk(&self, hash: &Hash, cref: &ChunkRef) -> Result<Vec<u8>, BlobError> {
         Ok(crypto::RefKey::unseal(&self.access_key, hash, cref, self.blob.as_ref())?
-            .into_vec())
+               .into_vec())
     }
 }

@@ -176,9 +176,10 @@ impl<B: StoreBackend> StoreInner<B> {
             return Ok(Some(Vec::new()));
         }
         match self.backend.retrieve(&cref.blob_name[..]) {
-            Ok(Some(blob)) => Ok(Some(
-                BlobReader::new(self.keys.clone(), crypto::CipherTextRef::new(&blob[..]))?
-                    .read_chunk(hash, cref)?)),
+            Ok(Some(blob)) => {
+                Ok(Some(BlobReader::new(self.keys.clone(), crypto::CipherTextRef::new(&blob[..]))?
+                            .read_chunk(hash, cref)?))
+            }
             Ok(None) => Ok(None),
             Err(e) => Err(e.into()),
         }
@@ -188,8 +189,8 @@ impl<B: StoreBackend> StoreInner<B> {
         match self.backend.retrieve(&blob.name[..])? {
             None => Ok(None),
             Some(ct) => {
-                let hrefs = BlobReader::new(self.keys.clone(),
-                                            crypto::CipherTextRef::new(&ct[..]))?.refs()?;
+                let hrefs = BlobReader::new(self.keys.clone(), crypto::CipherTextRef::new(&ct[..]))?
+                    .refs()?;
                 if hrefs.len() == 0 {
                     Ok(None)
                 } else {

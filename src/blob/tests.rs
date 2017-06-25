@@ -229,7 +229,9 @@ fn blob_identity() {
         // Check recovered ChunkRefs.
         for (i, href) in hrefs.into_iter().enumerate() {
             assert!(chunks[i].len() < href.persistent_ref.length);
-            let chunk = reader.read_chunk(&href.hash, &href.persistent_ref).unwrap();
+            let chunk = reader
+                .read_chunk(&href.hash, &href.persistent_ref)
+                .unwrap();
             assert_eq!(chunks[i].len(), chunk.len());
             assert_eq!(&chunks[i], &chunk);
         }
