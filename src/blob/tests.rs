@@ -38,7 +38,8 @@ fn identity() {
             let leaf = LeafType::FileChunk;
             ids.push((bs_p.store(&chunk[..],
                                  hash::Hash::new(&keys, node, leaf, chunk),
-                                 node, leaf,
+                                 node,
+                                 leaf,
                                  None,
                                  Box::new(move |_| {})),
                       chunk));
@@ -85,7 +86,8 @@ fn identity_with_excessive_flushing() {
             let leaf = LeafType::FileChunk;
             ids.push((bs_p.store(&chunk[..],
                                  hash::Hash::new(&keys, node, leaf, chunk),
-                                 node, leaf,
+                                 node,
+                                 leaf,
                                  None,
                                  Box::new(move |_| {})),
                       chunk));

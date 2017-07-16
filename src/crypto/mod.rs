@@ -47,7 +47,10 @@ pub mod authed {
                         -> super::desc::Key {
             let mut mixed_key = [0u8; super::hash::DIGESTBYTES];
             let salt: &[u8; 16] = b"mixkey~~mixkey~~";
-            ::crypto::keys::keyed_fingerprint(&access_key[..], &other_key[..], salt, &mut mixed_key[..]);
+            ::crypto::keys::keyed_fingerprint(&access_key[..],
+                                              &other_key[..],
+                                              salt,
+                                              &mut mixed_key[..]);
             super::desc::Key::from_slice(&mixed_key[..super::desc::KEYBYTES]).unwrap()
         }
     }

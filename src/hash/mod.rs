@@ -45,14 +45,22 @@ pub struct Hash {
 
 impl Hash {
     /// Computes `hash(text)` and stores this digest as the `bytes` field in a new `Hash` structure.
-    pub fn new(keys: &crypto::keys::Keeper, nodetype: blob::NodeType, leaftype: blob::LeafType, text: &[u8]) -> Hash {
+    pub fn new(keys: &crypto::keys::Keeper,
+               nodetype: blob::NodeType,
+               leaftype: blob::LeafType,
+               text: &[u8])
+               -> Hash {
         use byteorder::{LittleEndian, WriteBytesExt};
 
         let mut hash = Hash { bytes: vec![0; 64] };
 
         let mut salt = [0u8; 16];
-        (&mut salt[..8]).write_u64::<LittleEndian>(From::from(nodetype)).unwrap();
-        (&mut salt[8..]).write_u64::<LittleEndian>(From::from(leaftype)).unwrap();
+        (&mut salt[..8])
+            .write_u64::<LittleEndian>(From::from(nodetype))
+            .unwrap();
+        (&mut salt[8..])
+            .write_u64::<LittleEndian>(From::from(leaftype))
+            .unwrap();
 
         keys.fingerprint(text, &salt, &mut hash.bytes[..]);
 

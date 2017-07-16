@@ -19,11 +19,13 @@ use argon2rs;
 struct PublicKey(secstr::SecStr);
 struct SecretKey(secstr::SecStr);
 
-pub fn keyed_fingerprint(sk: &[u8], msg: &[u8],
+pub fn keyed_fingerprint(sk: &[u8],
+                         msg: &[u8],
                          salt: &[u8; libsodium_sys::crypto_generichash_blake2b_SALTBYTES],
                          out: &mut [u8]) {
     let outlen = out.len();
-    let personal: &[u8; libsodium_sys::crypto_generichash_blake2b_PERSONALBYTES] = b"hat-backup~~~~~a";
+    let personal: &[u8; libsodium_sys::crypto_generichash_blake2b_PERSONALBYTES] =
+        b"hat-backup~~~~~a";
 
     let ret = unsafe {
         libsodium_sys::crypto_generichash_blake2b_salt_personal(out.as_mut_ptr(),
@@ -132,7 +134,8 @@ impl Keeper {
         let mut out = secstr::SecStr::new(vec![0; outlen]);
         let salt: &[u8; 16] = b"nonce~~~nonce~~~";
         keyed_fingerprint(&self.universal_key.unsecure(),
-                          &nonce[..], salt,
+                          &nonce[..],
+                          salt,
                           out.unsecure_mut());
         out
     }
