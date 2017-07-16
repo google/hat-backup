@@ -125,7 +125,15 @@ fn blobid_identity() {
             key: None,
         };
         let blob_name_bytes = blob_name.as_bytes();
-        ChunkRef::from_bytes(&mut &blob_name_bytes[..]).unwrap() == blob_name
+        let recovered = ChunkRef::from_bytes(&mut &blob_name_bytes[..]).unwrap();
+        assert_eq!(blob_name.blob_name, recovered.blob_name);
+        assert_eq!(blob_name.offset, recovered.offset);
+        assert_eq!(blob_name.length, recovered.length);
+        assert!(recovered.blob_id.is_none());
+        assert!(recovered.packing.is_none());
+        assert!(recovered.key.is_none());
+
+        true
     }
     quickcheck::quickcheck(prop as fn(Vec<u8>, usize, usize) -> bool);
 }

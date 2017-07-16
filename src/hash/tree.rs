@@ -31,7 +31,7 @@ use std::collections::VecDeque;
 use std::fmt;
 
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug)]
 pub struct HashRef {
     pub hash: Hash,
     pub node: NodeType, // Where in the tree this reference points.
@@ -169,7 +169,18 @@ fn test_hash_refs_identity() {
                    });
         }
         let bytes = hash_refs_to_bytes(&v);
-        assert_eq!(hash_refs_from_bytes(&bytes), Some(v));
+        for (i, r) in hash_refs_from_bytes(&bytes).unwrap().iter().enumerate() {
+            assert_eq!(v[i].hash, r.hash);
+            assert_eq!(v[i].node, r.node);
+            assert_eq!(v[i].leaf, r.leaf);
+            assert_eq!(v[i].info, r.info);
+            assert!(v[i].persistent_ref.blob_id.is_none());
+            assert_eq!(v[i].persistent_ref.blob_name, r.persistent_ref.blob_name);
+            assert_eq!(v[i].persistent_ref.offset, r.persistent_ref.offset);
+            assert_eq!(v[i].persistent_ref.length, r.persistent_ref.length);
+            assert_eq!(v[i].persistent_ref.packing, r.persistent_ref.packing);
+            assert!(v[i].persistent_ref.key.is_none());
+        }
 
         true
     }

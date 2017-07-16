@@ -29,7 +29,6 @@ extern crate time;
 extern crate argon2rs;
 extern crate byteorder;
 extern crate capnp;
-extern crate sodiumoxide;
 extern crate libsodium_sys;
 extern crate hex;
 extern crate secstr;

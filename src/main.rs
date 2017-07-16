@@ -17,7 +17,7 @@ extern crate hat;
 
 // Rust crates.
 extern crate env_logger;
-extern crate sodiumoxide;
+extern crate libsodium_sys;
 
 // We use Clap for argument parsing.
 #[macro_use]
@@ -98,7 +98,7 @@ fn main() {
     let cache_dir = PathBuf::from(flag_or_env("hat_cache_dir"));
 
     // Initialize sodium (must only be called once)
-    sodiumoxide::init();
+    unsafe { libsodium_sys::sodium_init() };
 
     match matches.subcommand() {
         ("resume", Some(_cmd)) => {

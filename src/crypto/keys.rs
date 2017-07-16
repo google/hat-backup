@@ -36,6 +36,12 @@ pub fn compute_salt(node_type: blob::NodeType, leaf_type: blob::LeafType) -> Box
     Box::new(salt)
 }
 
+pub fn random_bytes(size: usize) -> secstr::SecStr {
+    let mut r = vec![0u8; size];
+    unsafe { libsodium_sys::randombytes_buf(r.as_mut_ptr(), r.len()) };
+    secstr::SecStr::new(r)
+}
+
 pub fn keyed_fingerprint(sk: &[u8], msg: &[u8], salt: &[u8], out: &mut [u8]) {
     use libsodium_sys::{crypto_generichash_blake2b_SALTBYTES,
                         crypto_generichash_blake2b_PERSONALBYTES};

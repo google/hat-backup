@@ -201,8 +201,8 @@ fn verify_filesystem<B: StoreBackend>(fs: &FileSystem, ks_p: &StoreProcess<Entry
                         assert_eq!(original_all, recovered_all);
                     }
                     None => {
-                        assert_eq!(entry.data_hash, None);
-                        assert_eq!(persistent_ref, None);
+                        assert!(entry.data_hash.is_none());
+                        assert!(persistent_ref.is_none());
                     }
                 }
 

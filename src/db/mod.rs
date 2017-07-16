@@ -891,8 +891,8 @@ impl InternalIndex {
                             work_opt_: Option<SnapshotWorkStatus>) {
         let family_id_ = self.get_or_create_family_id(&family);
         let insert = match self.snapshot_lookup(family, snapshot_id_) {
-            Some((_info, h, r)) => {
-                if h.bytes != hash_ref_.hash.bytes || r.is_none() || &r.unwrap() != hash_ref_ {
+            Some((_info, h, _r)) => {
+                if h.bytes != hash_ref_.hash.bytes {
                     panic!("Snapshot already exists, but with different hash");
                 }
                 false

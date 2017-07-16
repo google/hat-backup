@@ -16,7 +16,6 @@ use blob::Key;
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 pub use errors::CryptoError;
 use hash::tree::HashRef;
-use sodiumoxide::crypto::stream;
 use std::io;
 use std::mem;
 
@@ -34,23 +33,36 @@ pub struct CipherTextRef<'a>(&'a [u8]);
 
 pub mod authed {
     pub mod desc {
-        pub use sodiumoxide::crypto::secretbox::xsalsa20poly1305::{KEYBYTES, Key, MACBYTES,
-                                                                   NONCEBYTES, Nonce};
+        use libsodium_sys;
+        use secstr;
+
+        pub const KEYBYTES: usize = libsodium_sys::crypto_aead_chacha20poly1305_KEYBYTES;
+        pub const NONCEBYTES: usize = libsodium_sys::crypto_aead_chacha20poly1305_NPUBBYTES;
+        pub const MACBYTES: usize = libsodium_sys::crypto_aead_chacha20poly1305_ABYTES;
+        pub type Key = secstr::SecStr;
+        pub type Nonce = secstr::SecStr;
     }
 
     pub mod imp {
-        pub use sodiumoxide::crypto::secretbox::xsalsa20poly1305::{gen_key, gen_nonce, open, seal};
+        use secstr;
+
+        pub fn gen_key() -> secstr::SecStr {
+            ::crypto::keys::random_bytes(super::desc::KEYBYTES)
+        }
+        pub fn gen_nonce() -> secstr::SecStr {
+            ::crypto::keys::random_bytes(super::desc::NONCEBYTES)
+        }
 
         pub fn mix_keys(access_key: &super::desc::Key,
                         other_key: &super::desc::Key)
                         -> super::desc::Key {
             let mut mixed_key = [0u8; super::hash::DIGESTBYTES];
             let salt: &[u8; 16] = b"mixkey~~mixkey~~";
-            ::crypto::keys::keyed_fingerprint(&access_key[..],
-                                              &other_key[..],
+            ::crypto::keys::keyed_fingerprint(&access_key.unsecure()[..],
+                                              &other_key.unsecure()[..],
                                               salt,
                                               &mut mixed_key[..]);
-            super::desc::Key::from_slice(&mixed_key[..super::desc::KEYBYTES]).unwrap()
+            super::desc::Key::from(&mixed_key[..super::desc::KEYBYTES])
         }
     }
 
@@ -61,11 +73,9 @@ pub mod authed {
 
 pub mod sealed {
     pub mod desc {
-        pub use sodiumoxide::crypto::box_::curve25519xsalsa20poly1305::{MACBYTES, PUBLICKEYBYTES,
-                                                                        PublicKey, SECRETKEYBYTES,
-                                                                        SecretKey};
+        use libsodium_sys;
 
-        pub const SEALBYTES: usize = PUBLICKEYBYTES + MACBYTES;
+        pub const SEALBYTES: usize = libsodium_sys::crypto_box_SEALBYTES;
 
         pub fn symmetric_seal_bytes() -> usize {
             // Mac and nonce from inner symmetric seal
@@ -98,15 +108,10 @@ pub mod sealed {
             symmetric_seal_bytes() + access_cipher_bytes()
         }
     }
-
-    pub mod imp {
-        pub use sodiumoxide::crypto::box_::curve25519xsalsa20poly1305::gen_keypair;
-        pub use sodiumoxide::crypto::sealedbox::curve25519blake2bxsalsa20poly1305::{open, seal};
-    }
 }
 
 fn wrap_key(key: authed::desc::Key) -> Key {
-    Key::XSalsa20Poly1305(key)
+    Key::AeadChacha20Poly1305(key)
 }
 
 impl<'a> PlainTextRef<'a> {
@@ -136,7 +141,7 @@ impl<'a> PlainTextRef<'a> {
                          nonce: &authed::desc::Nonce,
                          key: &authed::desc::Key)
                          -> CipherText {
-        CipherText::new(keys::Keeper::symmetric_lock(self.0, additional_data, &nonce[..], &key[..]))
+        CipherText::new(keys::Keeper::symmetric_lock(self.0, additional_data, nonce.unsecure(), key.unsecure()))
     }
 }
 
@@ -198,9 +203,24 @@ impl CipherText {
         }
     }
     pub fn random_pad(size: usize) -> CipherText {
-        let key = stream::salsa20::gen_key();
-        let nonce = stream::salsa20::gen_nonce();
-        CipherText::new(stream::salsa20::stream(size, &nonce, &key))
+        use libsodium_sys::{crypto_stream_chacha20,
+                            crypto_stream_chacha20_KEYBYTES,
+                            crypto_stream_chacha20_NONCEBYTES};
+
+        let key = keys::random_bytes(crypto_stream_chacha20_KEYBYTES);
+        let nonce = keys::random_bytes(crypto_stream_chacha20_NONCEBYTES);
+        let mut stream = vec![0u8; size];
+
+        let ret = unsafe {
+            crypto_stream_chacha20(
+                stream.as_mut_ptr(),
+                stream.len() as u64,
+                nonce.unsecure().as_ptr() as *const [u8; crypto_stream_chacha20_NONCEBYTES],
+                key.unsecure().as_ptr() as *const [u8; crypto_stream_chacha20_KEYBYTES])
+        };
+        assert_eq!(0, ret);
+
+        CipherText::new(stream)
     }
     pub fn to_vec(&self) -> Vec<u8> {
         let mut out = vec![];
@@ -256,10 +276,10 @@ impl<'a> CipherTextRef<'a> {
                         nonce: &authed::desc::Nonce,
                         key: &authed::desc::Key)
                         -> Result<PlainText, CryptoError> {
-        Ok(PlainText::new(keys::Keeper::symmetric_unlock(&key[..],
+        Ok(PlainText::new(keys::Keeper::symmetric_unlock(key.unsecure(),
                                                          &self.0,
                                                          additional_data,
-                                                         &nonce[..])))
+                                                         nonce.unsecure())))
     }
 
     pub fn strip_authentication(&self, keys: &keys::Keeper) -> Result<CipherTextRef, CryptoError> {
@@ -288,9 +308,7 @@ impl RefKey {
         let partial_key = authed::imp::gen_key();
         href.persistent_ref.key = Some(wrap_key(partial_key.clone()));
 
-        let nonce = authed::desc::Nonce::from_slice(&href.hash.bytes[..authed::desc::NONCEBYTES])
-            .unwrap();
-
+        let nonce = authed::desc::Nonce::from(&href.hash.bytes[..authed::desc::NONCEBYTES]);
         let key = ::crypto::authed::imp::mix_keys(&access_key, &partial_key);
 
         let additional_data = keys::compute_salt(href.node, href.leaf);
@@ -308,17 +326,14 @@ impl RefKey {
         let ct = ct.slice(href.persistent_ref.offset,
                           href.persistent_ref.offset + href.persistent_ref.length);
         match href.persistent_ref.key {
-            Some(Key::XSalsa20Poly1305(ref key)) if href.hash.bytes.len() >=
-                                                    authed::desc::NONCEBYTES => {
-                match authed::desc::Nonce::from_slice(&href.hash.bytes
-                                                           [..authed::desc::NONCEBYTES]) {
-                    None => Err("crypto read failed: unseal".into()),
-                    Some(nonce) => {
-                        let additional_data = keys::compute_salt(href.node, href.leaf);
-                        let real_key = ::crypto::authed::imp::mix_keys(access_key, &key);
-                        Ok(ct.to_plaintext(&additional_data, &nonce, &real_key)?)
-                    }
-                }
+            Some(Key::AeadChacha20Poly1305(ref key)) if href.hash.bytes.len() >=
+                                                        authed::desc::NONCEBYTES => {
+                let nonce = authed::desc::Nonce::from(
+                    &href.hash.bytes[..authed::desc::NONCEBYTES]);
+
+                let additional_data = keys::compute_salt(href.node, href.leaf);
+                let real_key = ::crypto::authed::imp::mix_keys(access_key, &key);
+                Ok(ct.to_plaintext(&additional_data, &nonce, &real_key)?)
             }
             _ => Err("crypto read failed: unseal".into()),
         }
@@ -373,11 +388,11 @@ impl<'k> FixedKey<'k> {
         // Encrypt plaintext with inner key.
         let additional_data: &[u8] = b"hat_blob_seal~";
         let mut ct = pt.to_ciphertext(additional_data, &nonce, &inner_key);
-        ct.append(CipherText::new(nonce.0.to_vec()));
+        ct.append(CipherText::new(nonce.unsecure().to_vec()));
 
         // Construct footer of length as LittleEndian and inner key.
         let mut foot_pt = PlainText::from_i64(ct.len() as i64);
-        foot_pt.0.extend_from_slice(&inner_key.0);
+        foot_pt.0.extend_from_slice(inner_key.unsecure());
         assert_eq!(foot_pt.len(), sealed::desc::footer_plain_bytes());
 
         // Seal footer with blob data key as it contains all the reference keys.
@@ -385,7 +400,7 @@ impl<'k> FixedKey<'k> {
         assert_eq!(foot_ct.len(), sealed::desc::footer_cipher_bytes());
 
         let mut access_pt = PlainText::new(foot_ct.to_vec());
-        access_pt.0.extend_from_slice(&access_key[..]);
+        access_pt.0.extend_from_slice(access_key.unsecure());
         assert_eq!(access_pt.len(), sealed::desc::access_plain_bytes());
 
         let access_ct = self.seal_blob_access(access_pt.as_ref());
@@ -408,7 +423,7 @@ impl<'k> FixedKey<'k> {
 
         let access_key = access_pt.split_off(sealed::desc::access_plain_bytes() -
                                              ::crypto::authed::desc::KEYBYTES);
-        Ok((::crypto::authed::desc::Key::from_slice(&access_key[..]).unwrap(),
+        Ok((::crypto::authed::desc::Key::from(&access_key[..]),
             CipherText::new(access_pt),
             rest))
     }
@@ -439,7 +454,7 @@ impl<'k> FixedKey<'k> {
             .split_from_right(::crypto::authed::desc::NONCEBYTES)?;
         Ok((rest,
             ct.to_plaintext(additional_data,
-                            &::crypto::authed::desc::Nonce::from_slice(nonce.0).unwrap(),
-                            &::crypto::authed::desc::Key::from_slice(inner_key.0).unwrap())?))
+                            &::crypto::authed::desc::Nonce::from(nonce.0),
+                            &::crypto::authed::desc::Key::from(inner_key.0))?))
     }
 }
