@@ -28,10 +28,12 @@ const CHUNKSIZE: usize = 128 * 1024;
 
 
 fn dummy_hashref(keys: &crypto::keys::Keeper) -> HashRef {
+    let node = NodeType::Leaf;
+    let leaf = LeafType::FileChunk;
     HashRef {
-        hash: Hash::new(keys, &[]),
-        node: NodeType::Leaf,
-        leaf: LeafType::FileChunk,
+        hash: Hash::new(keys, node, leaf, &[]),
+        node: node,
+        leaf: leaf,
         persistent_ref: ChunkRef {
             blob_id: None,
             blob_name: vec![],
