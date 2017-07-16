@@ -12,10 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use blob::{ChunkRef, Key};
+use blob::Key;
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 pub use errors::CryptoError;
-use hash::Hash;
 use hash::tree::HashRef;
 use sodiumoxide::crypto::stream;
 use std::io;
@@ -133,10 +132,11 @@ impl<'a> PlainTextRef<'a> {
         }
     }
     pub fn to_ciphertext(&self,
+                         additional_data: &[u8],
                          nonce: &authed::desc::Nonce,
                          key: &authed::desc::Key)
                          -> CipherText {
-        CipherText::new(authed::imp::seal(self.0, nonce, key))
+        CipherText::new(keys::Keeper::symmetric_lock(self.0, additional_data, &nonce[..], &key[..]))
     }
 }
 
@@ -252,11 +252,12 @@ impl<'a> CipherTextRef<'a> {
         }
     }
     pub fn to_plaintext(&self,
+                        additional_data: &[u8],
                         nonce: &authed::desc::Nonce,
                         key: &authed::desc::Key)
                         -> Result<PlainText, CryptoError> {
-        Ok(PlainText::new(try!(authed::imp::open(&self.0, &nonce, &key)
-           .map_err(|()| "crypto read failed: to_plaintext"))))
+        Ok(PlainText::new(
+            keys::Keeper::symmetric_unlock(&key[..], &self.0, additional_data, &nonce[..])))
     }
 
     pub fn strip_authentication(&self, keys: &keys::Keeper) -> Result<CipherTextRef, CryptoError> {
@@ -289,27 +290,30 @@ impl RefKey {
             .unwrap();
 
         let key = ::crypto::authed::imp::mix_keys(&access_key, &partial_key);
-        let ct = pt.to_ciphertext(&nonce, &key);
+
+        let additional_data = keys::compute_salt(href.node, href.leaf);
+        let ct = pt.to_ciphertext(&additional_data, &nonce, &key);
         href.persistent_ref.length = ct.len();
 
         ct
     }
 
     pub fn unseal(access_key: &::crypto::authed::desc::Key,
-                  hash: &Hash,
-                  cref: &ChunkRef,
+                  href: &HashRef,
                   ct: CipherTextRef)
                   -> Result<PlainText, CryptoError> {
-        assert!(ct.len() > cref.offset + cref.length);
-        let ct = ct.slice(cref.offset, cref.offset + cref.length);
-        match cref.key {
-            Some(Key::XSalsa20Poly1305(ref key)) if hash.bytes.len() >=
+        assert!(ct.len() > href.persistent_ref.offset + href.persistent_ref.length);
+        let ct = ct.slice(href.persistent_ref.offset,
+                          href.persistent_ref.offset + href.persistent_ref.length);
+        match href.persistent_ref.key {
+            Some(Key::XSalsa20Poly1305(ref key)) if href.hash.bytes.len() >=
                                                     authed::desc::NONCEBYTES => {
-                match authed::desc::Nonce::from_slice(&hash.bytes[..authed::desc::NONCEBYTES]) {
+                match authed::desc::Nonce::from_slice(&href.hash.bytes[..authed::desc::NONCEBYTES]) {
                     None => Err("crypto read failed: unseal".into()),
                     Some(nonce) => {
+                        let additional_data = keys::compute_salt(href.node, href.leaf);
                         let real_key = ::crypto::authed::imp::mix_keys(access_key, &key);
-                        Ok(ct.to_plaintext(&nonce, &real_key)?)
+                        Ok(ct.to_plaintext(&additional_data, &nonce, &real_key)?)
                     }
                 }
             }
@@ -364,7 +368,8 @@ impl<'k> FixedKey<'k> {
         let nonce = ::crypto::authed::imp::gen_nonce();
 
         // Encrypt plaintext with inner key.
-        let mut ct = pt.to_ciphertext(&nonce, &inner_key);
+        let additional_data: &[u8] = b"hat_blob_seal~";
+        let mut ct = pt.to_ciphertext(additional_data, &nonce, &inner_key);
         ct.append(CipherText::new(nonce.0.to_vec()));
 
         // Construct footer of length as LittleEndian and inner key.
@@ -425,11 +430,13 @@ impl<'k> FixedKey<'k> {
         assert!(ct_len > 0);
 
         // Read and unseal inner symmetric cipher text.
+        let additional_data: &[u8] = b"hat_blob_seal~";
         let (rest, ct_and_nonce) = ct.split_from_right(ct_len as usize)?;
         let (ct, nonce) = ct_and_nonce
             .split_from_right(::crypto::authed::desc::NONCEBYTES)?;
         Ok((rest,
-            ct.to_plaintext(&::crypto::authed::desc::Nonce::from_slice(nonce.0).unwrap(),
+            ct.to_plaintext(additional_data,
+                            &::crypto::authed::desc::Nonce::from_slice(nonce.0).unwrap(),
                             &::crypto::authed::desc::Key::from_slice(inner_key.0).unwrap())?))
     }
 }

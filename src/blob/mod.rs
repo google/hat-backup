@@ -171,14 +171,14 @@ impl<B: StoreBackend> StoreInner<B> {
         href
     }
 
-    fn retrieve(&mut self, hash: &Hash, cref: &ChunkRef) -> Result<Option<Vec<u8>>, BlobError> {
-        if cref.offset == 0 && cref.length == 0 {
+    fn retrieve(&mut self, href: &HashRef) -> Result<Option<Vec<u8>>, BlobError> {
+        if href.persistent_ref.offset == 0 && href.persistent_ref.length == 0 {
             return Ok(Some(Vec::new()));
         }
-        match self.backend.retrieve(&cref.blob_name[..]) {
+        match self.backend.retrieve(&href.persistent_ref.blob_name[..]) {
             Ok(Some(blob)) => {
                 Ok(Some(BlobReader::new(self.keys.clone(), crypto::CipherTextRef::new(&blob[..]))?
-                            .read_chunk(hash, cref)?))
+                            .read_chunk(href)?))
             }
             Ok(None) => Ok(None),
             Err(e) => Err(e.into()),
@@ -260,8 +260,8 @@ impl<B: StoreBackend> BlobStore<B> {
     }
 
     /// Retrieve the data chunk identified by `ChunkRef`.
-    pub fn retrieve(&self, hash: &Hash, cref: &ChunkRef) -> Result<Option<Vec<u8>>, BlobError> {
-        self.lock().retrieve(hash, cref)
+    pub fn retrieve(&self, href: &HashRef) -> Result<Option<Vec<u8>>, BlobError> {
+        self.lock().retrieve(href)
     }
 
     /// Fetch a blob and recover the HashRefs for its contents.

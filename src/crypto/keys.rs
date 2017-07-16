@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use blob;
 use libsodium_sys;
 use secstr;
 use argon2rs;
@@ -19,12 +20,26 @@ use argon2rs;
 struct PublicKey(secstr::SecStr);
 struct SecretKey(secstr::SecStr);
 
+pub fn compute_salt(node_type: blob::NodeType, leaf_type: blob::LeafType) -> Box<[u8]> {
+    use byteorder::{LittleEndian, WriteBytesExt};
+
+    let mut salt = [0u8; 16];
+    {
+        let (mut left, mut right) = salt.split_at_mut(8);
+        left.write_u64::<LittleEndian>(From::from(node_type)).unwrap();
+        right.write_u64::<LittleEndian>(From::from(leaf_type)).unwrap();
+    }
+
+    Box::new(salt)
+}
+
 pub fn keyed_fingerprint(sk: &[u8],
                          msg: &[u8],
-                         salt: &[u8; libsodium_sys::crypto_generichash_blake2b_SALTBYTES],
+                         salt: &[u8],
                          out: &mut [u8]) {
     use libsodium_sys::{crypto_generichash_blake2b_SALTBYTES,
                         crypto_generichash_blake2b_PERSONALBYTES};
+    assert_eq!(crypto_generichash_blake2b_SALTBYTES, salt.len());
 
     let outlen = out.len();
     let personal: &[u8; libsodium_sys::crypto_generichash_blake2b_PERSONALBYTES] =
@@ -234,7 +249,7 @@ impl Keeper {
                                   ciphertext)
     }
 
-    pub fn fingerprint(&self, msg: &[u8], salt: &[u8; 16], out: &mut [u8]) {
+    pub fn fingerprint(&self, msg: &[u8], salt: &[u8], out: &mut [u8]) {
         let key = self.fingerprint_key
             .as_ref()
             .expect("need fingerprint key");
@@ -249,11 +264,7 @@ impl Keeper {
         keyed_fingerprint(key.unsecure(), blob, salt, &mut out[..])
     }
 
-    pub fn symmetric_lock(msg: &[u8], data: &[u8], nonce: &[u8; 8]) -> (secstr::SecStr, Vec<u8>) {
-        let sk_len = libsodium_sys::crypto_aead_chacha20poly1305_KEYBYTES;
-        let mut sk = secstr::SecStr::new(vec![0u8; sk_len]);
-        unsafe { libsodium_sys::randombytes_buf(sk.unsecure_mut().as_mut_ptr(), sk_len) }
-
+    pub fn symmetric_lock(msg: &[u8], ad: &[u8], nonce: &[u8], key: &[u8]) -> Vec<u8> {
         let mut out = vec![0u8; msg.len() + libsodium_sys::crypto_aead_chacha20poly1305_ABYTES];
         let mut out_len = 0;
 
@@ -262,23 +273,22 @@ impl Keeper {
                                                                 &mut out_len,
                                                                 msg.as_ptr(),
                                                                 msg.len() as u64,
-                                                                data.as_ptr(),
-                                                                data.len() as u64,
+                                                                ad.as_ptr(),
+                                                                ad.len() as u64,
                                                                 &[0u8; 0],
                                                                 nonce.as_ptr() as *const [u8; 8],
-                                                                sk.unsecure().as_ptr() as
-                                                                *const [u8; 32])
+                                                                key.as_ptr() as *const [u8; 32])
         };
         assert_eq!(0, ret);
         assert_eq!(out_len, out.len() as u64);
 
-        (sk, out)
+        out
     }
 
-    pub fn symmetric_unlock(sk: &secstr::SecStr,
+    pub fn symmetric_unlock(key: &[u8],
                             ciphertext: &[u8],
-                            data: &[u8],
-                            nonce: &[u8; 8])
+                            ad: &[u8],
+                            nonce: &[u8])
                             -> Vec<u8> {
         let mut out =
             vec![0u8; ciphertext.len() - libsodium_sys::crypto_aead_chacha20poly1305_ABYTES];
@@ -290,10 +300,10 @@ impl Keeper {
                                                                 &mut [0u8; 0],
                                                                 ciphertext.as_ptr(),
                                                                 ciphertext.len() as u64,
-                                                                data.as_ptr(),
-                                                                data.len() as u64,
+                                                                ad.as_ptr(),
+                                                                ad.len() as u64,
                                                                 nonce.as_ptr() as *const [u8; 8],
-                                                                sk.unsecure().as_ptr() as
+                                                                key.as_ptr() as
                                                                 *const [u8; 32])
         };
         assert_eq!(0, ret);

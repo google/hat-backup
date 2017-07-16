@@ -50,18 +50,9 @@ impl Hash {
                leaftype: blob::LeafType,
                text: &[u8])
                -> Hash {
-        use byteorder::{LittleEndian, WriteBytesExt};
-
         let mut hash = Hash { bytes: vec![0; 64] };
 
-        let mut salt = [0u8; 16];
-        (&mut salt[..8])
-            .write_u64::<LittleEndian>(From::from(nodetype))
-            .unwrap();
-        (&mut salt[8..])
-            .write_u64::<LittleEndian>(From::from(leaftype))
-            .unwrap();
-
+        let salt = crypto::keys::compute_salt(nodetype, leaftype);
         keys.fingerprint(text, &salt, &mut hash.bytes[..]);
 
         hash

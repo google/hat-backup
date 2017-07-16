@@ -20,9 +20,7 @@ use hash::tree::*;
 use key;
 use quickcheck;
 
-use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet};
-
 use std::sync::{Arc, Mutex};
 
 #[derive(Clone)]
@@ -48,16 +46,11 @@ impl HashTreeBackend for MemoryBackend {
     type Err = key::MsgError;
 
     fn fetch_chunk(&self,
-                   href: &HashRef,
-                   ref_opt: Option<&ChunkRef>)
+                   href: &HashRef)
                    -> Result<Option<Vec<u8>>, Self::Err> {
-        let hash = match ref_opt {
-            Some(ref b) => Cow::Owned(Hash { bytes: b.blob_name.clone() }), // blob name is chunk hash
-            None => Cow::Borrowed(&href.hash),
-        };
         let guarded_chunks = self.chunks.lock().unwrap();
         Ok(guarded_chunks
-               .get(&hash.bytes)
+               .get(&href.hash.bytes)
                .map(|&(_, _, _, ref chunk)| chunk.clone()))
     }
 

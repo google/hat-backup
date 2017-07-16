@@ -14,14 +14,12 @@
 
 use crypto;
 use crypto::{CipherText, CipherTextRef, PlainTextRef};
-use hash::Hash;
 use hash::tree::HashRef;
 
 use std::mem;
 use std::sync::Arc;
 
 use super::BlobError;
-use super::ChunkRef;
 
 
 pub struct Blob {
@@ -154,8 +152,8 @@ impl<'b> BlobReader<'b> {
         Ok(hrefs)
     }
 
-    pub fn read_chunk(&self, hash: &Hash, cref: &ChunkRef) -> Result<Vec<u8>, BlobError> {
-        Ok(crypto::RefKey::unseal(&self.access_key, hash, cref, self.blob.as_ref())?
+    pub fn read_chunk(&self, href: &HashRef) -> Result<Vec<u8>, BlobError> {
+        Ok(crypto::RefKey::unseal(&self.access_key, href, self.blob.as_ref())?
                .into_vec())
     }
 }
