@@ -48,12 +48,12 @@ impl HashTreeBackend for MemoryBackend {
     type Err = key::MsgError;
 
     fn fetch_chunk(&self,
-                   hash: &Hash,
+                   href: &HashRef,
                    ref_opt: Option<&ChunkRef>)
                    -> Result<Option<Vec<u8>>, Self::Err> {
         let hash = match ref_opt {
             Some(ref b) => Cow::Owned(Hash { bytes: b.blob_name.clone() }), // blob name is chunk hash
-            None => Cow::Borrowed(hash),
+            None => Cow::Borrowed(&href.hash),
         };
         let guarded_chunks = self.chunks.lock().unwrap();
         Ok(guarded_chunks
@@ -99,7 +99,7 @@ impl HashTreeBackend for MemoryBackend {
         let mut guarded_chunks = self.chunks.lock().unwrap();
 
         let keys = crypto::keys::Keeper::new_for_testing();
-        let hash = Hash::new(&keys, chunk);
+        let hash = Hash::new(&keys, node, leaf, chunk);
         guarded_chunks.insert(hash.bytes.clone(), (node, leaf, childs, chunk.to_vec()));
 
         Ok((0,

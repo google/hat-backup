@@ -100,7 +100,7 @@ impl HashRef {
 pub trait HashTreeBackend: Clone {
     type Err: fmt::Debug;
 
-    fn fetch_chunk(&self, &Hash, Option<&ChunkRef>) -> Result<Option<Vec<u8>>, Self::Err>;
+    fn fetch_chunk(&self, &HashRef, Option<&ChunkRef>) -> Result<Option<Vec<u8>>, Self::Err>;
     fn fetch_childs(&self, &Hash) -> Option<Vec<u64>>;
     fn fetch_persistent_ref(&self, &Hash) -> Option<ChunkRef>;
     fn insert_chunk(&self,
@@ -383,7 +383,7 @@ impl<B> Walker<B>
             }
             let fetch_chunk = |backend: &B, child: &HashRef| {
                 backend
-                    .fetch_chunk(&child.hash, Some(&child.persistent_ref))
+                    .fetch_chunk(child, None)
                     .map(|opt| opt.expect("Invalid hash ref"))
             };
 

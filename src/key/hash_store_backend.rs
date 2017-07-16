@@ -50,14 +50,6 @@ impl<B: StoreBackend> HashStoreBackend<B> {
         }
     }
 
-    fn fetch_chunk_from_hash(&self, hash: &hash::Hash) -> Result<Option<Vec<u8>>, MsgError> {
-        assert!(!hash.bytes.is_empty());
-        match self.hash_index.fetch_persistent_ref(hash)? {
-            None => Ok(None),
-            Some(chunk_ref) => self.fetch_chunk_from_persistent_ref(hash, &chunk_ref),
-        }
-    }
-
     fn fetch_chunk_from_persistent_ref(&self,
                                        hash: &hash::Hash,
                                        cref: &blob::ChunkRef)
@@ -71,25 +63,27 @@ impl<B: StoreBackend> HashTreeBackend for HashStoreBackend<B> {
     type Err = MsgError;
 
     fn fetch_chunk(&self,
-                   hash: &hash::Hash,
+                   href: &hash::tree::HashRef,
                    persistent_ref: Option<&blob::ChunkRef>)
                    -> Result<Option<Vec<u8>>, MsgError> {
-        assert!(!hash.bytes.is_empty());
+        assert!(!href.hash.bytes.is_empty());
 
-        let data_opt = if let Some(r) = persistent_ref {
-            self.fetch_chunk_from_persistent_ref(&hash, &r)?
+        let data_opt = if let Some(ref r) = persistent_ref {
+            // Fetch chunk using provided reference.
+            self.fetch_chunk_from_persistent_ref(&href.hash, r)?
         } else {
-            self.fetch_chunk_from_hash(&hash)?
+            // Fetch chunk using hash's reference.
+            self.fetch_chunk_from_persistent_ref(&href.hash, &href.persistent_ref)?
         };
 
         Ok(data_opt.and_then(|data| {
-            let actual_hash = hash::Hash::new(&self.keys, &data[..]);
-            if *hash == actual_hash {
+            let actual_hash = hash::Hash::new(&self.keys, href.node, href.leaf, &data[..]);
+            if href.hash == actual_hash {
                 Some(data)
             } else {
                 error!("Data hash does not match expectation: {:?} instead of {:?}",
                        actual_hash,
-                       hash);
+                       href.hash);
                 None
             }
         }))
@@ -121,7 +115,7 @@ impl<B: StoreBackend> HashTreeBackend for HashStoreBackend<B> {
                     info: Option<&key::Info>)
                     -> Result<(u64, hash::tree::HashRef), MsgError> {
         let mut hash_entry = hash::Entry {
-            hash: hash::Hash::new(&self.keys, chunk),
+            hash: hash::Hash::new(&self.keys, node, leaf, chunk),
             node: node,
             leaf: leaf,
             childs: childs,

@@ -34,10 +34,11 @@ fn identity() {
 
         let mut ids = Vec::new();
         for chunk in chunks.iter() {
+            let node = NodeType::Leaf;
+            let leaf = LeafType::FileChunk;
             ids.push((bs_p.store(&chunk[..],
-                                 hash::Hash::new(&keys, chunk),
-                                 NodeType::Leaf,
-                                 LeafType::FileChunk,
+                                 hash::Hash::new(&keys, node, leaf, chunk),
+                                 node, leaf,
                                  None,
                                  Box::new(move |_| {})),
                       chunk));
@@ -80,10 +81,11 @@ fn identity_with_excessive_flushing() {
 
         let mut ids = Vec::new();
         for chunk in chunks.iter() {
+            let node = NodeType::Leaf;
+            let leaf = LeafType::FileChunk;
             ids.push((bs_p.store(&chunk[..],
-                                 hash::Hash::new(&keys, chunk),
-                                 NodeType::Leaf,
-                                 LeafType::FileChunk,
+                                 hash::Hash::new(&keys, node, leaf, chunk),
+                                 node, leaf,
                                  None,
                                  Box::new(move |_| {})),
                       chunk));
@@ -139,10 +141,12 @@ fn blobid_identity() {
 fn blob_reuse() {
     let keys = Arc::new(crypto::keys::Keeper::new_for_testing());
 
+    let node = NodeType::Leaf;
+    let leaf = LeafType::FileChunk;
     let mut c1 = hash::tree::HashRef {
-        hash: hash::Hash::new(&keys, &[]),
-        node: NodeType::Leaf,
-        leaf: LeafType::FileChunk,
+        hash: hash::Hash::new(&keys, node, leaf, &[]),
+        node: node,
+        leaf: leaf,
         info: None,
         persistent_ref: ChunkRef {
             blob_id: None,
@@ -187,13 +191,17 @@ fn blob_identity() {
     fn prop(chunks: Vec<Vec<u8>>) -> bool {
         let max_size = 10000;
         let keys = Arc::new(crypto::keys::Keeper::new_for_testing());
+
+        let node = NodeType::Leaf;
+        let leaf = LeafType::FileChunk;
+
         let mut b = Blob::new(keys.clone(), max_size);
         let mut n = 0;
         for chunk in chunks.iter() {
             let mut cref = hash::tree::HashRef {
-                hash: hash::Hash::new(&keys, &[]),
-                node: NodeType::Leaf,
-                leaf: LeafType::FileChunk,
+                hash: hash::Hash::new(&keys, node, leaf, &[]),
+                node: node,
+                leaf: leaf,
                 info: None,
                 persistent_ref: ChunkRef {
                     blob_id: None,
@@ -254,11 +262,13 @@ fn random_input_fails() {
 fn empty_blocks_blob_ciphertext(blob: &mut Blob, blocksize: usize) -> Vec<u8> {
     let keys = Arc::new(crypto::keys::Keeper::new_for_testing());
     let block = vec![0u8; blocksize];
+    let node = NodeType::Leaf;
+    let leaf = LeafType::FileChunk;
     loop {
         let mut cref = hash::tree::HashRef {
-            hash: hash::Hash::new(&keys, &block[..]),
-            node: NodeType::Leaf,
-            leaf: LeafType::FileChunk,
+            hash: hash::Hash::new(&keys, node, leaf, &block[..]),
+            node: node,
+            leaf: leaf,
             info: None,
             persistent_ref: ChunkRef {
                 blob_id: None,
