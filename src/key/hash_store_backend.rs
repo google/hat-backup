@@ -54,11 +54,12 @@ impl<B: StoreBackend> HashStoreBackend<B> {
 impl<B: StoreBackend> HashTreeBackend for HashStoreBackend<B> {
     type Err = MsgError;
 
-    fn fetch_chunk(&self, href: &hash::tree::HashRef)
-                   -> Result<Option<Vec<u8>>, MsgError> {
+    fn fetch_chunk(&self, href: &hash::tree::HashRef) -> Result<Option<Vec<u8>>, MsgError> {
         assert!(!href.hash.bytes.is_empty());
 
-        Ok(self.blob_store.retrieve(&href)?.and_then(|data| {
+        Ok(self.blob_store
+               .retrieve(&href)?
+               .and_then(|data| {
             let actual_hash = hash::Hash::new(&self.keys, href.node, href.leaf, &data[..]);
             if href.hash == actual_hash {
                 Some(data)

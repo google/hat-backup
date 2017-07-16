@@ -59,10 +59,7 @@ fn identity() {
 
         // All chunks must be available through the blob store:
         for &(ref id, chunk) in ids.iter() {
-            assert_eq!(bs_p.retrieve(&id)
-                           .unwrap()
-                           .unwrap(),
-                       &chunk[..]);
+            assert_eq!(bs_p.retrieve(&id).unwrap().unwrap(), &chunk[..]);
         }
 
         return true;
@@ -93,10 +90,7 @@ fn identity_with_excessive_flushing() {
                       chunk));
             bs_p.flush();
             let &(ref id, chunk) = ids.last().unwrap();
-            assert_eq!(bs_p.retrieve(&id)
-                           .unwrap()
-                           .unwrap(),
-                       &chunk[..]);
+            assert_eq!(bs_p.retrieve(&id).unwrap().unwrap(), &chunk[..]);
         }
 
         // Non-empty chunks must be in the backend now:
@@ -111,10 +105,7 @@ fn identity_with_excessive_flushing() {
 
         // All chunks must be available through the blob store:
         for &(ref id, chunk) in ids.iter() {
-            assert_eq!(bs_p.retrieve(&id)
-                           .unwrap()
-                           .unwrap(),
-                       &chunk[..]);
+            assert_eq!(bs_p.retrieve(&id).unwrap().unwrap(), &chunk[..]);
         }
 
         return true;
@@ -167,10 +158,8 @@ fn blob_reuse() {
 
     let out = b.to_ciphertext().unwrap().to_vec();
     let reader = BlobReader::new(keys.clone(), crypto::CipherTextRef::new(&out[..])).unwrap();
-    assert_eq!(vec![1, 2, 3],
-               reader.read_chunk(&c1).unwrap());
-    assert_eq!(vec![4, 5, 6],
-               reader.read_chunk(&c2).unwrap());
+    assert_eq!(vec![1, 2, 3], reader.read_chunk(&c1).unwrap());
+    assert_eq!(vec![4, 5, 6], reader.read_chunk(&c2).unwrap());
 
     let mut c3 = c2.clone();
 
@@ -180,12 +169,9 @@ fn blob_reuse() {
 
     let out = b.to_ciphertext().unwrap().to_vec();
     let reader = BlobReader::new(keys.clone(), crypto::CipherTextRef::new(&out[..])).unwrap();
-    assert_eq!(vec![1, 2],
-               reader.read_chunk(&c1).unwrap());
-    assert_eq!(vec![1, 2],
-               reader.read_chunk(&c2).unwrap());
-    assert_eq!(vec![1, 2],
-               reader.read_chunk(&c3).unwrap());
+    assert_eq!(vec![1, 2], reader.read_chunk(&c1).unwrap());
+    assert_eq!(vec![1, 2], reader.read_chunk(&c2).unwrap());
+    assert_eq!(vec![1, 2], reader.read_chunk(&c3).unwrap());
 }
 
 #[test]
@@ -239,9 +225,7 @@ fn blob_identity() {
         // Check recovered ChunkRefs.
         for (i, href) in hrefs.into_iter().enumerate() {
             assert!(chunks[i].len() < href.persistent_ref.length);
-            let chunk = reader
-                .read_chunk(&href)
-                .unwrap();
+            let chunk = reader.read_chunk(&href).unwrap();
             assert_eq!(chunks[i].len(), chunk.len());
             assert_eq!(&chunks[i], &chunk);
         }

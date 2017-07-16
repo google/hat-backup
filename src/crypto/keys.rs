@@ -26,17 +26,17 @@ pub fn compute_salt(node_type: blob::NodeType, leaf_type: blob::LeafType) -> Box
     let mut salt = [0u8; 16];
     {
         let (mut left, mut right) = salt.split_at_mut(8);
-        left.write_u64::<LittleEndian>(From::from(node_type)).unwrap();
-        right.write_u64::<LittleEndian>(From::from(leaf_type)).unwrap();
+        left.write_u64::<LittleEndian>(From::from(node_type))
+            .unwrap();
+        right
+            .write_u64::<LittleEndian>(From::from(leaf_type))
+            .unwrap();
     }
 
     Box::new(salt)
 }
 
-pub fn keyed_fingerprint(sk: &[u8],
-                         msg: &[u8],
-                         salt: &[u8],
-                         out: &mut [u8]) {
+pub fn keyed_fingerprint(sk: &[u8], msg: &[u8], salt: &[u8], out: &mut [u8]) {
     use libsodium_sys::{crypto_generichash_blake2b_SALTBYTES,
                         crypto_generichash_blake2b_PERSONALBYTES};
     assert_eq!(crypto_generichash_blake2b_SALTBYTES, salt.len());
@@ -285,11 +285,7 @@ impl Keeper {
         out
     }
 
-    pub fn symmetric_unlock(key: &[u8],
-                            ciphertext: &[u8],
-                            ad: &[u8],
-                            nonce: &[u8])
-                            -> Vec<u8> {
+    pub fn symmetric_unlock(key: &[u8], ciphertext: &[u8], ad: &[u8], nonce: &[u8]) -> Vec<u8> {
         let mut out =
             vec![0u8; ciphertext.len() - libsodium_sys::crypto_aead_chacha20poly1305_ABYTES];
         let mut out_len = 0;
@@ -303,8 +299,7 @@ impl Keeper {
                                                                 ad.as_ptr(),
                                                                 ad.len() as u64,
                                                                 nonce.as_ptr() as *const [u8; 8],
-                                                                key.as_ptr() as
-                                                                *const [u8; 32])
+                                                                key.as_ptr() as *const [u8; 32])
         };
         assert_eq!(0, ret);
         assert_eq!(out_len, out.len() as u64);

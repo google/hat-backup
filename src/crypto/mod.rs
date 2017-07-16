@@ -256,8 +256,10 @@ impl<'a> CipherTextRef<'a> {
                         nonce: &authed::desc::Nonce,
                         key: &authed::desc::Key)
                         -> Result<PlainText, CryptoError> {
-        Ok(PlainText::new(
-            keys::Keeper::symmetric_unlock(&key[..], &self.0, additional_data, &nonce[..])))
+        Ok(PlainText::new(keys::Keeper::symmetric_unlock(&key[..],
+                                                         &self.0,
+                                                         additional_data,
+                                                         &nonce[..])))
     }
 
     pub fn strip_authentication(&self, keys: &keys::Keeper) -> Result<CipherTextRef, CryptoError> {
@@ -308,7 +310,8 @@ impl RefKey {
         match href.persistent_ref.key {
             Some(Key::XSalsa20Poly1305(ref key)) if href.hash.bytes.len() >=
                                                     authed::desc::NONCEBYTES => {
-                match authed::desc::Nonce::from_slice(&href.hash.bytes[..authed::desc::NONCEBYTES]) {
+                match authed::desc::Nonce::from_slice(&href.hash.bytes
+                                                           [..authed::desc::NONCEBYTES]) {
                     None => Err("crypto read failed: unseal".into()),
                     Some(nonce) => {
                         let additional_data = keys::compute_salt(href.node, href.leaf);

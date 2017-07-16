@@ -45,9 +45,7 @@ impl MemoryBackend {
 impl HashTreeBackend for MemoryBackend {
     type Err = key::MsgError;
 
-    fn fetch_chunk(&self,
-                   href: &HashRef)
-                   -> Result<Option<Vec<u8>>, Self::Err> {
+    fn fetch_chunk(&self, href: &HashRef) -> Result<Option<Vec<u8>>, Self::Err> {
         let guarded_chunks = self.chunks.lock().unwrap();
         Ok(guarded_chunks
                .get(&href.hash.bytes)
