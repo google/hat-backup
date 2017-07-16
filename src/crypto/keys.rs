@@ -23,19 +23,23 @@ pub fn keyed_fingerprint(sk: &[u8],
                          msg: &[u8],
                          salt: &[u8; libsodium_sys::crypto_generichash_blake2b_SALTBYTES],
                          out: &mut [u8]) {
+    use libsodium_sys::{crypto_generichash_blake2b_SALTBYTES,
+                        crypto_generichash_blake2b_PERSONALBYTES};
+
     let outlen = out.len();
     let personal: &[u8; libsodium_sys::crypto_generichash_blake2b_PERSONALBYTES] =
         b"hat-backup~~~~~a";
 
     let ret = unsafe {
-        libsodium_sys::crypto_generichash_blake2b_salt_personal(out.as_mut_ptr(),
-                                                                outlen,
-                                                                msg.as_ptr(),
-                                                                msg.len() as u64,
-                                                                sk.as_ptr(),
-                                                                sk.len(),
-                                                                salt.as_ptr() as *const [u8; libsodium_sys::crypto_generichash_blake2b_SALTBYTES],
-                                                                personal.as_ptr() as *const [u8; libsodium_sys::crypto_generichash_blake2b_PERSONALBYTES])
+        libsodium_sys::crypto_generichash_blake2b_salt_personal(
+            out.as_mut_ptr(),
+            outlen,
+            msg.as_ptr(),
+            msg.len() as u64,
+            sk.as_ptr(),
+            sk.len(),
+            salt.as_ptr() as *const [u8; crypto_generichash_blake2b_SALTBYTES],
+            personal.as_ptr() as *const [u8; crypto_generichash_blake2b_PERSONALBYTES])
     };
     assert_eq!(ret, 0);
 }
