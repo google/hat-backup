@@ -44,8 +44,6 @@ table! {
 }
 
 joinable!(key_data -> key_tree (node_id));
-select_column_workaround!(key_data -> key_tree (node_id, committed, tag, created, modified, accessed, permissions, user_id, group_id, hash, hash_ref));
-select_column_workaround!(key_tree -> key_data (node_id, parent_id, name));
 
 // Rust models.
 
