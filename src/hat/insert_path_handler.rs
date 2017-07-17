@@ -34,16 +34,18 @@ impl FileEntry {
     fn new(full_path: PathBuf, parent: Option<u64>) -> Result<FileEntry, Box<Error>> {
         debug!("FileEntry::new({:?})", full_path);
 
-        let filename_opt =
-            full_path.file_name().and_then(|n| n.to_str()).map(|n| n.bytes().collect());
+        let filename_opt = full_path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .map(|n| n.bytes().collect());
 
         if filename_opt.is_some() {
             let meta = fs::symlink_metadata(&full_path)?;
             Ok(FileEntry {
-                key_entry: key::Entry::new(parent, filename_opt.unwrap(), Some(&meta)),
-                metadata: meta,
-                full_path: full_path,
-            })
+                   key_entry: key::Entry::new(parent, filename_opt.unwrap(), Some(&meta)),
+                   metadata: meta,
+                   full_path: full_path,
+               })
         } else {
             Err(From::from("Could not parse filename."[..].to_owned()))
         }

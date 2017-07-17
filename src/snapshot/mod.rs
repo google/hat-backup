@@ -41,7 +41,9 @@ impl SnapshotIndex {
                   family_name: &str,
                   snapshot_id: u64)
                   -> Option<(db::SnapshotInfo, hash::Hash, Option<hash::tree::HashRef>)> {
-        self.index.lock().snapshot_lookup(family_name, snapshot_id)
+        self.index
+            .lock()
+            .snapshot_lookup(family_name, snapshot_id)
     }
 
     pub fn reserve(&mut self, family: String) -> db::SnapshotInfo {
@@ -53,27 +55,37 @@ impl SnapshotIndex {
                   snapshot: &db::SnapshotInfo,
                   hash: &hash::Hash,
                   hash_ref: &hash::tree::HashRef) {
-        self.index.lock().snapshot_update(snapshot, "anonymous", hash, hash_ref);
+        self.index
+            .lock()
+            .snapshot_update(snapshot, "anonymous", hash, hash_ref);
     }
 
     /// ReadyCommit.
     pub fn ready_commit(&mut self, snapshot: &db::SnapshotInfo) {
-        self.index.lock().snapshot_set_tag(snapshot, tags::Tag::Complete)
+        self.index
+            .lock()
+            .snapshot_set_tag(snapshot, tags::Tag::Complete)
     }
 
     /// Register a new snapshot by its family name, hash and persistent reference.
     pub fn commit(&mut self, snapshot: &db::SnapshotInfo) {
-        self.index.lock().snapshot_set_tag(snapshot, tags::Tag::Done)
+        self.index
+            .lock()
+            .snapshot_set_tag(snapshot, tags::Tag::Done)
     }
 
     /// We are deleting this snapshot.
     pub fn will_delete(&mut self, snapshot: &db::SnapshotInfo) {
-        self.index.lock().snapshot_set_tag(snapshot, tags::Tag::WillDelete)
+        self.index
+            .lock()
+            .snapshot_set_tag(snapshot, tags::Tag::WillDelete)
     }
 
     /// We are ready to delete of this snapshot.
     pub fn ready_delete(&mut self, snapshot: &db::SnapshotInfo) {
-        self.index.lock().snapshot_set_tag(snapshot, tags::Tag::ReadyDelete)
+        self.index
+            .lock()
+            .snapshot_set_tag(snapshot, tags::Tag::ReadyDelete)
     }
 
     /// Extract latest snapshot data for family.
@@ -104,7 +116,9 @@ impl SnapshotIndex {
                    msg: &str,
                    hash_ref: &hash::tree::HashRef,
                    work_opt: Option<db::SnapshotWorkStatus>) {
-        self.index.lock().snapshot_recover(snapshot_id, family, msg, hash_ref, work_opt)
+        self.index
+            .lock()
+            .snapshot_recover(snapshot_id, family, msg, hash_ref, work_opt)
     }
 
     /// Flush the hash index to clear internal buffers and commit the underlying database.

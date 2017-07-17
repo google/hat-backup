@@ -14,8 +14,11 @@
 
 
 use blob::{Blob, ChunkRef, NodeType, LeafType};
+use crypto;
 use hash::Hash;
 use hash::tree::HashRef;
+
+use std::sync::Arc;
 
 use test::Bencher;
 
@@ -24,11 +27,13 @@ const BLOBSIZE: usize = 5 * 1024 * 1024;
 const CHUNKSIZE: usize = 128 * 1024;
 
 
-fn dummy_hashref() -> HashRef {
+fn dummy_hashref(keys: &crypto::keys::Keeper) -> HashRef {
+    let node = NodeType::Leaf;
+    let leaf = LeafType::FileChunk;
     HashRef {
-        hash: Hash::new(&[]),
-        node: NodeType::Leaf,
-        leaf: LeafType::FileChunk,
+        hash: Hash::new(keys, node, leaf, &[]),
+        node: node,
+        leaf: leaf,
         persistent_ref: ChunkRef {
             blob_id: None,
             blob_name: vec![],
@@ -44,28 +49,30 @@ fn dummy_hashref() -> HashRef {
 
 #[bench]
 fn insert_128_kb_chunks(bench: &mut Bencher) {
-    let mut b = Blob::new(BLOBSIZE);
-    let mut href = dummy_hashref();
+    let keys = Arc::new(crypto::keys::Keeper::new_for_testing());
+    let mut b = Blob::new(keys.clone(), BLOBSIZE);
+    let mut href = dummy_hashref(&keys);
     let chunk = [0u8; CHUNKSIZE];
     bench.iter(|| {
-        if let Err(()) = b.try_append(&chunk[..], &mut href) {
-            b = Blob::new(BLOBSIZE);
+                   if let Err(()) = b.try_append(&chunk[..], &mut href) {
+            b = Blob::new(keys.clone(), BLOBSIZE);
             b.try_append(&chunk[..], &mut href).unwrap();
         }
-    });
+               });
     bench.bytes = CHUNKSIZE as u64;
 }
 
 #[bench]
 fn insert_256_kb_chunks(bench: &mut Bencher) {
+    let keys = Arc::new(crypto::keys::Keeper::new_for_testing());
     let chunk = vec![0u8; 2 * CHUNKSIZE];
-    let mut b = Blob::new(BLOBSIZE);
-    let mut href = dummy_hashref();
+    let mut b = Blob::new(keys.clone(), BLOBSIZE);
+    let mut href = dummy_hashref(&keys);
     bench.iter(|| {
-        if let Err(()) = b.try_append(&chunk[..], &mut href) {
+                   if let Err(()) = b.try_append(&chunk[..], &mut href) {
             b.to_ciphertext();
             b.try_append(&chunk[..], &mut href).unwrap();
         }
-    });
+               });
     bench.bytes = 2 * CHUNKSIZE as u64;
 }

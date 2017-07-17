@@ -77,17 +77,19 @@ pub mod recover {
 
     impl tree::Visitor for FileVisitor {
         fn branch_enter(&mut self, href: &tree::HashRef, childs: &Vec<tree::HashRef>) -> bool {
-            self.nodes.push_back(Node {
-                href: href.clone(),
-                childs: Some(childs.clone()),
-            });
+            self.nodes
+                .push_back(Node {
+                               href: href.clone(),
+                               childs: Some(childs.clone()),
+                           });
             true
         }
         fn leaf_enter(&mut self, href: &tree::HashRef) -> bool {
-            self.nodes.push_back(Node {
-                href: href.clone(),
-                childs: None,
-            });
+            self.nodes
+                .push_back(Node {
+                               href: href.clone(),
+                               childs: None,
+                           });
 
             // Do not proceed to read the actual file data.
             false
@@ -142,17 +144,19 @@ pub mod recover {
 
     impl tree::Visitor for DirVisitor {
         fn branch_enter(&mut self, href: &tree::HashRef, childs: &Vec<tree::HashRef>) -> bool {
-            self.nodes.push_back(Node {
-                href: href.clone(),
-                childs: Some(childs.clone()),
-            });
+            self.nodes
+                .push_back(Node {
+                               href: href.clone(),
+                               childs: Some(childs.clone()),
+                           });
             true
         }
         fn leaf_enter(&mut self, href: &tree::HashRef) -> bool {
-            self.nodes.push_back(Node {
-                href: href.clone(),
-                childs: None,
-            });
+            self.nodes
+                .push_back(Node {
+                               href: href.clone(),
+                               childs: None,
+                           });
             // Only proceed to the leaf if it contains a tree list.
             match href.leaf {
                 blob::LeafType::TreeList => true,
@@ -174,9 +178,11 @@ fn parse_dir_data(chunk: &[u8], mut out: &mut Vec<walker::FileEntry>) -> Result<
 
     let reader = capnp::serialize_packed::read_message(&mut &chunk[..],
                                                        capnp::message::ReaderOptions::new())
-        .unwrap();
+            .unwrap();
 
-    let list = reader.get_root::<root_capnp::file_list::Reader>().unwrap();
+    let list = reader
+        .get_root::<root_capnp::file_list::Reader>()
+        .unwrap();
     for f in list.get_files().unwrap().iter() {
         if f.get_info()?.get_name().unwrap().len() == 0 {
             // Empty entry at end.
@@ -205,9 +211,9 @@ fn parse_dir_data(chunk: &[u8], mut out: &mut Vec<walker::FileEntry>) -> Result<
             .unwrap();
 
         out.push(walker::FileEntry {
-            hash_ref: hash_ref,
-            meta: entry,
-        });
+                     hash_ref: hash_ref,
+                     meta: entry,
+                 });
     }
     Ok(())
 }
@@ -263,7 +269,7 @@ impl<B: StoreBackend> Family<B> {
             handler.recurse(PathBuf::from(&dir), parent);
 
             match self.key_store_process[0]
-                .send_reply(key::Msg::CommitReservedNodes(Some(parent))) {
+                      .send_reply(key::Msg::CommitReservedNodes(Some(parent))) {
                 Ok(key::Reply::Ok) => (),
                 _ => panic!("Unexpected reply from keystore"),
             }
@@ -363,7 +369,11 @@ impl<B: StoreBackend> Family<B> {
     pub fn list_from_key_store(&self,
                                dir_id: Option<u64>)
                                -> Result<Vec<key::DirElem<B>>, HatError> {
-        match self.key_store_process.iter().last().unwrap().send_reply(key::Msg::ListDir(dir_id))? {
+        match self.key_store_process
+                  .iter()
+                  .last()
+                  .unwrap()
+                  .send_reply(key::Msg::ListDir(dir_id))? {
             key::Reply::ListResult(ls) => Ok(ls),
             _ => Err(From::from("Unexpected result from key store")),
         }
@@ -374,8 +384,7 @@ impl<B: StoreBackend> Family<B> {
          dir_hash: hash::tree::HashRef,
          backend: HTB)
          -> Result<Vec<(key::Entry, hash::tree::HashRef)>, HatError> {
-        let it = hash::tree::LeafIterator::new(backend, dir_hash)
-            ?
+        let it = hash::tree::LeafIterator::new(backend, dir_hash)?
             .expect("unable to open dir");
 
         let mut out = Vec::new();
@@ -403,7 +412,7 @@ impl<B: StoreBackend> Family<B> {
                           dir_id: Option<u64>,
                           top_hash_fn: &F)
                           -> Result<(), HatError>
-                          where F: Fn(&hash::Hash) {
+where F: Fn(&hash::Hash){
 
         let files_at_a_time = 1024;
         let mut it = self.list_from_key_store(dir_id)?.into_iter();
@@ -417,9 +426,7 @@ impl<B: StoreBackend> Family<B> {
                 let mut files = files_root.init_files(files_at_a_time as u32);
 
                 for (idx, (entry, data_ref, _data_res_open)) in
-                    it.by_ref()
-                        .take(files_at_a_time)
-                        .enumerate() {
+                    it.by_ref().take(files_at_a_time).enumerate() {
                     assert!(idx < files_at_a_time);
 
                     current_msg_is_empty = false;
@@ -428,26 +435,30 @@ impl<B: StoreBackend> Family<B> {
                     file_msg.set_id(entry.node_id.unwrap_or(0));
 
                     {
-                        entry.info.populate_msg(file_msg.borrow().init_info().borrow());
+                        entry
+                            .info
+                            .populate_msg(file_msg.borrow().init_info().borrow());
                     }
 
                     if let Some(hash_bytes) = entry.data_hash {
                         // This is a file, store its data hash:
                         let mut hash_ref_msg = capnp::message::Builder::new_default();
-                        let mut hash_ref_root =
-                            hash_ref_msg.init_root::<root_capnp::hash_ref::Builder>();
+                        let mut hash_ref_root = hash_ref_msg
+                            .init_root::<root_capnp::hash_ref::Builder>();
 
                         // Populate data hash and ChunkRef.
-                        data_ref.expect("has data")
+                        data_ref
+                            .expect("has data")
                             .populate_msg(hash_ref_root.borrow());
                         // Set as file content.
-                        file_msg.borrow()
+                        file_msg
+                            .borrow()
                             .init_content()
                             .set_data(hash_ref_root.as_reader())?;
 
                         top_hash_fn(&hash::Hash { bytes: hash_bytes });
                     } else {
-                        drop(data_ref);  // May not use data reference without hash.
+                        drop(data_ref); // May not use data reference without hash.
 
                         // This is a directory, recurse!
                         let mut inner_tree = self.key_store
@@ -457,13 +468,14 @@ impl<B: StoreBackend> Family<B> {
                         let dir_hash_ref = inner_tree.hash(Some(&entry.info))?;
 
                         let mut hash_ref_msg = capnp::message::Builder::new_default();
-                        let mut hash_ref_root =
-                            hash_ref_msg.init_root::<root_capnp::hash_ref::Builder>();
+                        let mut hash_ref_root = hash_ref_msg
+                            .init_root::<root_capnp::hash_ref::Builder>();
 
                         // Populate directory hash and ChunkRef.
                         dir_hash_ref.populate_msg(hash_ref_root.borrow());
                         // Set as directory content.
-                        file_msg.borrow()
+                        file_msg
+                            .borrow()
                             .init_content()
                             .set_directory(hash_ref_root.as_reader())?;
 

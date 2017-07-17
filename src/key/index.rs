@@ -121,30 +121,36 @@ impl Info {
             }
         };
         Ok(Info {
-            name: msg.get_name()?.to_vec(),
-            created_ts_secs: none_if_zero(msg.get_created_timestamp_secs()),
-            modified_ts_secs: none_if_zero(msg.get_modified_timestamp_secs()),
-            accessed_ts_secs: none_if_zero(msg.get_accessed_timestamp_secs()),
-            permissions: match msg.get_permissions().which()? {
-                root_capnp::file_info::permissions::None(()) => None,
-                root_capnp::file_info::permissions::Mode(m) => Some(fs::Permissions::from_mode(m)),
-            },
+               name: msg.get_name()?.to_vec(),
+               created_ts_secs: none_if_zero(msg.get_created_timestamp_secs()),
+               modified_ts_secs: none_if_zero(msg.get_modified_timestamp_secs()),
+               accessed_ts_secs: none_if_zero(msg.get_accessed_timestamp_secs()),
+               permissions: match msg.get_permissions().which()? {
+                   root_capnp::file_info::permissions::None(()) => None,
+                   root_capnp::file_info::permissions::Mode(m) => {
+                       Some(fs::Permissions::from_mode(m))
+                   }
+               },
 
-            user_id: owner.as_ref().map(|&(uid, _)| uid),
-            group_id: owner.as_ref().map(|&(_, gid)| gid),
+               user_id: owner.as_ref().map(|&(uid, _)| uid),
+               group_id: owner.as_ref().map(|&(_, gid)| gid),
 
-            byte_length: Some(msg.get_byte_length()),
+               byte_length: Some(msg.get_byte_length()),
 
-            hat_snapshot_ts: msg.get_hat_snapshot_timestamp(),
-        })
+               hat_snapshot_ts: msg.get_hat_snapshot_timestamp(),
+           })
     }
     pub fn populate_msg(&self, mut msg: root_capnp::file_info::Builder) {
         msg.borrow().set_name(&self.name);
 
-        msg.borrow().set_created_timestamp_secs(self.created_ts_secs.unwrap_or(0));
-        msg.borrow().set_modified_timestamp_secs(self.modified_ts_secs.unwrap_or(0));
-        msg.borrow().set_accessed_timestamp_secs(self.accessed_ts_secs.unwrap_or(0));
-        msg.borrow().set_byte_length(self.byte_length.unwrap_or(0));
+        msg.borrow()
+            .set_created_timestamp_secs(self.created_ts_secs.unwrap_or(0));
+        msg.borrow()
+            .set_modified_timestamp_secs(self.modified_ts_secs.unwrap_or(0));
+        msg.borrow()
+            .set_accessed_timestamp_secs(self.accessed_ts_secs.unwrap_or(0));
+        msg.borrow()
+            .set_byte_length(self.byte_length.unwrap_or(0));
 
         match (self.user_id, self.group_id) {
             (Some(uid), Some(gid)) => {
@@ -162,7 +168,8 @@ impl Info {
             None => msg.borrow().get_permissions().set_none(()),
         }
 
-        msg.borrow().set_hat_snapshot_timestamp(self.hat_snapshot_ts);
+        msg.borrow()
+            .set_hat_snapshot_timestamp(self.hat_snapshot_ts);
     }
 }
 
@@ -189,8 +196,9 @@ impl InternalKeyIndex {
                 .execute(&ki.conn)?;
         }
 
-        diesel::migrations::run_pending_migrations_in_directory(
-            &ki.conn, &migrations_dir, &mut InfoWriter)?;
+        diesel::migrations::run_pending_migrations_in_directory(&ki.conn,
+                                                                &migrations_dir,
+                                                                &mut InfoWriter)?;
 
         {
             let tm = ki.conn.transaction_manager();
@@ -200,7 +208,8 @@ impl InternalKeyIndex {
         {
             // Reset tags.
             use super::schema::key_data::dsl::*;
-            diesel::update(key_data.filter(tag.ne(Tag::Done as i64))).set(tag.eq(Tag::Done as i64))
+            diesel::update(key_data.filter(tag.ne(Tag::Done as i64)))
+                .set(tag.eq(Tag::Done as i64))
                 .execute(&ki.conn)?;
         }
 
@@ -208,8 +217,8 @@ impl InternalKeyIndex {
     }
 
     fn last_insert_rowid(&self) -> Result<i64, DieselError> {
-        let id = try!(diesel::select(diesel::expression::sql("last_insert_rowid()"))
-            .first::<i64>(&self.conn));
+        let id = diesel::select(diesel::expression::sql("last_insert_rowid()"))
+            .first::<i64>(&self.conn)?;
         Ok(id)
     }
 
@@ -257,7 +266,11 @@ impl InternalKeyIndex {
                 created: entry.info.created_ts_secs.map(|u| u as i64),
                 modified: entry.info.modified_ts_secs.map(|u| u as i64),
                 accessed: entry.info.accessed_ts_secs.map(|u| u as i64),
-                permissions: entry.info.permissions.as_ref().map(|p| p.mode() as i64),
+                permissions: entry
+                    .info
+                    .permissions
+                    .as_ref()
+                    .map(|p| p.mode() as i64),
                 group_id: entry.info.group_id.map(|u| u as i64),
                 user_id: entry.info.user_id.map(|u| u as i64),
                 hash: hash_ref_opt.map(|h| &h.hash.bytes[..]),
@@ -284,7 +297,8 @@ impl InternalKeyIndex {
 
         let row_opt = match parent_ {
             Some(p) => {
-                key_tree.inner_join(key_data)
+                key_tree
+                    .inner_join(key_data)
                     .filter(parent_id.eq(p as i64))
                     .filter(name.eq(&name_[..]))
                     .order(committed)
@@ -292,7 +306,8 @@ impl InternalKeyIndex {
                     .optional()?
             }
             None => {
-                key_tree.inner_join(key_data)
+                key_tree
+                    .inner_join(key_data)
                     .filter(parent_id.is_null())
                     .filter(name.eq(&name_[..]))
                     .order(committed)
@@ -303,21 +318,22 @@ impl InternalKeyIndex {
 
         if let Some((node, data)) = row_opt {
             Ok(Some(Entry {
-                node_id: node.node_id.map(|n| n as u64),
-                parent_id: node.parent_id.map(|p| p as u64),
-                data_hash: data.hash,
-                info: Info {
-                    name: name_,
-                    created_ts_secs: data.created.map(|i| i as u64),
-                    modified_ts_secs: data.modified.map(|i| i as u64),
-                    accessed_ts_secs: data.accessed.map(|i| i as u64),
-                    permissions: data.permissions.map(|m| fs::Permissions::from_mode(m as u32)),
-                    user_id: data.user_id.map(|x| x as u64),
-                    group_id: data.group_id.map(|x| x as u64),
-                    byte_length: None,
-                    hat_snapshot_ts: 0,
-                },
-            }))
+                        node_id: node.node_id.map(|n| n as u64),
+                        parent_id: node.parent_id.map(|p| p as u64),
+                        data_hash: data.hash,
+                        info: Info {
+                            name: name_,
+                            created_ts_secs: data.created.map(|i| i as u64),
+                            modified_ts_secs: data.modified.map(|i| i as u64),
+                            accessed_ts_secs: data.accessed.map(|i| i as u64),
+                            permissions: data.permissions
+                                .map(|m| fs::Permissions::from_mode(m as u32)),
+                            user_id: data.user_id.map(|x| x as u64),
+                            group_id: data.group_id.map(|x| x as u64),
+                            byte_length: None,
+                            hat_snapshot_ts: 0,
+                        },
+                    }))
         } else {
             Ok(None)
         }
@@ -334,13 +350,15 @@ impl InternalKeyIndex {
 
         let rows = match parent_opt {
             Some(p) => {
-                key_tree.inner_join(key_data)
+                key_tree
+                    .inner_join(key_data)
                     .filter(parent_id.eq(p as i64))
                     .filter(committed.eq(true))
                     .load::<(schema::KeyNode, schema::KeyData)>(&self.conn)?
             }
             None => {
-                key_tree.inner_join(key_data)
+                key_tree
+                    .inner_join(key_data)
                     .filter(parent_id.is_null())
                     .filter(committed.eq(true))
                     .load::<(schema::KeyNode, schema::KeyData)>(&self.conn)?
@@ -348,37 +366,38 @@ impl InternalKeyIndex {
         };
 
         Ok(rows.into_iter()
-            .map(|(node, mut data)| {
-                (Entry {
-                     node_id: node.node_id.map(|n| n as u64),
-                     parent_id: node.parent_id.map(|i| i as u64),
-                     data_hash: data.hash,
-                     info: Info {
-                         name: node.name,
-                         created_ts_secs: data.created.map(|i| i as u64),
-                         modified_ts_secs: data.modified.map(|i| i as u64),
-                         accessed_ts_secs: data.accessed.map(|i| i as u64),
-                         permissions: data.permissions
-                             .map(|m| fs::Permissions::from_mode(m as u32)),
-                         user_id: data.user_id.map(|x| x as u64),
-                         group_id: data.group_id.map(|x| x as u64),
-                         byte_length: None,
-                         hat_snapshot_ts: 0,
-                     },
+               .map(|(node, mut data)| {
+            (Entry {
+                 node_id: node.node_id.map(|n| n as u64),
+                 parent_id: node.parent_id.map(|i| i as u64),
+                 data_hash: data.hash,
+                 info: Info {
+                     name: node.name,
+                     created_ts_secs: data.created.map(|i| i as u64),
+                     modified_ts_secs: data.modified.map(|i| i as u64),
+                     accessed_ts_secs: data.accessed.map(|i| i as u64),
+                     permissions: data.permissions
+                         .map(|m| fs::Permissions::from_mode(m as u32)),
+                     user_id: data.user_id.map(|x| x as u64),
+                     group_id: data.group_id.map(|x| x as u64),
+                     byte_length: None,
+                     hat_snapshot_ts: 0,
                  },
-                 data.hash_ref
-                     .as_mut()
-                     .map(|p| ::hash::tree::HashRef::from_bytes(&mut &p[..]).unwrap()))
-            })
-            .collect())
+             },
+             data.hash_ref
+                 .as_mut()
+                 .map(|p| ::hash::tree::HashRef::from_bytes(&mut &p[..]).unwrap()))
+        })
+               .collect())
     }
 
     fn mark_reserved(&mut self, entry: &Entry) -> Result<(), DieselError> {
         use super::schema::key_data::dsl::*;
-        diesel::update(
-            key_data.filter(node_id.eq(entry.node_id.expect("Need ID to reserve entry") as i64)))
-            .set((tag.eq(Tag::Reserved as i64)))
-            .execute(&self.conn)?;
+        diesel::update(key_data.filter(node_id
+                                           .eq(entry.node_id.expect("Need ID to reserve entry") as
+                                               i64)))
+                .set((tag.eq(Tag::Reserved as i64)))
+                .execute(&self.conn)?;
         Ok(())
     }
 
@@ -387,9 +406,11 @@ impl InternalKeyIndex {
         // Promote all needed keys to 'ready' in one statement to preserve referential integrity.
         // If the (node_id, ready) combination already exist, the conflict is resolved by replace.
         use super::schema::key_data::dsl::*;
-        diesel::update(key_data.filter(tag.eq(Tag::Reserved as i64))
-                .filter(committed.eq(false))).set(committed.eq(true))
-            .execute(&self.conn)?;
+        diesel::update(key_data
+                           .filter(tag.eq(Tag::Reserved as i64))
+                           .filter(committed.eq(false)))
+                .set(committed.eq(true))
+                .execute(&self.conn)?;
 
         Ok(())
     }
@@ -402,13 +423,15 @@ impl InternalKeyIndex {
 
         let children = match parent_opt {
             Some(p) => {
-                key_tree.inner_join(key_data)
+                key_tree
+                    .inner_join(key_data)
                     .filter(parent_id.eq(p as i64))
                     .select((node_id, tag))
                     .load::<(Option<i64>, i64)>(&self.conn)?
             }
             None => {
-                key_tree.inner_join(key_data)
+                key_tree
+                    .inner_join(key_data)
                     .filter(parent_id.is_null())
                     .select((node_id, tag))
                     .load::<(Option<i64>, i64)>(&self.conn)?
@@ -420,7 +443,8 @@ impl InternalKeyIndex {
             if tag_ == Tag::Reserved as i64 {
                 self.cleanup_unused(Some(id as u64))?;
             } else {
-                diesel::delete(key_tree.filter(node_id.eq(id))).execute(&self.conn)?;
+                diesel::delete(key_tree.filter(node_id.eq(id)))
+                    .execute(&self.conn)?;
             }
         }
 

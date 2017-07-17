@@ -19,6 +19,7 @@ path = "src/main.rs"
 capnpc = "*"
 
 [dependencies]
+arrayref = "*"
 byteorder = "*"
 capnp = "*"
 clap = "*"
@@ -29,12 +30,14 @@ log = "*"
 quickcheck = "*"
 rand = "*"
 hex = "*"
-sodiumoxide = "*"
+secstr = "*"
 time = "*"
 void = "1"
 scoped-pool = "*"
 filetime = "*"
 
+[dependencies.argon2rs]
+version = "*"
 
 [dependencies.diesel]
 default-features = false
@@ -48,6 +51,10 @@ version = "^0.11.0"
 
 [features]
 default = []
+
+# Allow for simd intrinsics for performance increase.
+# This is not supported on stable or beta yet.
+simd = ["argon2rs/simd"]
 
 # Running our benchmarks currently requires
 # running on nightly. Use this feature to enable

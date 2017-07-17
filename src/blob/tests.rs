@@ -13,7 +13,8 @@
 // limitations under the License
 
 use backend::{MemoryBackend, StoreBackend};
-use blob::{Blob, BlobError, BlobIndex, BlobStore, ChunkRef, Key, NodeType, LeafType};
+use blob::{Blob, BlobReader, BlobError, BlobIndex, BlobStore, ChunkRef, NodeType, LeafType};
+use crypto;
 use db;
 use hash;
 use quickcheck;
@@ -26,16 +27,19 @@ fn identity() {
     fn prop(chunks: Vec<Vec<u8>>) -> bool {
         let backend = Arc::new(MemoryBackend::new());
 
+        let keys = Arc::new(crypto::keys::Keeper::new_for_testing());
         let db = Arc::new(db::Index::new_for_testing());
-        let blob_index = Arc::new(BlobIndex::new(db).unwrap());
-        let bs_p = BlobStore::new(blob_index, backend.clone(), 1024);
+        let blob_index = Arc::new(BlobIndex::new(keys.clone(), db).unwrap());
+        let bs_p = BlobStore::new(keys.clone(), blob_index, backend.clone(), 1024);
 
         let mut ids = Vec::new();
         for chunk in chunks.iter() {
+            let node = NodeType::Leaf;
+            let leaf = LeafType::FileChunk;
             ids.push((bs_p.store(&chunk[..],
-                                 hash::Hash::new(chunk),
-                                 NodeType::Leaf,
-                                 LeafType::FileChunk,
+                                 hash::Hash::new(&keys, node, leaf, chunk),
+                                 node,
+                                 leaf,
                                  None,
                                  Box::new(move |_| {})),
                       chunk));
@@ -55,10 +59,7 @@ fn identity() {
 
         // All chunks must be available through the blob store:
         for &(ref id, chunk) in ids.iter() {
-            assert_eq!(bs_p.retrieve(&id.hash, &id.persistent_ref)
-                           .unwrap()
-                           .unwrap(),
-                       &chunk[..]);
+            assert_eq!(bs_p.retrieve(&id).unwrap().unwrap(), &chunk[..]);
         }
 
         return true;
@@ -71,25 +72,25 @@ fn identity_with_excessive_flushing() {
     fn prop(chunks: Vec<Vec<u8>>) -> bool {
         let backend = Arc::new(MemoryBackend::new());
 
+        let keys = Arc::new(crypto::keys::Keeper::new_for_testing());
         let db = Arc::new(db::Index::new_for_testing());
-        let blob_index = Arc::new(BlobIndex::new(db).unwrap());
-        let bs_p = BlobStore::new(blob_index, backend.clone(), 1024);
+        let blob_index = Arc::new(BlobIndex::new(keys.clone(), db).unwrap());
+        let bs_p = BlobStore::new(keys.clone(), blob_index, backend.clone(), 1024);
 
         let mut ids = Vec::new();
         for chunk in chunks.iter() {
+            let node = NodeType::Leaf;
+            let leaf = LeafType::FileChunk;
             ids.push((bs_p.store(&chunk[..],
-                                 hash::Hash::new(chunk),
-                                 NodeType::Leaf,
-                                 LeafType::FileChunk,
+                                 hash::Hash::new(&keys, node, leaf, chunk),
+                                 node,
+                                 leaf,
                                  None,
                                  Box::new(move |_| {})),
                       chunk));
             bs_p.flush();
             let &(ref id, chunk) = ids.last().unwrap();
-            assert_eq!(bs_p.retrieve(&id.hash, &id.persistent_ref)
-                           .unwrap()
-                           .unwrap(),
-                       &chunk[..]);
+            assert_eq!(bs_p.retrieve(&id).unwrap().unwrap(), &chunk[..]);
         }
 
         // Non-empty chunks must be in the backend now:
@@ -104,10 +105,7 @@ fn identity_with_excessive_flushing() {
 
         // All chunks must be available through the blob store:
         for &(ref id, chunk) in ids.iter() {
-            assert_eq!(bs_p.retrieve(&id.hash, &id.persistent_ref)
-                           .unwrap()
-                           .unwrap(),
-                       &chunk[..]);
+            assert_eq!(bs_p.retrieve(&id).unwrap().unwrap(), &chunk[..]);
         }
 
         return true;
@@ -127,17 +125,29 @@ fn blobid_identity() {
             key: None,
         };
         let blob_name_bytes = blob_name.as_bytes();
-        ChunkRef::from_bytes(&mut &blob_name_bytes[..]).unwrap() == blob_name
+        let recovered = ChunkRef::from_bytes(&mut &blob_name_bytes[..]).unwrap();
+        assert_eq!(blob_name.blob_name, recovered.blob_name);
+        assert_eq!(blob_name.offset, recovered.offset);
+        assert_eq!(blob_name.length, recovered.length);
+        assert!(recovered.blob_id.is_none());
+        assert!(recovered.packing.is_none());
+        assert!(recovered.key.is_none());
+
+        true
     }
     quickcheck::quickcheck(prop as fn(Vec<u8>, usize, usize) -> bool);
 }
 
 #[test]
 fn blob_reuse() {
+    let keys = Arc::new(crypto::keys::Keeper::new_for_testing());
+
+    let node = NodeType::Leaf;
+    let leaf = LeafType::FileChunk;
     let mut c1 = hash::tree::HashRef {
-        hash: hash::Hash::new(&[]),
-        node: NodeType::Leaf,
-        leaf: LeafType::FileChunk,
+        hash: hash::Hash::new(&keys, node, leaf, &[]),
+        node: node,
+        leaf: leaf,
         info: None,
         persistent_ref: ChunkRef {
             blob_id: None,
@@ -150,16 +160,14 @@ fn blob_reuse() {
     };
     let mut c2 = c1.clone();
 
-    let mut b = Blob::new(1000);
+    let mut b = Blob::new(keys.clone(), 1000);
     b.try_append(&[1, 2, 3], &mut c1).unwrap();
     b.try_append(&[4, 5, 6], &mut c2).unwrap();
 
     let out = b.to_ciphertext().unwrap().to_vec();
-
-    assert_eq!(vec![1, 2, 3],
-               Blob::read_chunk(&out, &c1.hash, &c1.persistent_ref).unwrap());
-    assert_eq!(vec![4, 5, 6],
-               Blob::read_chunk(&out, &c2.hash, &c2.persistent_ref).unwrap());
+    let reader = BlobReader::new(keys.clone(), crypto::CipherTextRef::new(&out[..])).unwrap();
+    assert_eq!(vec![1, 2, 3], reader.read_chunk(&c1).unwrap());
+    assert_eq!(vec![4, 5, 6], reader.read_chunk(&c2).unwrap());
 
     let mut c3 = c2.clone();
 
@@ -168,25 +176,28 @@ fn blob_reuse() {
     b.try_append(&[1, 2], &mut c3).unwrap();
 
     let out = b.to_ciphertext().unwrap().to_vec();
-    assert_eq!(vec![1, 2],
-               Blob::read_chunk(&out, &c1.hash, &c1.persistent_ref).unwrap());
-    assert_eq!(vec![1, 2],
-               Blob::read_chunk(&out, &c2.hash, &c2.persistent_ref).unwrap());
-    assert_eq!(vec![1, 2],
-               Blob::read_chunk(&out, &c3.hash, &c3.persistent_ref).unwrap());
+    let reader = BlobReader::new(keys.clone(), crypto::CipherTextRef::new(&out[..])).unwrap();
+    assert_eq!(vec![1, 2], reader.read_chunk(&c1).unwrap());
+    assert_eq!(vec![1, 2], reader.read_chunk(&c2).unwrap());
+    assert_eq!(vec![1, 2], reader.read_chunk(&c3).unwrap());
 }
 
 #[test]
 fn blob_identity() {
     fn prop(chunks: Vec<Vec<u8>>) -> bool {
         let max_size = 10000;
-        let mut b = Blob::new(max_size);
+        let keys = Arc::new(crypto::keys::Keeper::new_for_testing());
+
+        let node = NodeType::Leaf;
+        let leaf = LeafType::FileChunk;
+
+        let mut b = Blob::new(keys.clone(), max_size);
         let mut n = 0;
         for chunk in chunks.iter() {
             let mut cref = hash::tree::HashRef {
-                hash: hash::Hash::new(&[]),
-                node: NodeType::Leaf,
-                leaf: LeafType::FileChunk,
+                hash: hash::Hash::new(&keys, node, leaf, &[]),
+                node: node,
+                leaf: leaf,
                 info: None,
                 persistent_ref: ChunkRef {
                     blob_id: None,
@@ -214,13 +225,15 @@ fn blob_identity() {
 
         assert_eq!(max_size, out.len());
 
-        let hrefs = Blob::new(max_size).refs_from_bytes(&out).unwrap();
+        let keys = Arc::new(crypto::keys::Keeper::new_for_testing());
+        let reader = BlobReader::new(keys.clone(), crypto::CipherTextRef::new(&out[..])).unwrap();
+        let hrefs = reader.refs().unwrap();
         assert_eq!(n, hrefs.len());
 
         // Check recovered ChunkRefs.
         for (i, href) in hrefs.into_iter().enumerate() {
             assert!(chunks[i].len() < href.persistent_ref.length);
-            let chunk = Blob::read_chunk(&out, &href.hash, &href.persistent_ref).unwrap();
+            let chunk = reader.read_chunk(&href).unwrap();
             assert_eq!(chunks[i].len(), chunk.len());
             assert_eq!(&chunks[i], &chunk);
         }
@@ -233,43 +246,23 @@ fn blob_identity() {
 
 #[test]
 fn random_input_fails() {
-    use sodiumoxide::crypto::secretbox::xsalsa20poly1305;
-
-    fn prop(data: Vec<u8>, hash: Vec<u8>) -> bool {
-        let blob = Blob::new(128000);
-        if let Ok(_) = blob.refs_from_bytes(&data[..]) {
-            return false;
-        }
-        let key = vec![0; 32];
-        let hash = hash::Hash { bytes: hash };
-        let mut cref = ChunkRef {
-            blob_id: None,
-            blob_name: Vec::new(),
-            offset: 0,
-            length: 0,
-            packing: None,
-            key: Some(Key::XSalsa20Poly1305(xsalsa20poly1305::Key::from_slice(&key[..]).unwrap())),
-        };
-
-        for l in 0..data.len() {
-            cref.length = l;
-            if let Ok(_) = Blob::read_chunk(&data[..], &hash, &cref) {
-                return false;
-            }
-        }
-
-        return true;
+    fn prop(data: Vec<u8>) -> bool {
+        let keys = Arc::new(crypto::keys::Keeper::new_for_testing());
+        BlobReader::new(keys, crypto::CipherTextRef::new(&data[..])).is_err()
     }
-    quickcheck::quickcheck(prop as fn(Vec<u8>, Vec<u8>) -> bool);
+    quickcheck::quickcheck(prop as fn(Vec<u8>) -> bool);
 }
 
 fn empty_blocks_blob_ciphertext(blob: &mut Blob, blocksize: usize) -> Vec<u8> {
+    let keys = Arc::new(crypto::keys::Keeper::new_for_testing());
     let block = vec![0u8; blocksize];
+    let node = NodeType::Leaf;
+    let leaf = LeafType::FileChunk;
     loop {
         let mut cref = hash::tree::HashRef {
-            hash: hash::Hash::new(&block[..]),
-            node: NodeType::Leaf,
-            leaf: LeafType::FileChunk,
+            hash: hash::Hash::new(&keys, node, leaf, &block[..]),
+            node: node,
+            leaf: leaf,
             info: None,
             persistent_ref: ChunkRef {
                 blob_id: None,
@@ -292,7 +285,8 @@ fn empty_blocks_blob_ciphertext(blob: &mut Blob, blocksize: usize) -> Vec<u8> {
 fn blob_ciphertext_uniqueblocks() {
     // If every inserted block gets a unique (nonce, key) combination, they should produce unique
     // blocks in the out-coming ciphertext (by high enough probability to assert it).
-    let mut blob = Blob::new(1024 * 1024);
+    let keys = Arc::new(crypto::keys::Keeper::new_for_testing());
+    let mut blob = Blob::new(keys, 1024 * 1024);
     let mut blocks = HashSet::new();
 
     for _ in 1..10 {
@@ -306,13 +300,15 @@ fn blob_ciphertext_uniqueblocks() {
 
 #[test]
 fn blob_ciphertext_authed_allbytes() {
-    let mut blob = Blob::new(1024);
+    let keys = Arc::new(crypto::keys::Keeper::new_for_testing());
+    let mut blob = Blob::new(keys.clone(), 1024);
     let mut bytes = empty_blocks_blob_ciphertext(&mut blob, 1);
 
-    fn verify(blob: &Blob, bs: &[u8]) -> Result<Vec<Vec<u8>>, BlobError> {
+    fn verify(keys: &Arc<crypto::keys::Keeper>, bs: &[u8]) -> Result<Vec<Vec<u8>>, BlobError> {
         let mut vs = vec![];
-        for r in blob.refs_from_bytes(bs)? {
-            vs.push(Blob::read_chunk(&bs, &r.hash, &r.persistent_ref)?);
+        let reader = BlobReader::new(keys.clone(), crypto::CipherTextRef::new(&bs[..]))?;
+        for r in reader.refs()? {
+            vs.push(reader.read_chunk(&r)?);
         }
         Ok(vs)
     };
@@ -335,10 +331,10 @@ fn blob_ciphertext_authed_allbytes() {
     };
 
     // Blob is valid.
-    let vs = verify(&blob, &bytes[..]).unwrap();
+    let vs = verify(&keys, &bytes[..]).unwrap();
     for i in 0..bytes.len() {
-        assert!(with_modified(&mut bytes[..], i, 1, |bs| verify(&blob, bs)).is_err());
+        assert!(with_modified(&mut bytes[..], i, 1, |bs| verify(&keys, bs)).is_err());
     }
     // We did not corrupt the blob.
-    assert_eq!(vs, verify(&blob, &bytes[..]).unwrap());
+    assert_eq!(vs, verify(&keys, &bytes[..]).unwrap());
 }

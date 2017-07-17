@@ -49,7 +49,8 @@ impl<P: Clone + Ord, K: Clone + Ord, V> UniquePriorityQueue<P, K, V> {
         if self.priority.get(&p).is_some() || self.key_to_priority.contains_key(&k) {
             return Err(());
         }
-        self.priority.insert_unique(p.clone(), (Status::Pending, k.clone(), v));
+        self.priority
+            .insert_unique(p.clone(), (Status::Pending, k.clone(), v));
         self.key_to_priority.insert(k, p);
 
         Ok(())
@@ -61,19 +62,27 @@ impl<P: Clone + Ord, K: Clone + Ord, V> UniquePriorityQueue<P, K, V> {
     }
 
     pub fn find_mut_value_of_priority(&mut self, p: &P) -> Option<&mut V> {
-        self.priority.get_mut(p).map(|&mut (_, _, ref mut v_opt)| v_opt)
+        self.priority
+            .get_mut(p)
+            .map(|&mut (_, _, ref mut v_opt)| v_opt)
     }
 
     pub fn update_value<F>(&mut self, k: &K, f: F)
         where F: FnOnce(&mut V)
     {
-        let prio = self.key_to_priority.get(k).expect("update_value: Key must exist.");
-        let cur = self.priority.get_mut(prio).expect("update_value: Priority must exist.");
+        let prio = self.key_to_priority
+            .get(k)
+            .expect("update_value: Key must exist.");
+        let cur = self.priority
+            .get_mut(prio)
+            .expect("update_value: Priority must exist.");
         f(&mut cur.2);
     }
 
     pub fn set_ready(&mut self, p: &P) {
-        let cur = self.priority.get_mut(p).expect("set_ready: Priority must exist.");
+        let cur = self.priority
+            .get_mut(p)
+            .expect("set_ready: Priority must exist.");
         cur.0 = Status::Ready;
     }
 
@@ -81,9 +90,9 @@ impl<P: Clone + Ord, K: Clone + Ord, V> UniquePriorityQueue<P, K, V> {
         let min_opt = self.priority
             .pop_min_when(|_k, min| min.0 == Status::Ready);
         min_opt.map(|(p, (_status, k, v))| {
-            self.key_to_priority.remove(&k);
-            (p, k, v)
-        })
+                        self.key_to_priority.remove(&k);
+                        (p, k, v)
+                    })
     }
 }
 

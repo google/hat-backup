@@ -17,6 +17,7 @@
 
 use backend::StoreBackend;
 use capnp;
+use crypto;
 use errors;
 use hash::Hash;
 use hash::tree::HashRef;
@@ -39,7 +40,7 @@ pub mod tests;
 mod benchmarks;
 
 
-pub use self::blob::Blob;
+pub use self::blob::{Blob, BlobReader};
 pub use self::chunk::{ChunkRef, Key, NodeType, LeafType, Packing};
 pub use self::index::{BlobDesc, BlobIndex};
 
@@ -64,6 +65,7 @@ error_type! {
 pub struct BlobStore<B>(Arc<Mutex<StoreInner<B>>>);
 
 pub struct StoreInner<B> {
+    keys: Arc<crypto::keys::Keeper>,
     backend: Arc<B>,
     blob_index: Arc<BlobIndex>,
     blob_desc: BlobDesc,
@@ -79,13 +81,18 @@ impl<B> Drop for StoreInner<B> {
 }
 
 impl<B: StoreBackend> StoreInner<B> {
-    fn new(index: Arc<BlobIndex>, backend: Arc<B>, max_blob_size: usize) -> StoreInner<B> {
+    fn new(keys: Arc<crypto::keys::Keeper>,
+           index: Arc<BlobIndex>,
+           backend: Arc<B>,
+           max_blob_size: usize)
+           -> StoreInner<B> {
         let mut bs = StoreInner {
+            keys: keys.clone(),
             backend: backend,
             blob_index: index,
             blob_desc: Default::default(),
             blob_refs: Vec::new(),
-            blob: Blob::new(max_blob_size),
+            blob: Blob::new(keys, max_blob_size),
         };
         bs.reserve_new_blob();
         bs
@@ -164,12 +171,15 @@ impl<B: StoreBackend> StoreInner<B> {
         href
     }
 
-    fn retrieve(&mut self, hash: &Hash, cref: &ChunkRef) -> Result<Option<Vec<u8>>, BlobError> {
-        if cref.offset == 0 && cref.length == 0 {
+    fn retrieve(&mut self, href: &HashRef) -> Result<Option<Vec<u8>>, BlobError> {
+        if href.persistent_ref.offset == 0 && href.persistent_ref.length == 0 {
             return Ok(Some(Vec::new()));
         }
-        match self.backend.retrieve(&cref.blob_name[..]) {
-            Ok(Some(blob)) => Ok(Some(Blob::read_chunk(&blob, hash, cref)?)),
+        match self.backend.retrieve(&href.persistent_ref.blob_name[..]) {
+            Ok(Some(blob)) => {
+                Ok(Some(BlobReader::new(self.keys.clone(), crypto::CipherTextRef::new(&blob[..]))?
+                            .read_chunk(href)?))
+            }
             Ok(None) => Ok(None),
             Err(e) => Err(e.into()),
         }
@@ -179,7 +189,8 @@ impl<B: StoreBackend> StoreInner<B> {
         match self.backend.retrieve(&blob.name[..])? {
             None => Ok(None),
             Some(ct) => {
-                let hrefs = self.blob.refs_from_bytes(&ct)?;
+                let hrefs = BlobReader::new(self.keys.clone(), crypto::CipherTextRef::new(&ct[..]))?
+                    .refs()?;
                 if hrefs.len() == 0 {
                     Ok(None)
                 } else {
@@ -198,11 +209,12 @@ impl<B: StoreBackend> StoreInner<B> {
     }
 
     fn tag(&mut self, chunk: ChunkRef, tag: tags::Tag) {
-        self.blob_index.tag(&BlobDesc {
-                                id: chunk.blob_id.unwrap_or(0),
-                                name: chunk.blob_name,
-                            },
-                            tag);
+        self.blob_index
+            .tag(&BlobDesc {
+                      id: chunk.blob_id.unwrap_or(0),
+                      name: chunk.blob_name,
+                  },
+                 tag);
     }
 
     fn tag_all(&mut self, tag: tags::Tag) {
@@ -220,8 +232,12 @@ impl<B: StoreBackend> StoreInner<B> {
 }
 
 impl<B: StoreBackend> BlobStore<B> {
-    pub fn new(index: Arc<BlobIndex>, backend: Arc<B>, max_blob_size: usize) -> BlobStore<B> {
-        BlobStore(Arc::new(Mutex::new(StoreInner::new(index, backend, max_blob_size))))
+    pub fn new(keys: Arc<crypto::keys::Keeper>,
+               index: Arc<BlobIndex>,
+               backend: Arc<B>,
+               max_blob_size: usize)
+               -> BlobStore<B> {
+        BlobStore(Arc::new(Mutex::new(StoreInner::new(keys, index, backend, max_blob_size))))
     }
 
     fn lock(&self) -> MutexGuard<StoreInner<B>> {
@@ -244,8 +260,8 @@ impl<B: StoreBackend> BlobStore<B> {
     }
 
     /// Retrieve the data chunk identified by `ChunkRef`.
-    pub fn retrieve(&self, hash: &Hash, cref: &ChunkRef) -> Result<Option<Vec<u8>>, BlobError> {
-        self.lock().retrieve(hash, cref)
+    pub fn retrieve(&self, href: &HashRef) -> Result<Option<Vec<u8>>, BlobError> {
+        self.lock().retrieve(href)
     }
 
     /// Fetch a blob and recover the HashRefs for its contents.
@@ -277,9 +293,9 @@ impl<B: StoreBackend> BlobStore<B> {
     pub fn find(&self, name: &[u8]) -> Option<BlobDesc> {
         if &name[..] == [0] {
             Some(BlobDesc {
-                name: vec![0],
-                id: 0,
-            })
+                     name: vec![0],
+                     id: 0,
+                 })
         } else {
             self.lock().blob_index.find(name)
         }

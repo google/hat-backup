@@ -55,9 +55,9 @@ impl<B: gc::GcBackend> gc::Gc<B> for GcRc<B> {
             self.backend
                 .update_data(r, DATA_FAMILY, move |GcData { num, bytes }| {
                     Some(GcData {
-                        num: num + 1,
-                        bytes: bytes,
-                    })
+                             num: num + 1,
+                             bytes: bytes,
+                         })
                 })?;
         }
 
@@ -97,9 +97,9 @@ impl<B: gc::GcBackend> gc::Gc<B> for GcRc<B> {
             self.backend
                 .update_data(r, DATA_FAMILY, move |GcData { num, bytes }| {
                     Some(GcData {
-                        num: num - 1,
-                        bytes: bytes,
-                    })
+                             num: num - 1,
+                             bytes: bytes,
+                         })
                 })?;
         }
         self.backend.set_tag(ref_final, tags::Tag::ReadyDelete)?;
@@ -130,11 +130,11 @@ impl<B: gc::GcBackend> gc::Gc<B> for GcRc<B> {
 
     fn status(&mut self, final_ref: gc::Id) -> Result<Option<gc::Status>, Self::Err> {
         Ok(match self.backend.get_tag(final_ref)? {
-            Some(tags::Tag::Complete) |
-            Some(tags::Tag::ReadyDelete) => Some(gc::Status::Complete),
-            Some(tags::Tag::InProgress) => Some(gc::Status::InProgress),
-            _ => None,
-        })
+               Some(tags::Tag::Complete) |
+               Some(tags::Tag::ReadyDelete) => Some(gc::Status::Complete),
+               Some(tags::Tag::InProgress) => Some(gc::Status::InProgress),
+               _ => None,
+           })
     }
 }
 

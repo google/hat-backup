@@ -14,7 +14,7 @@
 
 use capnp;
 use root_capnp;
-use sodiumoxide::crypto::secretbox::xsalsa20poly1305;
+use secstr;
 
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -23,9 +23,9 @@ pub enum Packing {
     Snappy,
 }
 
-#[derive(Debug, Clone, Eq, PartialEq)]
+#[derive(Debug, Clone)]
 pub enum Key {
-    XSalsa20Poly1305(xsalsa20poly1305::Key),
+    AeadChacha20Poly1305(secstr::SecStr),
 }
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
@@ -97,7 +97,7 @@ impl From<LeafType> for u64 {
     }
 }
 
-#[derive(Debug, Clone, Eq, PartialEq)]
+#[derive(Debug, Clone)]
 pub struct ChunkRef {
     pub blob_id: Option<i64>,
     pub blob_name: Vec<u8>,
@@ -151,8 +151,10 @@ impl ChunkRef {
         msg.set_offset(self.offset as u64);
         msg.set_length(self.length as u64);
 
-        if let Some(Key::XSalsa20Poly1305(ref salsa)) = self.key {
-            msg.borrow().init_key().set_xsalsa20_poly1305(salsa.0.as_ref());
+        if let Some(Key::AeadChacha20Poly1305(ref chacha)) = self.key {
+            msg.borrow()
+                .init_key()
+                .set_aead_chacha20_poly1305(chacha.unsecure());
         } else {
             msg.borrow().init_key().set_none(());
         }
@@ -166,22 +168,21 @@ impl ChunkRef {
 
     pub fn read_msg(msg: &root_capnp::chunk_ref::Reader) -> Result<ChunkRef, capnp::Error> {
         Ok(ChunkRef {
-            blob_id: None,
-            blob_name: msg.get_blob_name()?.to_owned(),
-            offset: msg.get_offset() as usize,
-            length: msg.get_length() as usize,
-            packing: match msg.get_packing().which()? {
-                root_capnp::chunk_ref::packing::None(()) => None,
-                root_capnp::chunk_ref::packing::Gzip(()) => Some(Packing::GZip),
-                root_capnp::chunk_ref::packing::Snappy(()) => Some(Packing::Snappy),
-            },
-            key: match msg.get_key().which()? {
-                root_capnp::chunk_ref::key::None(()) => None,
-                root_capnp::chunk_ref::key::Xsalsa20Poly1305(res) => {
-                    Some(Key::XSalsa20Poly1305(xsalsa20poly1305::Key::from_slice(res?)
-                        .expect("Incorrect key-size")))
-                }
-            },
-        })
+               blob_id: None,
+               blob_name: msg.get_blob_name()?.to_owned(),
+               offset: msg.get_offset() as usize,
+               length: msg.get_length() as usize,
+               packing: match msg.get_packing().which()? {
+                   root_capnp::chunk_ref::packing::None(()) => None,
+                   root_capnp::chunk_ref::packing::Gzip(()) => Some(Packing::GZip),
+                   root_capnp::chunk_ref::packing::Snappy(()) => Some(Packing::Snappy),
+               },
+               key: match msg.get_key().which()? {
+                   root_capnp::chunk_ref::key::None(()) => None,
+                   root_capnp::chunk_ref::key::AeadChacha20Poly1305(res) => {
+                       Some(Key::AeadChacha20Poly1305(secstr::SecStr::from(res?)))
+                   }
+               },
+           })
     }
 }

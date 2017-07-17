@@ -43,7 +43,7 @@ struct ChunkRef {
 
 	key :union {
 		none @6 :Void;
-		xsalsa20Poly1305 @7 :Data;
+		aeadChacha20Poly1305 @7 :Data;
 	}
 }
 

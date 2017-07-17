@@ -14,14 +14,13 @@
 
 
 use blob::{ChunkRef, NodeType, LeafType};
+use crypto;
 use hash::Hash;
 use hash::tree::*;
 use key;
 use quickcheck;
 
-use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet};
-
 use std::sync::{Arc, Mutex};
 
 #[derive(Clone)]
@@ -46,21 +45,18 @@ impl MemoryBackend {
 impl HashTreeBackend for MemoryBackend {
     type Err = key::MsgError;
 
-    fn fetch_chunk(&self,
-                   hash: &Hash,
-                   ref_opt: Option<&ChunkRef>)
-                   -> Result<Option<Vec<u8>>, Self::Err> {
-        let hash = match ref_opt {
-            Some(ref b) => Cow::Owned(Hash { bytes: b.blob_name.clone() }), // blob name is chunk hash
-            None => Cow::Borrowed(hash),
-        };
+    fn fetch_chunk(&self, href: &HashRef) -> Result<Option<Vec<u8>>, Self::Err> {
         let guarded_chunks = self.chunks.lock().unwrap();
-        Ok(guarded_chunks.get(&hash.bytes).map(|&(_, _, _, ref chunk)| chunk.clone()))
+        Ok(guarded_chunks
+               .get(&href.hash.bytes)
+               .map(|&(_, _, _, ref chunk)| chunk.clone()))
     }
 
     fn fetch_childs(&self, hash: &Hash) -> Option<Vec<u64>> {
         let guarded_chunks = self.chunks.lock().unwrap();
-        guarded_chunks.get(&hash.bytes).and_then(|&(_, _, ref childs, _)| childs.clone())
+        guarded_chunks
+            .get(&hash.bytes)
+            .and_then(|&(_, _, ref childs, _)| childs.clone())
     }
 
     fn fetch_persistent_ref(&self, hash: &Hash) -> Option<ChunkRef> {
@@ -68,13 +64,13 @@ impl HashTreeBackend for MemoryBackend {
         match guarded_chunks.get(&hash.bytes) {
             Some(&(_, _, _, ref chunk)) => {
                 Some(ChunkRef {
-                    blob_id: None,
-                    blob_name: hash.bytes.clone(),
-                    offset: 0,
-                    length: chunk.len(),
-                    packing: None,
-                    key: None,
-                })
+                         blob_id: None,
+                         blob_name: hash.bytes.clone(),
+                         offset: 0,
+                         length: chunk.len(),
+                         packing: None,
+                         key: None,
+                     })
             }
             None => None,
         }
@@ -93,7 +89,8 @@ impl HashTreeBackend for MemoryBackend {
 
         let mut guarded_chunks = self.chunks.lock().unwrap();
 
-        let hash = Hash::new(chunk);
+        let keys = crypto::keys::Keeper::new_for_testing();
+        let hash = Hash::new(&keys, node, leaf, chunk);
         guarded_chunks.insert(hash.bytes.clone(), (node, leaf, childs, chunk.to_vec()));
 
         Ok((0,
@@ -190,8 +187,11 @@ fn identity_append1() {
 
 #[test]
 fn identity_append5() {
-    let blocks: Vec<Vec<u8>> =
-        vec![b"foo".to_vec(), b"bar".to_vec(), b"baz".to_vec(), b"qux".to_vec(), b"norf".to_vec()];
+    let blocks: Vec<Vec<u8>> = vec![b"foo".to_vec(),
+                                    b"bar".to_vec(),
+                                    b"baz".to_vec(),
+                                    b"qux".to_vec(),
+                                    b"norf".to_vec()];
 
     let backend = MemoryBackend::new();
     let mut ht = SimpleHashTreeWriter::new(LeafType::FileChunk, 4, backend.clone());
