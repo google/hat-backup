@@ -154,7 +154,7 @@ impl ChunkRef {
         if let Some(Key::AeadChacha20Poly1305(ref chacha)) = self.key {
             msg.borrow()
                 .init_key()
-                .set_xsalsa20_poly1305(chacha.unsecure());
+                .set_aead_chacha20_poly1305(chacha.unsecure());
         } else {
             msg.borrow().init_key().set_none(());
         }
@@ -179,7 +179,7 @@ impl ChunkRef {
                },
                key: match msg.get_key().which()? {
                    root_capnp::chunk_ref::key::None(()) => None,
-                   root_capnp::chunk_ref::key::Xsalsa20Poly1305(res) => {
+                   root_capnp::chunk_ref::key::AeadChacha20Poly1305(res) => {
                     Some(Key::AeadChacha20Poly1305(secstr::SecStr::from(res?)))
                 }
                },
