@@ -68,15 +68,7 @@ table! {
 }
 
 joinable!(snapshots -> family (family_id));
-select_column_workaround!(snapshots -> family (id, tag, family_id, snapshot_id, msg,
-                                               hash, hash_ref));
-select_column_workaround!(family -> snapshots (id, name));
-
 joinable!(hashes -> blobs (blob_id));
-select_column_workaround!(blobs -> hashes (id, name, tag));
-select_column_workaround!(
-    hashes -> blobs (id, hash, tag, height, leaf_type, childs, blob_id, blob_ref, ready));
-
 
 // Rust models.
 

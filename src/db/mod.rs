@@ -280,7 +280,7 @@ impl InternalIndex {
         use diesel::expression::max;
 
         let id_opt = hashes
-            .select(max(id).nullable())
+            .select(max(id))
             .first::<Option<i64>>(&self.conn)
             .expect("Error selecting max hash id");
 
@@ -569,7 +569,7 @@ impl InternalIndex {
         use self::schema::blobs::dsl::*;
 
         blobs
-            .select(max(id).nullable())
+            .select(max(id))
             .first::<Option<i64>>(&self.conn)
             .optional()
             .expect("Error querying blobs")
@@ -720,7 +720,7 @@ impl InternalIndex {
 
         snapshots
             .filter(family_id.eq(family_id_))
-            .select(max(snapshot_id).nullable())
+            .select(max(snapshot_id))
             .first::<Option<i64>>(&self.conn)
             .optional()
             .expect("Error reading latest snapshot id")
