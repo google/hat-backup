@@ -180,8 +180,8 @@ impl ChunkRef {
                key: match msg.get_key().which()? {
                    root_capnp::chunk_ref::key::None(()) => None,
                    root_capnp::chunk_ref::key::AeadChacha20Poly1305(res) => {
-                    Some(Key::AeadChacha20Poly1305(secstr::SecStr::from(res?)))
-                }
+                       Some(Key::AeadChacha20Poly1305(secstr::SecStr::from(res?)))
+                   }
                },
            })
     }

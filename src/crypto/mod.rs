@@ -141,7 +141,10 @@ impl<'a> PlainTextRef<'a> {
                          nonce: &authed::desc::Nonce,
                          key: &authed::desc::Key)
                          -> CipherText {
-        CipherText::new(keys::Keeper::symmetric_lock(self.0, additional_data, nonce.unsecure(), key.unsecure()))
+        CipherText::new(keys::Keeper::symmetric_lock(self.0,
+                                                     additional_data,
+                                                     nonce.unsecure(),
+                                                     key.unsecure()))
     }
 }
 
@@ -203,8 +206,7 @@ impl CipherText {
         }
     }
     pub fn random_pad(size: usize) -> CipherText {
-        use libsodium_sys::{crypto_stream_chacha20,
-                            crypto_stream_chacha20_KEYBYTES,
+        use libsodium_sys::{crypto_stream_chacha20, crypto_stream_chacha20_KEYBYTES,
                             crypto_stream_chacha20_NONCEBYTES};
 
         let key = keys::random_bytes(crypto_stream_chacha20_KEYBYTES);
@@ -212,11 +214,12 @@ impl CipherText {
         let mut stream = vec![0u8; size];
 
         let ret = unsafe {
-            crypto_stream_chacha20(
-                stream.as_mut_ptr(),
-                stream.len() as u64,
-                nonce.unsecure().as_ptr() as *const [u8; crypto_stream_chacha20_NONCEBYTES],
-                key.unsecure().as_ptr() as *const [u8; crypto_stream_chacha20_KEYBYTES])
+            crypto_stream_chacha20(stream.as_mut_ptr(),
+                                   stream.len() as u64,
+                                   nonce.unsecure().as_ptr() as
+                                   *const [u8; crypto_stream_chacha20_NONCEBYTES],
+                                   key.unsecure().as_ptr() as
+                                   *const [u8; crypto_stream_chacha20_KEYBYTES])
         };
         assert_eq!(0, ret);
 
@@ -328,8 +331,7 @@ impl RefKey {
         match href.persistent_ref.key {
             Some(Key::AeadChacha20Poly1305(ref key)) if href.hash.bytes.len() >=
                                                         authed::desc::NONCEBYTES => {
-                let nonce = authed::desc::Nonce::from(
-                    &href.hash.bytes[..authed::desc::NONCEBYTES]);
+                let nonce = authed::desc::Nonce::from(&href.hash.bytes[..authed::desc::NONCEBYTES]);
 
                 let additional_data = keys::compute_salt(href.node, href.leaf);
                 let real_key = ::crypto::authed::imp::mix_keys(access_key, &key);
@@ -423,9 +425,7 @@ impl<'k> FixedKey<'k> {
 
         let access_key = access_pt.split_off(sealed::desc::access_plain_bytes() -
                                              ::crypto::authed::desc::KEYBYTES);
-        Ok((::crypto::authed::desc::Key::from(&access_key[..]),
-            CipherText::new(access_pt),
-            rest))
+        Ok((::crypto::authed::desc::Key::from(&access_key[..]), CipherText::new(access_pt), rest))
     }
 
     pub fn unseal<'a>(&self,
