@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use crypto;
+use chrono;
 use backend::StoreBackend;
 use blob;
 use capnp;
@@ -355,6 +356,7 @@ impl<B: StoreBackend> HatRc<B> {
                 s.set_id(snapshot.info.snapshot_id);
                 s.set_family_name(&snapshot.family_name);
                 s.set_msg(&snapshot.msg.unwrap_or("".to_owned()));
+                s.set_utc_timestamp(chrono::Utc::now().timestamp());
                 let hash_ref = snapshot.hash_ref.unwrap();
                 hash::tree::HashRef::from_bytes(&mut hash_ref.as_ref())?
                     .populate_msg(s.init_hash_ref());

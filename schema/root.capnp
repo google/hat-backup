@@ -18,11 +18,11 @@
 
 struct Snapshot {
 	id @0 :UInt64;
+	hashRef @1 :HashRef;
 
-	familyName @1: Text;
-	msg @2 :Text;
-
-	hashRef @3 :HashRef;
+	familyName @2: Text;
+	msg @3 :Text;
+	utcTimestamp @4 :Int64;
 }
 
 struct SnapshotList {
@@ -96,7 +96,7 @@ struct FileInfo {
 	    mode @8 :UInt32;
 	}
 
-	hatSnapshotTimestamp @9 :UInt64;
+	utcTimestamp @9 :Int64;
 }
 
 struct File {

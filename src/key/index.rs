@@ -18,6 +18,7 @@
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
 
+use chrono;
 use diesel;
 use diesel::prelude::*;
 use diesel::connection::TransactionManager;
@@ -31,7 +32,6 @@ use std::sync::{Mutex, MutexGuard};
 
 use super::schema;
 use time::Duration;
-use std::time;
 use std::path::Path;
 use util::{InfoWriter, PeriodicTimer};
 use tags::Tag;
@@ -59,7 +59,7 @@ pub struct Info {
     pub group_id: Option<u64>,
 
     pub byte_length: Option<u64>,
-    pub hat_snapshot_ts: u64,
+    pub hat_snapshot_ts: i64,
 }
 
 impl Entry {
@@ -102,10 +102,7 @@ impl Info {
             group_id: meta.map(|m| m.st_gid() as u64),
 
             byte_length: meta.map(|m| m.len()),
-            hat_snapshot_ts: time::SystemTime::now()
-                .duration_since(time::UNIX_EPOCH)
-                .unwrap()
-                .as_secs(),
+            hat_snapshot_ts: chrono::Utc::now().timestamp(),
         }
     }
 
@@ -137,7 +134,7 @@ impl Info {
 
                byte_length: Some(msg.get_byte_length()),
 
-               hat_snapshot_ts: msg.get_hat_snapshot_timestamp(),
+               hat_snapshot_ts: msg.get_utc_timestamp(),
            })
     }
     pub fn populate_msg(&self, mut msg: root_capnp::file_info::Builder) {
@@ -169,7 +166,7 @@ impl Info {
         }
 
         msg.borrow()
-            .set_hat_snapshot_timestamp(self.hat_snapshot_ts);
+            .set_utc_timestamp(self.hat_snapshot_ts);
     }
 }
 
