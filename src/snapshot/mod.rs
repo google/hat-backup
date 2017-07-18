@@ -15,6 +15,7 @@
 //! Local state for known snapshots.
 
 
+use chrono;
 use db;
 use hash;
 use std::sync::Arc;
@@ -113,12 +114,13 @@ impl SnapshotIndex {
     pub fn recover(&mut self,
                    snapshot_id: u64,
                    family: &str,
+                   created: chrono::DateTime<chrono::Utc>,
                    msg: &str,
                    hash_ref: &hash::tree::HashRef,
                    work_opt: Option<db::SnapshotWorkStatus>) {
         self.index
             .lock()
-            .snapshot_recover(snapshot_id, family, msg, hash_ref, work_opt)
+            .snapshot_recover(snapshot_id, family, created, msg, hash_ref, work_opt)
     }
 
     /// Flush the hash index to clear internal buffers and commit the underlying database.

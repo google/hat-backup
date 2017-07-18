@@ -18,6 +18,7 @@
 use blob;
 
 use capnp;
+use chrono;
 
 use diesel;
 use diesel::connection::TransactionManager;
@@ -127,6 +128,7 @@ pub struct SnapshotStatus {
     pub info: SnapshotInfo,
     pub hash: Option<hash::Hash>,
     pub hash_ref: Option<Vec<u8>>,
+    pub created: chrono::DateTime<chrono::Utc>,
     pub msg: Option<String>,
     pub status: SnapshotWorkStatus,
 }
@@ -739,7 +741,7 @@ impl InternalIndex {
             .inner_join(family)
             .filter(name.eq(family_name_))
             .filter(snapshot_id.eq(snapshot_id_ as i64))
-            .select((id, tag, family_id, snapshot_id, msg, hash, hash_ref))
+            .select((id, tag, family_id, snapshot_id, utc_datetime, msg, hash, hash_ref))
             .first::<self::schema::Snapshot>(&self.conn)
             .optional()
             .expect("Error reading snapshot info");
@@ -766,6 +768,7 @@ impl InternalIndex {
             family_id: family_id_,
             snapshot_id: snapshot_id_,
             tag: tags::Tag::Reserved as i32,
+            utc_datetime: chrono::Utc::now().naive_utc(),
             msg: None,
             hash: None,
             hash_ref: None,
@@ -866,8 +869,10 @@ impl InternalIndex {
                               } else {
                                   Some(::hash::Hash { bytes: bytes })
                               });
+
                 SnapshotStatus {
                     family_name: fam.name,
+                    created: chrono::DateTime::from_utc(snap.utc_datetime, chrono::Utc),
                     msg: snap.msg,
                     hash: hash_,
                     hash_ref: snap.hash_ref,
@@ -886,6 +891,7 @@ impl InternalIndex {
     pub fn snapshot_recover(&mut self,
                             snapshot_id_: u64,
                             family: &str,
+                            created: chrono::DateTime<chrono::Utc>,
                             msg_: &str,
                             hash_ref_: &hash::tree::HashRef,
                             work_opt_: Option<SnapshotWorkStatus>) {
@@ -906,6 +912,7 @@ impl InternalIndex {
             let new = self::schema::NewSnapshot {
                 family_id: family_id_,
                 snapshot_id: snapshot_id_ as i64,
+                utc_datetime: created.naive_utc(),
                 msg: Some(msg_),
                 hash: Some(&hash_ref_.hash.bytes[..]),
                 hash_ref: Some(&hash_ref_bytes[..]),

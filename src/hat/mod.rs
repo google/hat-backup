@@ -25,6 +25,7 @@ use hash;
 use key;
 use root_capnp;
 use snapshot;
+use std::cmp;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::str;
@@ -356,7 +357,7 @@ impl<B: StoreBackend> HatRc<B> {
                 s.set_id(snapshot.info.snapshot_id);
                 s.set_family_name(&snapshot.family_name);
                 s.set_msg(&snapshot.msg.unwrap_or("".to_owned()));
-                s.set_utc_timestamp(chrono::Utc::now().timestamp());
+                s.set_utc_timestamp(snapshot.created.timestamp());
                 let hash_ref = snapshot.hash_ref.unwrap();
                 hash::tree::HashRef::from_bytes(&mut hash_ref.as_ref())?
                     .populate_msg(s.init_hash_ref());
@@ -433,6 +434,9 @@ impl<B: StoreBackend> HatRc<B> {
         info!(".. from blob: {}",
               root_href.persistent_ref.blob_name.to_hex());
 
+        use chrono::TimeZone;
+        let mut max_created = chrono::Utc.timestamp(0, 0);
+
         for msg in hash::tree::LeafIterator::new(self.hash_backend(), root_href.clone())?
                 .unwrap() {
             let message_reader =
@@ -444,10 +448,14 @@ impl<B: StoreBackend> HatRc<B> {
                 .unwrap();
 
             for s in snapshot_list.get_snapshots().unwrap().iter() {
+                let created = chrono::Utc.timestamp(s.get_utc_timestamp(), 0);
+                max_created = cmp::max(max_created, created);
+
                 let hash_ref = hash::tree::HashRef::read_msg(&s.get_hash_ref().unwrap()).unwrap();
                 self.snapshot_index
                     .recover(s.get_id(),
                              s.get_family_name().unwrap(),
+                             created,
                              s.get_msg().unwrap(),
                              &hash_ref,
                              Some(db::SnapshotWorkStatus::RecoverInProgress));
@@ -468,6 +476,7 @@ impl<B: StoreBackend> HatRc<B> {
         self.snapshot_index
             .recover(next_id as u64,
                      &synthetic_roots_family(),
+                     max_created,
                      "",
                      &root_href,
                      Some(db::SnapshotWorkStatus::RecoverInProgress));
