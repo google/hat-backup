@@ -125,11 +125,12 @@ impl<B> Clone for Store<B> {
 
 // Implementations
 impl<B: StoreBackend> Store<B> {
-    pub fn new(index: Arc<index::KeyIndex>,
-               hash_index: Arc<hash::HashIndex>,
-               blob_store: Arc<blob::BlobStore<B>>,
-               keys: Arc<crypto::keys::Keeper>)
-               -> Store<B> {
+    pub fn new(
+        index: Arc<index::KeyIndex>,
+        hash_index: Arc<hash::HashIndex>,
+        blob_store: Arc<blob::BlobStore<B>>,
+        keys: Arc<crypto::keys::Keeper>,
+    ) -> Store<B> {
         Store {
             index: index,
             hash_index: hash_index,
@@ -148,13 +149,18 @@ impl<B: StoreBackend> Store<B> {
         let ki_p = Arc::new(index::KeyIndex::new_for_testing()?);
         let hi_p = Arc::new(hash::HashIndex::new(db_p.clone())?);
         let blob_index = Arc::new(blob::BlobIndex::new(keys.clone(), db_p)?);
-        let bs_p = Arc::new(blob::BlobStore::new(keys, blob_index, backend, max_blob_size));
+        let bs_p = Arc::new(blob::BlobStore::new(
+            keys,
+            blob_index,
+            backend,
+            max_blob_size,
+        ));
         Ok(Store {
-               index: ki_p,
-               hash_index: hi_p,
-               blob_store: bs_p,
-               keys: Arc::new(crypto::keys::Keeper::new_for_testing()),
-           })
+            index: ki_p,
+            hash_index: hi_p,
+            blob_store: bs_p,
+            keys: Arc::new(crypto::keys::Keeper::new_for_testing()),
+        })
     }
 
     pub fn flush(&mut self) -> Result<(), MsgError> {
@@ -165,37 +171,45 @@ impl<B: StoreBackend> Store<B> {
         Ok(())
     }
 
-    pub fn hash_tree_writer(&mut self,
-                            leaf: blob::LeafType)
-                            -> SimpleHashTreeWriter<HashStoreBackend<B>> {
-        let backend = HashStoreBackend::new(self.hash_index.clone(),
-                                            self.blob_store.clone(),
-                                            self.keys.clone());
+    pub fn hash_tree_writer(
+        &mut self,
+        leaf: blob::LeafType,
+    ) -> SimpleHashTreeWriter<HashStoreBackend<B>> {
+        let backend = HashStoreBackend::new(
+            self.hash_index.clone(),
+            self.blob_store.clone(),
+            self.keys.clone(),
+        );
         SimpleHashTreeWriter::new(leaf, 8, backend)
     }
 }
 
 fn file_size_warning(name: &[u8], wanted: u64, got: u64) {
     if wanted < got {
-        println!("Warning: File grew while reading it: {:?} (wanted {}, got {})",
-                 name,
-                 wanted,
-                 got)
+        println!(
+            "Warning: File grew while reading it: {:?} (wanted {}, got {})",
+            name,
+            wanted,
+            got
+        )
     } else if wanted > got {
-        println!("Warning: Could not read whole file (or it shrank): {:?} (wanted {}, got {})",
-                 name,
-                 wanted,
-                 got)
+        println!(
+            "Warning: Could not read whole file (or it shrank): {:?} (wanted {}, got {})",
+            name,
+            wanted,
+            got
+        )
     }
 }
 
 impl<IT: io::Read, B: StoreBackend> MsgHandler<Msg<IT>, Reply<B>> for Store<B> {
     type Err = MsgError;
 
-    fn handle<F: FnOnce(Result<Reply<B>, MsgError>)>(&mut self,
-                                                     msg: Msg<IT>,
-                                                     reply: F)
-                                                     -> Result<(), MsgError> {
+    fn handle<F: FnOnce(Result<Reply<B>, MsgError>)>(
+        &mut self,
+        msg: Msg<IT>,
+        reply: F,
+    ) -> Result<(), MsgError> {
         macro_rules! reply_ok(($x:expr) => {{
             reply(Ok($x));
             Ok(())
@@ -217,23 +231,20 @@ impl<IT: io::Read, B: StoreBackend> MsgHandler<Msg<IT>, Reply<B>> for Store<B> {
                     Ok(entries) => {
                         let mut my_entries: Vec<DirElem<B>> = Vec::with_capacity(entries.len());
                         for (entry, hash_ref_opt) in entries {
-                            let hash_ref =
-                                hash_ref_opt.or_else(|| {
-                                                         entry.data_hash.as_ref().and_then(|bytes| {
+                            let hash_ref = hash_ref_opt.or_else(|| {
+                                entry.data_hash.as_ref().and_then(|bytes| {
                                     let h = hash::Hash { bytes: bytes.clone() };
                                     self.hash_index.fetch_hash_ref(&h).expect("Unknown hash")
                                 })
-                                                     });
-                            let open_fn = hash_ref
-                                .as_ref()
-                                .map(|r| {
-                                         HashTreeReaderInitializer {
-                                             hash_ref: r.clone(),
-                                             hash_index: self.hash_index.clone(),
-                                             blob_store: self.blob_store.clone(),
-                                             keys: self.keys.clone(),
-                                         }
-                                     });
+                            });
+                            let open_fn = hash_ref.as_ref().map(|r| {
+                                HashTreeReaderInitializer {
+                                    hash_ref: r.clone(),
+                                    hash_index: self.hash_index.clone(),
+                                    blob_store: self.blob_store.clone(),
+                                    keys: self.keys.clone(),
+                                }
+                            });
 
                             my_entries.push((entry, hash_ref, open_fn));
                         }
@@ -252,8 +263,10 @@ impl<IT: io::Read, B: StoreBackend> MsgHandler<Msg<IT>, Reply<B>> for Store<B> {
             }
 
             Msg::Insert(org_entry, chunk_it_opt) => {
-                let entry = match self.index
-                          .lookup(org_entry.parent_id, org_entry.info.name.clone())? {
+                let entry = match self.index.lookup(
+                    org_entry.parent_id,
+                    org_entry.info.name.clone(),
+                )? {
                     Some(ref entry) if org_entry.data_looks_unchanged(entry) => {
                         if chunk_it_opt.is_some() && entry.data_hash.is_some() {
                             let hash = hash::Hash { bytes: entry.data_hash.clone().unwrap() };
@@ -321,10 +334,9 @@ impl<IT: io::Read, B: StoreBackend> MsgHandler<Msg<IT>, Reply<B>> for Store<B> {
                 }
 
                 // Warn the user if we did not read the expected size:
-                entry
-                    .info
-                    .byte_length
-                    .map(|s| { file_size_warning(&entry.info.name, s, file_len); });
+                entry.info.byte_length.map(|s| {
+                    file_size_warning(&entry.info.name, s, file_len);
+                });
 
                 // Get top tree hash:
                 let hash_ref = tree.hash(Some(&entry.info))?;

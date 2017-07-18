@@ -70,36 +70,39 @@ impl<Msg: Send, Reply: Send, E> Clone for Process<Msg, Reply, E> {
 pub trait MsgHandler<Msg, Reply>: 'static + Send {
     type Err;
 
-    fn handle<F: FnOnce(Result<Reply, Self::Err>)>(&mut self,
-                                                   msg: Msg,
-                                                   callback: F)
-                                                   -> Result<(), Self::Err>;
+    fn handle<F: FnOnce(Result<Reply, Self::Err>)>(
+        &mut self,
+        msg: Msg,
+        callback: F,
+    ) -> Result<(), Self::Err>;
 }
 
 impl<Msg, Reply, E> Process<Msg, Reply, E>
-    where Msg: 'static + Send,
-          Reply: 'static + Send,
-          E: 'static + Send + fmt::Debug
+where
+    Msg: 'static + Send,
+    Reply: 'static + Send,
+    E: 'static + Send + fmt::Debug,
 {
     /// Create and start a new process using `handler`.
     pub fn new<H>(mut handler: H) -> Process<Msg, Reply, E>
-        where H: MsgHandler<Msg, Reply, Err = E>
+    where
+        H: MsgHandler<Msg, Reply, Err = E>,
     {
         let (sender, receiver) = mpsc::sync_channel::<(Msg, mpsc::Sender<Result<Reply, E>>)>(10);
 
         thread::spawn(move || while let Ok((msg, rep)) = receiver.recv() {
-                          let mut did_reply = false;
-                          let ret = handler.handle(msg, |r| {
+            let mut did_reply = false;
+            let ret = handler.handle(msg, |r| {
                 did_reply = true;
                 rep.send(r).expect("Message reply ignored");
             });
-                          match (ret, did_reply) {
-                              (Ok(()), true) => (),
-                              (Ok(()), false) => panic!("Handler returned without replying"),
-                              (Err(e), true) => panic!("Encountered unrecoverable error: {:?}", e),
-                              (Err(e), false) => rep.send(Err(e)).expect("Message reply ignored"),
-                          }
-                      });
+            match (ret, did_reply) {
+                (Ok(()), true) => (),
+                (Ok(()), false) => panic!("Handler returned without replying"),
+                (Err(e), true) => panic!("Encountered unrecoverable error: {:?}", e),
+                (Err(e), false) => rep.send(Err(e)).expect("Message reply ignored"),
+            }
+        });
 
         Process { sender: sender }
     }
@@ -110,9 +113,9 @@ impl<Msg, Reply, E> Process<Msg, Reply, E>
     pub fn send_reply(&self, msg: Msg) -> Result<Reply, E> {
         let (sender, receiver) = mpsc::channel();
 
-        self.sender
-            .send((msg, sender))
-            .expect("Could not send message; process looks dead");
+        self.sender.send((msg, sender)).expect(
+            "Could not send message; process looks dead",
+        );
         receiver.recv().expect("Could not read reply")
     }
 }

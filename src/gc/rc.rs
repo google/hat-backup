@@ -32,7 +32,8 @@ impl<B: gc::GcBackend> gc::Gc<B> for GcRc<B> {
     type Err = B::Err;
 
     fn new(backend: B) -> GcRc<B>
-        where B: gc::GcBackend
+    where
+        B: gc::GcBackend,
     {
         GcRc { backend: backend }
     }
@@ -41,10 +42,11 @@ impl<B: gc::GcBackend> gc::Gc<B> for GcRc<B> {
         true
     }
 
-    fn register_final(&mut self,
-                      _snapshot: &SnapshotInfo,
-                      ref_final: gc::Id)
-                      -> Result<(), Self::Err> {
+    fn register_final(
+        &mut self,
+        _snapshot: &SnapshotInfo,
+        ref_final: gc::Id,
+    ) -> Result<(), Self::Err> {
         // Start off with a commit to disable automatic commit and run register as one transaction.
         self.backend.manual_commit()?;
 
@@ -52,13 +54,16 @@ impl<B: gc::GcBackend> gc::Gc<B> for GcRc<B> {
         self.backend.set_tag(ref_final, tags::Tag::Reserved)?;
 
         for r in self.backend.list_ids_by_tag(tags::Tag::Reserved)? {
-            self.backend
-                .update_data(r, DATA_FAMILY, move |GcData { num, bytes }| {
+            self.backend.update_data(
+                r,
+                DATA_FAMILY,
+                move |GcData { num, bytes }| {
                     Some(GcData {
-                             num: num + 1,
-                             bytes: bytes,
-                         })
-                })?;
+                        num: num + 1,
+                        bytes: bytes,
+                    })
+                },
+            )?;
         }
 
         self.backend.set_tag(ref_final, tags::Tag::InProgress)?;
@@ -66,22 +71,25 @@ impl<B: gc::GcBackend> gc::Gc<B> for GcRc<B> {
         Ok(())
     }
 
-    fn register_cleanup(&mut self,
-                        _snapshot: &SnapshotInfo,
-                        _ref_final: gc::Id)
-                        -> Result<(), Self::Err> {
+    fn register_cleanup(
+        &mut self,
+        _snapshot: &SnapshotInfo,
+        _ref_final: gc::Id,
+    ) -> Result<(), Self::Err> {
         // Clear all tags including final reference.
         self.backend.set_all_tags(tags::Tag::Done)?;
 
         Ok(())
     }
 
-    fn deregister<F>(&mut self,
-                     _snapshot: &SnapshotInfo,
-                     ref_final: gc::Id,
-                     refs: F)
-                     -> Result<(), Self::Err>
-        where F: FnOnce() -> mpsc::Receiver<gc::Id>
+    fn deregister<F>(
+        &mut self,
+        _snapshot: &SnapshotInfo,
+        ref_final: gc::Id,
+        refs: F,
+    ) -> Result<(), Self::Err>
+    where
+        F: FnOnce() -> mpsc::Receiver<gc::Id>,
     {
         self.backend.set_all_tags(tags::Tag::Done)?;
         // Tag hashes whose counters will be decremented.
@@ -94,13 +102,16 @@ impl<B: gc::GcBackend> gc::Gc<B> for GcRc<B> {
         self.backend.manual_commit()?;
 
         for r in self.backend.list_ids_by_tag(tags::Tag::Reserved)? {
-            self.backend
-                .update_data(r, DATA_FAMILY, move |GcData { num, bytes }| {
+            self.backend.update_data(
+                r,
+                DATA_FAMILY,
+                move |GcData { num, bytes }| {
                     Some(GcData {
-                             num: num - 1,
-                             bytes: bytes,
-                         })
-                })?;
+                        num: num - 1,
+                        bytes: bytes,
+                    })
+                },
+            )?;
         }
         self.backend.set_tag(ref_final, tags::Tag::ReadyDelete)?;
 
@@ -130,11 +141,11 @@ impl<B: gc::GcBackend> gc::Gc<B> for GcRc<B> {
 
     fn status(&mut self, final_ref: gc::Id) -> Result<Option<gc::Status>, Self::Err> {
         Ok(match self.backend.get_tag(final_ref)? {
-               Some(tags::Tag::Complete) |
-               Some(tags::Tag::ReadyDelete) => Some(gc::Status::Complete),
-               Some(tags::Tag::InProgress) => Some(gc::Status::InProgress),
-               _ => None,
-           })
+            Some(tags::Tag::Complete) |
+            Some(tags::Tag::ReadyDelete) => Some(gc::Status::Complete),
+            Some(tags::Tag::InProgress) => Some(gc::Status::InProgress),
+            _ => None,
+        })
     }
 }
 

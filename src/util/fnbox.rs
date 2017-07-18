@@ -22,7 +22,8 @@ pub trait FnBox<A, B>: Send {
 }
 
 impl<A, B, F> FnBox<A, B> for F
-    where F: FnOnce(A) -> B + Send
+where
+    F: FnOnce(A) -> B + Send,
 {
     fn call(self: Box<F>, args: A) -> B {
         self(args)

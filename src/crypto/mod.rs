@@ -53,15 +53,18 @@ pub mod authed {
             ::crypto::keys::random_bytes(super::desc::NONCEBYTES)
         }
 
-        pub fn mix_keys(access_key: &super::desc::Key,
-                        other_key: &super::desc::Key)
-                        -> super::desc::Key {
+        pub fn mix_keys(
+            access_key: &super::desc::Key,
+            other_key: &super::desc::Key,
+        ) -> super::desc::Key {
             let mut mixed_key = [0u8; super::hash::DIGESTBYTES];
             let salt: &[u8; 16] = b"mixkey~~mixkey~~";
-            ::crypto::keys::keyed_fingerprint(&access_key.unsecure()[..],
-                                              &other_key.unsecure()[..],
-                                              salt,
-                                              &mut mixed_key[..]);
+            ::crypto::keys::keyed_fingerprint(
+                &access_key.unsecure()[..],
+                &other_key.unsecure()[..],
+                salt,
+                &mut mixed_key[..],
+            );
             super::desc::Key::from(&mixed_key[..super::desc::KEYBYTES])
         }
     }
@@ -127,24 +130,31 @@ impl<'a> PlainTextRef<'a> {
     pub fn slice(&self, from: usize, to: usize) -> PlainTextRef<'a> {
         PlainTextRef(&self.0[from..to])
     }
-    pub fn split_from_right(&self,
-                            len: usize)
-                            -> Result<(PlainTextRef<'a>, PlainTextRef<'a>), CryptoError> {
+    pub fn split_from_right(
+        &self,
+        len: usize,
+    ) -> Result<(PlainTextRef<'a>, PlainTextRef<'a>), CryptoError> {
         if self.len() < len {
             Err("crypto read failed: split_from_right".into())
         } else {
-            Ok((self.slice(0, self.len() - len), self.slice(self.len() - len, self.len())))
+            Ok((
+                self.slice(0, self.len() - len),
+                self.slice(self.len() - len, self.len()),
+            ))
         }
     }
-    pub fn to_ciphertext(&self,
-                         additional_data: &[u8],
-                         nonce: &authed::desc::Nonce,
-                         key: &authed::desc::Key)
-                         -> CipherText {
-        CipherText::new(keys::Keeper::symmetric_lock(self.0,
-                                                     additional_data,
-                                                     nonce.unsecure(),
-                                                     key.unsecure()))
+    pub fn to_ciphertext(
+        &self,
+        additional_data: &[u8],
+        nonce: &authed::desc::Nonce,
+        key: &authed::desc::Key,
+    ) -> CipherText {
+        CipherText::new(keys::Keeper::symmetric_lock(
+            self.0,
+            additional_data,
+            nonce.unsecure(),
+            key.unsecure(),
+        ))
     }
 }
 
@@ -214,12 +224,12 @@ impl CipherText {
         let mut stream = vec![0u8; size];
 
         let ret = unsafe {
-            crypto_stream_chacha20(stream.as_mut_ptr(),
-                                   stream.len() as u64,
-                                   nonce.unsecure().as_ptr() as
-                                   *const [u8; crypto_stream_chacha20_NONCEBYTES],
-                                   key.unsecure().as_ptr() as
-                                   *const [u8; crypto_stream_chacha20_KEYBYTES])
+            crypto_stream_chacha20(
+                stream.as_mut_ptr(),
+                stream.len() as u64,
+                nonce.unsecure().as_ptr() as *const [u8; crypto_stream_chacha20_NONCEBYTES],
+                key.unsecure().as_ptr() as *const [u8; crypto_stream_chacha20_KEYBYTES],
+            )
         };
         assert_eq!(0, ret);
 
@@ -265,24 +275,31 @@ impl<'a> CipherTextRef<'a> {
     pub fn len(&self) -> usize {
         self.0.len()
     }
-    pub fn split_from_right(&self,
-                            len: usize)
-                            -> Result<(CipherTextRef<'a>, CipherTextRef<'a>), CryptoError> {
+    pub fn split_from_right(
+        &self,
+        len: usize,
+    ) -> Result<(CipherTextRef<'a>, CipherTextRef<'a>), CryptoError> {
         if self.len() < len {
             Err("crypto read failed: split_from_right".into())
         } else {
-            Ok((self.slice(0, self.len() - len), self.slice(self.len() - len, self.len())))
+            Ok((
+                self.slice(0, self.len() - len),
+                self.slice(self.len() - len, self.len()),
+            ))
         }
     }
-    pub fn to_plaintext(&self,
-                        additional_data: &[u8],
-                        nonce: &authed::desc::Nonce,
-                        key: &authed::desc::Key)
-                        -> Result<PlainText, CryptoError> {
-        Ok(PlainText::new(keys::Keeper::symmetric_unlock(key.unsecure(),
-                                                         &self.0,
-                                                         additional_data,
-                                                         nonce.unsecure())))
+    pub fn to_plaintext(
+        &self,
+        additional_data: &[u8],
+        nonce: &authed::desc::Nonce,
+        key: &authed::desc::Key,
+    ) -> Result<PlainText, CryptoError> {
+        Ok(PlainText::new(keys::Keeper::symmetric_unlock(
+            key.unsecure(),
+            &self.0,
+            additional_data,
+            nonce.unsecure(),
+        )))
     }
 
     pub fn strip_authentication(&self, keys: &keys::Keeper) -> Result<CipherTextRef, CryptoError> {
@@ -304,10 +321,11 @@ pub struct RefKey {}
 
 
 impl RefKey {
-    pub fn seal(href: &mut HashRef,
-                access_key: &::crypto::authed::desc::Key,
-                pt: PlainTextRef)
-                -> CipherText {
+    pub fn seal(
+        href: &mut HashRef,
+        access_key: &::crypto::authed::desc::Key,
+        pt: PlainTextRef,
+    ) -> CipherText {
         let partial_key = authed::imp::gen_key();
         href.persistent_ref.key = Some(wrap_key(partial_key.clone()));
 
@@ -321,16 +339,19 @@ impl RefKey {
         ct
     }
 
-    pub fn unseal(access_key: &::crypto::authed::desc::Key,
-                  href: &HashRef,
-                  ct: CipherTextRef)
-                  -> Result<PlainText, CryptoError> {
+    pub fn unseal(
+        access_key: &::crypto::authed::desc::Key,
+        href: &HashRef,
+        ct: CipherTextRef,
+    ) -> Result<PlainText, CryptoError> {
         assert!(ct.len() > href.persistent_ref.offset + href.persistent_ref.length);
-        let ct = ct.slice(href.persistent_ref.offset,
-                          href.persistent_ref.offset + href.persistent_ref.length);
+        let ct = ct.slice(
+            href.persistent_ref.offset,
+            href.persistent_ref.offset + href.persistent_ref.length,
+        );
         match href.persistent_ref.key {
-            Some(Key::AeadChacha20Poly1305(ref key)) if href.hash.bytes.len() >=
-                                                        authed::desc::NONCEBYTES => {
+            Some(Key::AeadChacha20Poly1305(ref key))
+                if href.hash.bytes.len() >= authed::desc::NONCEBYTES => {
                 let nonce = authed::desc::Nonce::from(&href.hash.bytes[..authed::desc::NONCEBYTES]);
 
                 let additional_data = keys::compute_salt(href.node, href.leaf);
@@ -414,47 +435,59 @@ impl<'k> FixedKey<'k> {
         ct
     }
 
-    pub fn unseal_access_ctx<'a>
-        (&self,
-         ct: CipherTextRef<'a>)
-         -> Result<(::crypto::authed::desc::Key, CipherText, CipherTextRef<'a>), CryptoError> {
+    pub fn unseal_access_ctx<'a>(
+        &self,
+        ct: CipherTextRef<'a>,
+    ) -> Result<(::crypto::authed::desc::Key, CipherText, CipherTextRef<'a>), CryptoError> {
         // Read sealed ciphertext length and unseal it.
         let (rest, access_ct) = ct.split_from_right(sealed::desc::access_cipher_bytes())?;
         let mut access_pt = self.unseal_blob_access(access_ct).into_vec();
         assert_eq!(access_pt.len(), sealed::desc::access_plain_bytes());
 
-        let access_key = access_pt.split_off(sealed::desc::access_plain_bytes() -
-                                             ::crypto::authed::desc::KEYBYTES);
-        Ok((::crypto::authed::desc::Key::from(&access_key[..]), CipherText::new(access_pt), rest))
+        let access_key = access_pt.split_off(
+            sealed::desc::access_plain_bytes() -
+                ::crypto::authed::desc::KEYBYTES,
+        );
+        Ok((
+            ::crypto::authed::desc::Key::from(&access_key[..]),
+            CipherText::new(access_pt),
+            rest,
+        ))
     }
 
-    pub fn unseal<'a>(&self,
-                      footer_ct: CipherTextRef,
-                      ct: CipherTextRef<'a>)
-                      -> Result<(CipherTextRef<'a>, PlainText), CryptoError> {
+    pub fn unseal<'a>(
+        &self,
+        footer_ct: CipherTextRef,
+        ct: CipherTextRef<'a>,
+    ) -> Result<(CipherTextRef<'a>, PlainText), CryptoError> {
         assert_eq!(footer_ct.len(), sealed::desc::footer_cipher_bytes());
         let foot_pt = self.unseal_blob_data(footer_ct);
         assert_eq!(foot_pt.len(), sealed::desc::footer_plain_bytes());
 
         // Read length as LittleEndian and inner key.
-        let (foot_len, inner_key) = foot_pt
-            .as_ref()
-            .split_from_right(::crypto::authed::desc::KEYBYTES)?;
+        let (foot_len, inner_key) = foot_pt.as_ref().split_from_right(
+            ::crypto::authed::desc::KEYBYTES,
+        )?;
 
         // Parse length of inner symmetric cipher text.
-        let ct_len = foot_len
-            .read_i64()
-            .map_err(|_| "crypto read failed: unseal")?;
+        let ct_len = foot_len.read_i64().map_err(
+            |_| "crypto read failed: unseal",
+        )?;
         assert!(ct_len > 0);
 
         // Read and unseal inner symmetric cipher text.
         let additional_data: &[u8] = b"hat_blob_seal~";
         let (rest, ct_and_nonce) = ct.split_from_right(ct_len as usize)?;
-        let (ct, nonce) = ct_and_nonce
-            .split_from_right(::crypto::authed::desc::NONCEBYTES)?;
-        Ok((rest,
-            ct.to_plaintext(additional_data,
-                            &::crypto::authed::desc::Nonce::from(nonce.0),
-                            &::crypto::authed::desc::Key::from(inner_key.0))?))
+        let (ct, nonce) = ct_and_nonce.split_from_right(
+            ::crypto::authed::desc::NONCEBYTES,
+        )?;
+        Ok((
+            rest,
+            ct.to_plaintext(
+                additional_data,
+                &::crypto::authed::desc::Nonce::from(nonce.0),
+                &::crypto::authed::desc::Key::from(inner_key.0),
+            )?,
+        ))
     }
 }

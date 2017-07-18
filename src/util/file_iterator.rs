@@ -37,7 +37,8 @@ impl FileIterator {
 
     #[cfg(all(test, feature = "benchmarks"))]
     pub fn from_reader<R>(r: Box<R>) -> FileIterator
-        where R: Read + Send + 'static
+    where
+        R: Read + Send + 'static,
     {
         FileIterator::Reader(r)
     }

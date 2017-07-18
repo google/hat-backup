@@ -158,26 +158,28 @@ mod tests {
 
     #[test]
     fn can_visit_all() {
-        let paths: [&str; 20] = ["/",
-                                 "/foo",
-                                 "/bar/",
-                                 "/bar/baz/",
-                                 "/bar/baz/qux",
-                                 "/bar/baz/foo",
-                                 "/bar/baz/bar/",
-                                 "/bar/baz/bar/foo",
-                                 "/bar/baz/bar/bar/",
-                                 "/bar/baz/bar/bar/bar",
-                                 "/empty/",
-                                 "/empty/1/",
-                                 "/empty/2/",
-                                 "/empty/3/",
-                                 "/empty/4/",
-                                 "/empty/5/",
-                                 "/empty/6/",
-                                 "/empty/7/",
-                                 "/empty/8/",
-                                 "/empty/9/"];
+        let paths: [&str; 20] = [
+            "/",
+            "/foo",
+            "/bar/",
+            "/bar/baz/",
+            "/bar/baz/qux",
+            "/bar/baz/foo",
+            "/bar/baz/bar/",
+            "/bar/baz/bar/foo",
+            "/bar/baz/bar/bar/",
+            "/bar/baz/bar/bar/bar",
+            "/empty/",
+            "/empty/1/",
+            "/empty/2/",
+            "/empty/3/",
+            "/empty/4/",
+            "/empty/5/",
+            "/empty/6/",
+            "/empty/7/",
+            "/empty/8/",
+            "/empty/9/",
+        ];
 
         let handler = StubPathHandler::new(paths.iter().map(PathBuf::from).collect());
         handler.recurse(PathBuf::from("/"), None);

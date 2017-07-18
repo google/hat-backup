@@ -49,7 +49,10 @@ impl Index {
     }
     #[cfg(test)]
     pub fn new_for_testing() -> Index {
-        Index(Mutex::new(InternalIndex::new(Path::new("migrations"), ":memory:").unwrap()))
+        Index(Mutex::new(
+            InternalIndex::new(Path::new("migrations"), ":memory:")
+                .unwrap(),
+        ))
     }
 }
 
@@ -69,12 +72,11 @@ fn encode_childs(childs: &[u64]) -> Vec<u8> {
 }
 
 fn decode_childs(bytes: &[u8]) -> Result<Vec<u64>, capnp::Error> {
-    let reader = capnp::serialize_packed::read_message(&mut &bytes[..],
-                                                       capnp::message::ReaderOptions::new())
-            .unwrap();
-    let msg = reader
-        .get_root::<root_capnp::hash_ids::Reader>()
-        .unwrap();
+    let reader = capnp::serialize_packed::read_message(
+        &mut &bytes[..],
+        capnp::message::ReaderOptions::new(),
+    ).unwrap();
+    let msg = reader.get_root::<root_capnp::hash_ids::Reader>().unwrap();
 
     let ids = msg.get_hash_ids()?;
     let mut out = Vec::new();
@@ -84,9 +86,10 @@ fn decode_childs(bytes: &[u8]) -> Result<Vec<u64>, capnp::Error> {
     Ok(out)
 }
 
-fn decode_chunk_ref(cref: Option<&Vec<u8>>,
-                    blob: Option<self::schema::Blob>)
-                    -> Option<blob::ChunkRef> {
+fn decode_chunk_ref(
+    cref: Option<&Vec<u8>>,
+    blob: Option<self::schema::Blob>,
+) -> Option<blob::ChunkRef> {
     cref.map(|c| {
         let mut r = blob::ChunkRef::from_bytes(&mut &c[..]).expect("Failed to decode chunk");
         if r.length > 0 {
@@ -104,7 +107,11 @@ pub struct GcData {
     pub bytes: Vec<u8>,
 }
 pub trait UpdateFn: FnOnce(GcData) -> Option<GcData> {}
-impl<T> UpdateFn for T where T: FnOnce(GcData) -> Option<GcData> {}
+impl<T> UpdateFn for T
+where
+    T: FnOnce(GcData) -> Option<GcData>,
+{
+}
 
 #[derive(Clone, Debug)]
 pub struct SnapshotInfo {
@@ -203,9 +210,11 @@ impl InternalIndex {
             flush_periodically: true,
         };
 
-        diesel::migrations::run_pending_migrations_in_directory(&idx.conn,
-                                                                &migrations_dir,
-                                                                &mut InfoWriter)?;
+        diesel::migrations::run_pending_migrations_in_directory(
+            &idx.conn,
+            &migrations_dir,
+            &mut InfoWriter,
+        )?;
 
         {
             let tm = idx.conn.transaction_manager();
@@ -229,13 +238,11 @@ impl InternalIndex {
             .expect("Error querying hashes");
 
         result_opt.map(|(hash_, blob_)| {
-            let childs_ = hash_
-                .childs
-                .and_then(|b| if b.is_empty() {
-                              None
-                          } else {
-                              Some(decode_childs(&b).unwrap())
-                          });
+            let childs_ = hash_.childs.and_then(|b| if b.is_empty() {
+                None
+            } else {
+                Some(decode_childs(&b).unwrap())
+            });
             let persistent_ref = decode_chunk_ref(hash_.blob_ref.as_ref(), blob_);
             QueueEntry {
                 id: hash_.id as u64,
@@ -264,13 +271,11 @@ impl InternalIndex {
                 hash: self::hash::Hash { bytes: hash_.hash },
                 node: From::from(hash_.height as u64),
                 leaf: From::from(hash_.leaf_type as u64),
-                childs: hash_
-                    .childs
-                    .and_then(|p| if p.is_empty() {
-                                  None
-                              } else {
-                                  Some(decode_childs(&p).unwrap())
-                              }),
+                childs: hash_.childs.and_then(|p| if p.is_empty() {
+                    None
+                } else {
+                    Some(decode_childs(&p).unwrap())
+                }),
                 persistent_ref: decode_chunk_ref(hash_.blob_ref.as_ref(), blob_),
                 ready: hash_.ready,
             }
@@ -296,10 +301,7 @@ impl InternalIndex {
     pub fn hash_insert_new(&mut self, id_: u64, hash_bytes: Vec<u8>, entry: QueueEntry) {
         use self::schema::hashes::dsl::*;
 
-        let blob_ref_ = entry
-            .persistent_ref
-            .as_ref()
-            .map(|c| c.as_bytes_no_name());
+        let blob_ref_ = entry.persistent_ref.as_ref().map(|c| c.as_bytes_no_name());
         let childs_ = entry.childs.as_ref().map(|v| encode_childs(&v[..]));
 
         let height_: u64 = From::from(entry.node);
@@ -312,10 +314,7 @@ impl InternalIndex {
             height: height_ as i64,
             leaf_type: leaf_type_ as i64,
             childs: childs_.as_ref().map(|v| &v[..]),
-            blob_id: entry
-                .persistent_ref
-                .and_then(|r| r.blob_id)
-                .unwrap_or(0),
+            blob_id: entry.persistent_ref.and_then(|r| r.blob_id).unwrap_or(0),
             blob_ref: blob_ref_.as_ref().map(|v| &v[..]),
             ready: false,
         };
@@ -371,12 +370,14 @@ impl InternalIndex {
         let leaf_type_: u64 = From::from(entry.leaf);
 
         diesel::update(hashes.find(id_ as i64))
-            .set((blob_id.eq(blob_id_),
-                  blob_ref.eq(&blob_ref_[..]),
-                  ready.eq(true),
-                  height.eq(height_ as i64),
-                  leaf_type.eq(leaf_type_ as i64),
-                  childs.eq(childs_.as_ref().map(|v| &v[..]))))
+            .set((
+                blob_id.eq(blob_id_),
+                blob_ref.eq(&blob_ref_[..]),
+                ready.eq(true),
+                height.eq(height_ as i64),
+                leaf_type.eq(leaf_type_ as i64),
+                childs.eq(childs_.as_ref().map(|v| &v[..])),
+            ))
             .execute(&self.conn)
             .expect("Failed to set hash ready");
     }
@@ -439,12 +440,11 @@ impl InternalIndex {
     pub fn hash_set_gc_data(&mut self, hash_id_: u64, family_id_: u64, data: GcData) {
         use self::schema::gc_metadata::dsl::*;
 
-        let count = diesel::update(gc_metadata
-                                       .filter(hash_id.eq(hash_id_ as i64))
-                                       .filter(family_id.eq(family_id_ as i64)))
-                .set((gc_int.eq(data.num), gc_vec.eq(&data.bytes)))
-                .execute(&self.conn)
-                .expect("Error updating GC metadata");
+        let count = diesel::update(gc_metadata.filter(hash_id.eq(hash_id_ as i64)).filter(
+            family_id.eq(family_id_ as i64),
+        )).set((gc_int.eq(data.num), gc_vec.eq(&data.bytes)))
+            .execute(&self.conn)
+            .expect("Error updating GC metadata");
         assert!(count <= 1);
 
         if count == 0 {
@@ -462,11 +462,12 @@ impl InternalIndex {
         }
     }
 
-    pub fn hash_update_gc_data<F: UpdateFn>(&mut self,
-                                            hash_id: u64,
-                                            family_id: u64,
-                                            f: F)
-                                            -> GcData {
+    pub fn hash_update_gc_data<F: UpdateFn>(
+        &mut self,
+        hash_id: u64,
+        family_id: u64,
+        f: F,
+    ) -> GcData {
         let data = self.hash_read_gc_data(hash_id, family_id);
         match f(data.clone()) {
             None => {
@@ -480,9 +481,11 @@ impl InternalIndex {
         }
     }
 
-    pub fn hash_update_family_gc_data<F: UpdateFn, I: Iterator<Item = F>>(&mut self,
-                                                                          family_id_: u64,
-                                                                          mut fns: I) {
+    pub fn hash_update_family_gc_data<F: UpdateFn, I: Iterator<Item = F>>(
+        &mut self,
+        family_id_: u64,
+        mut fns: I,
+    ) {
         use self::schema::gc_metadata::dsl::*;
 
         let hash_ids_ = gc_metadata
@@ -500,11 +503,10 @@ impl InternalIndex {
     pub fn hash_delete_gc_data(&mut self, hash_id_: u64, family_id_: u64) {
         use self::schema::gc_metadata::dsl::*;
 
-        diesel::delete(gc_metadata
-                           .filter(hash_id.eq(hash_id_ as i64))
-                           .filter(family_id.eq(family_id_ as i64)))
-                .execute(&self.conn)
-                .expect("Error deleting GC metadata");
+        diesel::delete(gc_metadata.filter(hash_id.eq(hash_id_ as i64)).filter(
+            family_id.eq(family_id_ as i64),
+        )).execute(&self.conn)
+            .expect("Error deleting GC metadata");
     }
 
     pub fn hash_list(&mut self) -> Vec<Entry> {
@@ -637,9 +639,11 @@ impl InternalIndex {
                     .expect("Error updating blob tags")
             }
             Some(t) => {
-                unreachable!("blob with neither id nor name: id={}, name={}",
-                             t.id,
-                             t.name.len())
+                unreachable!(
+                    "blob with neither id nor name: id={}, name={}",
+                    t.id,
+                    t.name.len()
+                )
             }
         };
     }
@@ -660,11 +664,11 @@ impl InternalIndex {
             .expect("Error listing blobs")
             .into_iter()
             .map(|blob_| {
-                     blob::BlobDesc {
-                         id: blob_.id,
-                         name: blob_.name,
-                     }
-                 })
+                blob::BlobDesc {
+                    id: blob_.id,
+                    name: blob_.name,
+                }
+            })
             .collect()
     }
 
@@ -689,12 +693,13 @@ impl InternalIndex {
     pub fn snapshot_delete(&self, info: SnapshotInfo) {
         use self::schema::snapshots::dsl::*;
 
-        let count = diesel::delete(snapshots
-                                       .find(info.unique_id as i64)
-                                       .filter(family_id.eq(info.family_id as i64))
-                                       .filter(snapshot_id.eq(info.snapshot_id as i64)))
-                .execute(&self.conn)
-                .expect("Error deleting snapshots");
+        let count = diesel::delete(
+            snapshots
+                .find(info.unique_id as i64)
+                .filter(family_id.eq(info.family_id as i64))
+                .filter(snapshot_id.eq(info.snapshot_id as i64)),
+        ).execute(&self.conn)
+            .expect("Error deleting snapshots");
         assert!(count <= 1);
     }
 
@@ -730,10 +735,11 @@ impl InternalIndex {
     }
 
     /// Lookup exact snapshot info from family and snapshot id.
-    pub fn snapshot_lookup(&mut self,
-                           family_name_: &str,
-                           snapshot_id_: u64)
-                           -> Option<(SnapshotInfo, hash::Hash, Option<hash::tree::HashRef>)> {
+    pub fn snapshot_lookup(
+        &mut self,
+        family_name_: &str,
+        snapshot_id_: u64,
+    ) -> Option<(SnapshotInfo, hash::Hash, Option<hash::tree::HashRef>)> {
         use self::schema::snapshots::dsl::*;
         use self::schema::family::dsl::{family, name};
 
@@ -741,20 +747,32 @@ impl InternalIndex {
             .inner_join(family)
             .filter(name.eq(family_name_))
             .filter(snapshot_id.eq(snapshot_id_ as i64))
-            .select((id, tag, family_id, snapshot_id, utc_datetime, msg, hash, hash_ref))
+            .select((
+                id,
+                tag,
+                family_id,
+                snapshot_id,
+                utc_datetime,
+                msg,
+                hash,
+                hash_ref,
+            ))
             .first::<self::schema::Snapshot>(&self.conn)
             .optional()
             .expect("Error reading snapshot info");
 
         row_opt.map(|snap| {
-            (SnapshotInfo {
-                 unique_id: snap.id as u64,
-                 family_id: snap.family_id as u64,
-                 snapshot_id: snap.snapshot_id as u64,
-             },
-             ::hash::Hash { bytes: snap.hash.unwrap().to_vec() },
-             snap.hash_ref
-                 .and_then(|r| ::hash::tree::HashRef::from_bytes(&mut &r[..]).ok()))
+            (
+                SnapshotInfo {
+                    unique_id: snap.id as u64,
+                    family_id: snap.family_id as u64,
+                    snapshot_id: snap.snapshot_id as u64,
+                },
+                ::hash::Hash { bytes: snap.hash.unwrap().to_vec() },
+                snap.hash_ref.and_then(|r| {
+                    ::hash::tree::HashRef::from_bytes(&mut &r[..]).ok()
+                }),
+            )
         })
     }
 
@@ -788,17 +806,21 @@ impl InternalIndex {
         }
     }
 
-    pub fn snapshot_update(&mut self,
-                           snapshot_: &SnapshotInfo,
-                           msg_: &str,
-                           hash_: &hash::Hash,
-                           hash_ref_: &hash::tree::HashRef) {
+    pub fn snapshot_update(
+        &mut self,
+        snapshot_: &SnapshotInfo,
+        msg_: &str,
+        hash_: &hash::Hash,
+        hash_ref_: &hash::tree::HashRef,
+    ) {
         use self::schema::snapshots::dsl::*;
 
         diesel::update(snapshots.find(snapshot_.unique_id as i64))
-            .set((msg.eq(Some(msg_)),
-                  hash.eq(Some(&hash_.bytes)),
-                  hash_ref.eq(Some(hash_ref_.as_bytes()))))
+            .set((
+                msg.eq(Some(msg_)),
+                hash.eq(Some(&hash_.bytes)),
+                hash_ref.eq(Some(hash_ref_.as_bytes())),
+            ))
             .execute(&self.conn)
             .expect("Error updating snapshot");
     }
@@ -813,9 +835,10 @@ impl InternalIndex {
     }
 
     /// Extract latest snapshot data for family.
-    pub fn snapshot_latest(&mut self,
-                           family: &str)
-                           -> Option<(SnapshotInfo, hash::Hash, Option<hash::tree::HashRef>)> {
+    pub fn snapshot_latest(
+        &mut self,
+        family: &str,
+    ) -> Option<(SnapshotInfo, hash::Hash, Option<hash::tree::HashRef>)> {
         let family_id_opt = self.family_id_from_name(family);
         family_id_opt.and_then(|family_id_| {
             use self::schema::snapshots::dsl::*;
@@ -828,14 +851,17 @@ impl InternalIndex {
                 .expect("Error reading latest snapshot");
 
             row_opt.map(|snap| {
-                (SnapshotInfo {
-                     unique_id: snap.id as u64,
-                     family_id: snap.family_id as u64,
-                     snapshot_id: snap.snapshot_id as u64,
-                 },
-                 ::hash::Hash { bytes: snap.hash.expect("Snapshot without top hash") },
-                 snap.hash_ref
-                     .and_then(|r| ::hash::tree::HashRef::from_bytes(&mut &r[..]).ok()))
+                (
+                    SnapshotInfo {
+                        unique_id: snap.id as u64,
+                        family_id: snap.family_id as u64,
+                        snapshot_id: snap.snapshot_id as u64,
+                    },
+                    ::hash::Hash { bytes: snap.hash.expect("Snapshot without top hash") },
+                    snap.hash_ref.and_then(|r| {
+                        ::hash::tree::HashRef::from_bytes(&mut &r[..]).ok()
+                    }),
+                )
             })
         })
     }
@@ -845,30 +871,30 @@ impl InternalIndex {
         use self::schema::snapshots::dsl::*;
         use self::schema::family::dsl::family;
         let rows = match skip_tag {
-                None => {
-                    snapshots
-                        .inner_join(family)
-                        .load::<(self::schema::Snapshot, self::schema::Family)>(&self.conn)
-                }
-                Some(skip) => {
-                    snapshots
-                        .inner_join(family)
-                        .filter(tag.ne(skip as i32))
-                        .load::<(self::schema::Snapshot, self::schema::Family)>(&self.conn)
-                }
+            None => {
+                snapshots
+                    .inner_join(family)
+                    .load::<(self::schema::Snapshot, self::schema::Family)>(&self.conn)
             }
-            .unwrap();
+            Some(skip) => {
+                snapshots
+                    .inner_join(family)
+                    .filter(tag.ne(skip as i32))
+                    .load::<(self::schema::Snapshot, self::schema::Family)>(&self.conn)
+            }
+        }.unwrap();
 
         rows.into_iter()
             .map(|(snap, fam)| {
-                let status = tags::tag_from_num(snap.tag as i64)
-                    .map_or(SnapshotWorkStatus::CommitComplete, tag_to_work_status);
-                let hash_ = snap.hash
-                    .and_then(|bytes| if bytes.is_empty() {
-                                  None
-                              } else {
-                                  Some(::hash::Hash { bytes: bytes })
-                              });
+                let status = tags::tag_from_num(snap.tag as i64).map_or(
+                    SnapshotWorkStatus::CommitComplete,
+                    tag_to_work_status,
+                );
+                let hash_ = snap.hash.and_then(|bytes| if bytes.is_empty() {
+                    None
+                } else {
+                    Some(::hash::Hash { bytes: bytes })
+                });
 
                 SnapshotStatus {
                     family_name: fam.name,
@@ -888,13 +914,15 @@ impl InternalIndex {
     }
 
     /// Recover snapshot information.
-    pub fn snapshot_recover(&mut self,
-                            snapshot_id_: u64,
-                            family: &str,
-                            created: chrono::DateTime<chrono::Utc>,
-                            msg_: &str,
-                            hash_ref_: &hash::tree::HashRef,
-                            work_opt_: Option<SnapshotWorkStatus>) {
+    pub fn snapshot_recover(
+        &mut self,
+        snapshot_id_: u64,
+        family: &str,
+        created: chrono::DateTime<chrono::Utc>,
+        msg_: &str,
+        hash_ref_: &hash::tree::HashRef,
+        work_opt_: Option<SnapshotWorkStatus>,
+    ) {
         let family_id_ = self.get_or_create_family_id(&family);
         let insert = match self.snapshot_lookup(family, snapshot_id_) {
             Some((_info, h, _r)) => {

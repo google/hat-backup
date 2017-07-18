@@ -42,9 +42,10 @@ pub fn entry(name: Vec<u8>) -> key::Entry {
     key::Entry::new(None, name, None)
 }
 
-fn snapshot_files<B: StoreBackend>(family: &Family<B>,
-                                   files: Vec<(&str, Vec<u8>)>)
-                                   -> Result<(), HatError> {
+fn snapshot_files<B: StoreBackend>(
+    family: &Family<B>,
+    files: Vec<(&str, Vec<u8>)>,
+) -> Result<(), HatError> {
     let mut dirs = HashMap::new();
     for (name, contents) in files {
         let mut parent = None;
@@ -67,38 +68,47 @@ fn snapshot_files<B: StoreBackend>(family: &Family<B>,
             // We have a file to insert.
             let mut e = entry(current.bytes().collect());
             e.parent_id = parent.clone();
-            family
-                .snapshot_direct(e, false, Some(FileIterator::from_bytes(contents)))?;
+            family.snapshot_direct(
+                e,
+                false,
+                Some(FileIterator::from_bytes(contents)),
+            )?;
         }
     }
     Ok(())
 }
 
 fn basic_snapshot<B: StoreBackend>(fam: &Family<B>) {
-    snapshot_files(&fam,
-                   vec![("zeros", vec![0; 1000000]),
-                        ("ones", vec![1; 1000000]),
-                        ("twos", vec![2; 1000000]),
-                        ("zeros2", vec![0; 1000000]),
-                        ("block1", "block1".into()),
-                        ("block2", "block2".into()),
-                        ("block3", "block3".into()),
-                        ("block12", "block1".into()),
-                        ("some/number/of/empty/dirs/with/an/empty/file/deep/down", vec![]),
-                        ("dir1/zeros", vec![0; 10]),
-                        ("dir1/block1", "block1".into()),
-                        ("dir1/unique", "abcdefg".into()),
-                        ("dir2/zeros", vec![0; 10]),
-                        ("dir2/dir3/twos", vec![2; 10]),
-                        ("dir2/dir3/dir4/ones", vec![1; 10]),
-                        ("x/y/z/a", vec![]),
-                        ("x/y/z/b/", vec![]),
-                        ("z/y/x/a", vec![]),
-                        ("y/x/z/b/", vec![]),
-                        ("a/", vec![]),
-                        ("b/", vec![]),
-                        ("c/", vec![])])
-            .unwrap();
+    snapshot_files(
+        &fam,
+        vec![
+            ("zeros", vec![0; 1000000]),
+            ("ones", vec![1; 1000000]),
+            ("twos", vec![2; 1000000]),
+            ("zeros2", vec![0; 1000000]),
+            ("block1", "block1".into()),
+            ("block2", "block2".into()),
+            ("block3", "block3".into()),
+            ("block12", "block1".into()),
+            (
+                "some/number/of/empty/dirs/with/an/empty/file/deep/down",
+                vec![]
+            ),
+            ("dir1/zeros", vec![0; 10]),
+            ("dir1/block1", "block1".into()),
+            ("dir1/unique", "abcdefg".into()),
+            ("dir2/zeros", vec![0; 10]),
+            ("dir2/dir3/twos", vec![2; 10]),
+            ("dir2/dir3/dir4/ones", vec![1; 10]),
+            ("x/y/z/a", vec![]),
+            ("x/y/z/b/", vec![]),
+            ("z/y/x/a", vec![]),
+            ("y/x/z/b/", vec![]),
+            ("a/", vec![]),
+            ("b/", vec![]),
+            ("c/", vec![]),
+        ],
+    ).unwrap();
 }
 
 #[test]

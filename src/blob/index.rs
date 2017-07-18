@@ -41,9 +41,10 @@ pub struct BlobIndex(InternalBlobIndex);
 
 
 impl InternalBlobIndex {
-    pub fn new(keys: Arc<crypto::keys::Keeper>,
-               index: Arc<db::Index>)
-               -> Result<InternalBlobIndex, DieselError> {
+    pub fn new(
+        keys: Arc<crypto::keys::Keeper>,
+        index: Arc<db::Index>,
+    ) -> Result<InternalBlobIndex, DieselError> {
         let bi = InternalBlobIndex {
             index: index,
             next_id: Arc::new(Mutex::new(0)),
@@ -55,16 +56,18 @@ impl InternalBlobIndex {
 
     fn name_of_id(&self, id: i64) -> Vec<u8> {
         return crypto::FixedKey::new(&self.keys)
-                   .seal_blob_name(crypto::PlainText::from_i64(id).as_ref())
-                   .to_vec();
+            .seal_blob_name(crypto::PlainText::from_i64(id).as_ref())
+            .to_vec();
     }
 
     fn id_of_name(&self, name: &[u8]) -> Result<i64, String> {
-        return Ok(crypto::FixedKey::new(&self.keys)
-                      .unseal_blob_name(crypto::CipherTextRef::new(name))
-                      .as_ref()
-                      .read_i64()
-                      .unwrap());
+        return Ok(
+            crypto::FixedKey::new(&self.keys)
+                .unseal_blob_name(crypto::CipherTextRef::new(name))
+                .as_ref()
+                .read_i64()
+                .unwrap(),
+        );
     }
 
     fn new_blob_desc(&self) -> BlobDesc {
@@ -92,8 +95,9 @@ impl InternalBlobIndex {
     fn recover(&self, name: Vec<u8>) -> BlobDesc {
         let wanted_id = self.id_of_name(&name).unwrap();
         if let Some(id) = {
-               self.index.lock().blob_id_from_name(&name[..])
-           } {
+            self.index.lock().blob_id_from_name(&name[..])
+        }
+        {
             assert_eq!(id, wanted_id);
 
             // Blob exists.
@@ -116,9 +120,10 @@ impl InternalBlobIndex {
 }
 
 impl BlobIndex {
-    pub fn new(keys: Arc<crypto::keys::Keeper>,
-               index: Arc<db::Index>)
-               -> Result<BlobIndex, DieselError> {
+    pub fn new(
+        keys: Arc<crypto::keys::Keeper>,
+        index: Arc<db::Index>,
+    ) -> Result<BlobIndex, DieselError> {
         InternalBlobIndex::new(keys, index).map(|bi| BlobIndex(bi))
     }
 
@@ -149,9 +154,9 @@ impl BlobIndex {
     pub fn find(&self, name: &[u8]) -> Option<BlobDesc> {
         if let Some(id) = self.0.index.lock().blob_id_from_name(&name) {
             Some(BlobDesc {
-                     name: name.to_vec(),
-                     id: id,
-                 })
+                name: name.to_vec(),
+                id: id,
+            })
         } else {
             None
         }

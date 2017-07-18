@@ -36,13 +36,17 @@ fn identity() {
         for chunk in chunks.iter() {
             let node = NodeType::Leaf;
             let leaf = LeafType::FileChunk;
-            ids.push((bs_p.store(&chunk[..],
-                                 hash::Hash::new(&keys, node, leaf, chunk),
-                                 node,
-                                 leaf,
-                                 None,
-                                 Box::new(move |_| {})),
-                      chunk));
+            ids.push((
+                bs_p.store(
+                    &chunk[..],
+                    hash::Hash::new(&keys, node, leaf, chunk),
+                    node,
+                    leaf,
+                    None,
+                    Box::new(move |_| {}),
+                ),
+                chunk,
+            ));
         }
 
         bs_p.flush();
@@ -81,13 +85,17 @@ fn identity_with_excessive_flushing() {
         for chunk in chunks.iter() {
             let node = NodeType::Leaf;
             let leaf = LeafType::FileChunk;
-            ids.push((bs_p.store(&chunk[..],
-                                 hash::Hash::new(&keys, node, leaf, chunk),
-                                 node,
-                                 leaf,
-                                 None,
-                                 Box::new(move |_| {})),
-                      chunk));
+            ids.push((
+                bs_p.store(
+                    &chunk[..],
+                    hash::Hash::new(&keys, node, leaf, chunk),
+                    node,
+                    leaf,
+                    None,
+                    Box::new(move |_| {}),
+                ),
+                chunk,
+            ));
             bs_p.flush();
             let &(ref id, chunk) = ids.last().unwrap();
             assert_eq!(bs_p.retrieve(&id).unwrap().unwrap(), &chunk[..]);
@@ -313,12 +321,14 @@ fn blob_ciphertext_authed_allbytes() {
         Ok(vs)
     };
 
-    fn with_modified<F>(mut bytes: &mut [u8],
-                        i: usize,
-                        b: u8,
-                        f: F)
-                        -> Result<Vec<Vec<u8>>, BlobError>
-        where F: FnOnce(&[u8]) -> Result<Vec<Vec<u8>>, BlobError>
+    fn with_modified<F>(
+        mut bytes: &mut [u8],
+        i: usize,
+        b: u8,
+        f: F,
+    ) -> Result<Vec<Vec<u8>>, BlobError>
+    where
+        F: FnOnce(&[u8]) -> Result<Vec<Vec<u8>>, BlobError>,
     {
         {
             bytes[i] ^= b;
