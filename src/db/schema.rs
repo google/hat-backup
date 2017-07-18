@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use chrono;
 use diesel::prelude::*;
 
 // Table schemas.
@@ -61,6 +62,7 @@ table! {
         tag -> Integer,
         family_id -> BigInt,
         snapshot_id -> BigInt,
+        utc_datetime -> Timestamp,
         msg -> Nullable<VarChar>,
         hash -> Nullable<Binary>,
         hash_ref -> Nullable<Binary>,
@@ -86,7 +88,7 @@ pub struct Hash {
 }
 
 #[derive(Insertable)]
-#[table_name="hashes"]
+#[table_name = "hashes"]
 pub struct NewHash<'a> {
     pub id: i64,
     pub hash: &'a [u8],
@@ -109,7 +111,7 @@ pub struct GcMetadata {
 }
 
 #[derive(Insertable)]
-#[table_name="gc_metadata"]
+#[table_name = "gc_metadata"]
 pub struct NewGcMetadata<'a> {
     pub hash_id: i64,
     pub family_id: i64,
@@ -125,7 +127,7 @@ pub struct Blob {
 }
 
 #[derive(Insertable)]
-#[table_name="blobs"]
+#[table_name = "blobs"]
 pub struct NewBlob<'a> {
     pub id: i64,
     pub name: &'a [u8],
@@ -139,7 +141,7 @@ pub struct Family {
 }
 
 #[derive(Insertable)]
-#[table_name="family"]
+#[table_name = "family"]
 pub struct NewFamily<'a> {
     pub name: &'a str,
 }
@@ -151,17 +153,19 @@ pub struct Snapshot {
     pub tag: i32,
     pub family_id: i64,
     pub snapshot_id: i64,
+    pub utc_datetime: chrono::NaiveDateTime,
     pub msg: Option<String>,
     pub hash: Option<Vec<u8>>,
     pub hash_ref: Option<Vec<u8>>,
 }
 
 #[derive(Insertable)]
-#[table_name="snapshots"]
+#[table_name = "snapshots"]
 pub struct NewSnapshot<'a> {
     pub tag: i32,
     pub family_id: i64,
     pub snapshot_id: i64,
+    pub utc_datetime: chrono::NaiveDateTime,
     pub msg: Option<&'a str>,
     pub hash: Option<&'a [u8]>,
     pub hash_ref: Option<&'a [u8]>,

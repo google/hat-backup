@@ -109,8 +109,8 @@ pub struct ChunkRef {
 
 impl ChunkRef {
     pub fn from_bytes(bytes: &mut &[u8]) -> Result<ChunkRef, capnp::Error> {
-        let reader = capnp::serialize_packed::read_message(bytes,
-                                                           capnp::message::ReaderOptions::new())?;
+        let reader =
+            capnp::serialize_packed::read_message(bytes, capnp::message::ReaderOptions::new())?;
         let root = reader.get_root::<root_capnp::chunk_ref::Reader>()?;
 
         Ok(ChunkRef::read_msg(&root)?)
@@ -152,9 +152,9 @@ impl ChunkRef {
         msg.set_length(self.length as u64);
 
         if let Some(Key::AeadChacha20Poly1305(ref chacha)) = self.key {
-            msg.borrow()
-                .init_key()
-                .set_aead_chacha20_poly1305(chacha.unsecure());
+            msg.borrow().init_key().set_aead_chacha20_poly1305(
+                chacha.unsecure(),
+            );
         } else {
             msg.borrow().init_key().set_none(());
         }
@@ -168,21 +168,21 @@ impl ChunkRef {
 
     pub fn read_msg(msg: &root_capnp::chunk_ref::Reader) -> Result<ChunkRef, capnp::Error> {
         Ok(ChunkRef {
-               blob_id: None,
-               blob_name: msg.get_blob_name()?.to_owned(),
-               offset: msg.get_offset() as usize,
-               length: msg.get_length() as usize,
-               packing: match msg.get_packing().which()? {
-                   root_capnp::chunk_ref::packing::None(()) => None,
-                   root_capnp::chunk_ref::packing::Gzip(()) => Some(Packing::GZip),
-                   root_capnp::chunk_ref::packing::Snappy(()) => Some(Packing::Snappy),
-               },
-               key: match msg.get_key().which()? {
-                   root_capnp::chunk_ref::key::None(()) => None,
-                   root_capnp::chunk_ref::key::AeadChacha20Poly1305(res) => {
-                       Some(Key::AeadChacha20Poly1305(secstr::SecStr::from(res?)))
-                   }
-               },
-           })
+            blob_id: None,
+            blob_name: msg.get_blob_name()?.to_owned(),
+            offset: msg.get_offset() as usize,
+            length: msg.get_length() as usize,
+            packing: match msg.get_packing().which()? {
+                root_capnp::chunk_ref::packing::None(()) => None,
+                root_capnp::chunk_ref::packing::Gzip(()) => Some(Packing::GZip),
+                root_capnp::chunk_ref::packing::Snappy(()) => Some(Packing::Snappy),
+            },
+            key: match msg.get_key().which()? {
+                root_capnp::chunk_ref::key::None(()) => None,
+                root_capnp::chunk_ref::key::AeadChacha20Poly1305(res) => {
+                    Some(Key::AeadChacha20Poly1305(secstr::SecStr::from(res?)))
+                }
+            },
+        })
     }
 }

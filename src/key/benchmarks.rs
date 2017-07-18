@@ -26,7 +26,7 @@ fn insert_1_key_x_128000_zeros(bench: &mut Bencher) {
     let ks_p: StoreProcess<EntryStub, _> =
         Process::new(Store::new_for_testing(backend, 4 * 1024 * 1024).unwrap());
 
-    let bytes = vec![0u8; 128*1024];
+    let bytes = vec![0u8; 128 * 1024];
 
     let mut i = 0i32;
     bench.iter(|| {
@@ -52,7 +52,7 @@ fn insert_1_key_x_128000_unique(bench: &mut Bencher) {
     let ks_p: StoreProcess<EntryStub, _> =
         Process::new(Store::new_for_testing(backend, 4 * 1024 * 1024).unwrap());
 
-    let bytes = vec![0u8; 128*1024];
+    let bytes = vec![0u8; 128 * 1024];
 
     let mut i = 0i32;
     bench.iter(|| {
@@ -84,7 +84,7 @@ fn insert_1_key_x_16_x_128000_zeros(bench: &mut Bencher) {
         Process::new(Store::new_for_testing(backend, 4 * 1024 * 1024).unwrap());
 
     bench.iter(|| {
-        let bytes = vec![0u8; 128*1024];
+        let bytes = vec![0u8; 128 * 1024];
 
         let entry = EntryStub {
             data: Some(vec![bytes; 16]),
@@ -110,7 +110,7 @@ fn insert_1_key_x_16_x_128000_unique(bench: &mut Bencher) {
     let ks_p: StoreProcess<EntryStub, _> =
         Process::new(Store::new_for_testing(backend, 4 * 1024 * 1024).unwrap());
 
-    let bytes = vec![0u8; 128*1024];
+    let bytes = vec![0u8; 128 * 1024];
     let mut i = 0i32;
 
     bench.iter(|| {
@@ -153,13 +153,13 @@ fn insert_1_key_unchanged_empty(bench: &mut Bencher) {
         Process::new(Store::new_for_testing(backend, 4 * 1024 * 1024).unwrap());
 
     bench.iter(|| {
-                   let entry = EntryStub {
-                       data: None,
-                       key_entry: Entry::new(None, vec![1u8, 2, 3], None),
-                   };
-                   ks_p.send_reply(Msg::Insert(entry.key_entry.clone(), None))
-                       .unwrap();
-               });
+        let entry = EntryStub {
+            data: None,
+            key_entry: Entry::new(None, vec![1u8, 2, 3], None),
+        };
+        ks_p.send_reply(Msg::Insert(entry.key_entry.clone(), None))
+            .unwrap();
+    });
 
     ks_p.send_reply(Msg::Flush).unwrap();
 }

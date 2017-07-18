@@ -51,11 +51,13 @@ impl MemoryBackend {
 
     fn guarded_list(&self) -> Result<Vec<Box<[u8]>>, String> {
         let guarded_files = self.files.lock().unwrap();
-        Ok(guarded_files
-               .keys()
-               .cloned()
-               .map(|x| x.into_boxed_slice())
-               .collect())
+        Ok(
+            guarded_files
+                .keys()
+                .cloned()
+                .map(|x| x.into_boxed_slice())
+                .collect(),
+        )
     }
 }
 

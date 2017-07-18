@@ -55,7 +55,7 @@ pub struct KeyNode {
 }
 
 #[derive(Insertable)]
-#[table_name="key_tree"]
+#[table_name = "key_tree"]
 pub struct NewKeyNode<'a> {
     pub node_id: Option<i64>,
     pub parent_id: Option<i64>,
@@ -81,7 +81,7 @@ pub struct KeyData {
 }
 
 #[derive(Insertable)]
-#[table_name="key_data"]
+#[table_name = "key_data"]
 pub struct NewKeyData<'a> {
     pub node_id: Option<i64>,
     pub committed: bool,

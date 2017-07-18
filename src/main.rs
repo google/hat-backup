@@ -57,25 +57,41 @@ fn main() {
     let matches = App::new("hat")
         .version(&format!("v{}", crate_version!())[..])
         .about("Create backup snapshots")
-        .args_from_usage("-l, --license 'Display the license'
+        .args_from_usage(
+            "-l, --license 'Display the license'
                           --hat_migrations_dir=[DIR] 'Location of Hat SQL migrations'
-                          --hat_cache_dir=[DIR] 'Location of Hat local state'")
-        .subcommand(SubCommand::with_name("commit")
-                        .about("Commit a new snapshot")
-                        .args_from_usage(arg_template))
-        .subcommand(SubCommand::with_name("checkout")
-                        .about("Checkout a snapshot")
-                        .args_from_usage(arg_template))
-        .subcommand(SubCommand::with_name("recover").about("Recover list of commit'ed snapshots"))
-        .subcommand(SubCommand::with_name("delete")
-                        .about("Delete a snapshot")
-                        .args_from_usage("<NAME> 'Name of the snapshot family'
+                          --hat_cache_dir=[DIR] 'Location of Hat local state'",
+        )
+        .subcommand(
+            SubCommand::with_name("commit")
+                .about("Commit a new snapshot")
+                .args_from_usage(arg_template),
+        )
+        .subcommand(
+            SubCommand::with_name("checkout")
+                .about("Checkout a snapshot")
+                .args_from_usage(arg_template),
+        )
+        .subcommand(SubCommand::with_name("recover").about(
+            "Recover list of commit'ed snapshots",
+        ))
+        .subcommand(
+            SubCommand::with_name("delete")
+                .about("Delete a snapshot")
+                .args_from_usage(
+                    "<NAME> 'Name of the snapshot family'
                                                         \
-                              <ID> 'The snapshot id to delete'"))
-        .subcommand(SubCommand::with_name("gc")
-                        .about("Garbage collect: identify and remove unused data blocks.")
-                        .args_from_usage("-p --pretend 'Do not modify any data'"))
-        .subcommand(SubCommand::with_name("resume").about("Resume previous failed command."))
+                              <ID> 'The snapshot id to delete'",
+                ),
+        )
+        .subcommand(
+            SubCommand::with_name("gc")
+                .about("Garbage collect: identify and remove unused data blocks.")
+                .args_from_usage("-p --pretend 'Do not modify any data'"),
+        )
+        .subcommand(SubCommand::with_name("resume").about(
+            "Resume previous failed command.",
+        ))
         .get_matches();
 
     // Check for license flag
@@ -88,7 +104,9 @@ fn main() {
         matches
             .value_of(name)
             .map(|x| x.to_string())
-            .or_else(|| env::var_os(name.to_uppercase()).map(|s| s.into_string().unwrap()))
+            .or_else(|| {
+                env::var_os(name.to_uppercase()).map(|s| s.into_string().unwrap())
+            })
             .expect(&format!("{} required", name))
     };
 
@@ -116,8 +134,10 @@ fn main() {
                     .unwrap();
 
             // Update the family index.
-            let mut family = hat.open_family(name.clone())
-                .expect(&format!("Could not open family '{}'", name));
+            let mut family = hat.open_family(name.clone()).expect(&format!(
+                "Could not open family '{}'",
+                name
+            ));
             family.snapshot_dir(PathBuf::from(path));
 
             // Commit the updated index.
@@ -171,8 +191,10 @@ fn main() {
 
         }
         _ => {
-            println!("No subcommand specified\n{}\nFor more information re-run with --help",
-                     matches.usage());
+            println!(
+                "No subcommand specified\n{}\nFor more information re-run with --help",
+                matches.usage()
+            );
             std::process::exit(1);
         }
     }

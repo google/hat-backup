@@ -34,18 +34,17 @@ impl FileEntry {
     fn new(full_path: PathBuf, parent: Option<u64>) -> Result<FileEntry, Box<Error>> {
         debug!("FileEntry::new({:?})", full_path);
 
-        let filename_opt = full_path
-            .file_name()
-            .and_then(|n| n.to_str())
-            .map(|n| n.bytes().collect());
+        let filename_opt = full_path.file_name().and_then(|n| n.to_str()).map(|n| {
+            n.bytes().collect()
+        });
 
         if filename_opt.is_some() {
             let meta = fs::symlink_metadata(&full_path)?;
             Ok(FileEntry {
-                   key_entry: key::Entry::new(parent, filename_opt.unwrap(), Some(&meta)),
-                   metadata: meta,
-                   full_path: full_path,
-               })
+                key_entry: key::Entry::new(parent, filename_opt.unwrap(), Some(&meta)),
+                metadata: meta,
+                full_path: full_path,
+            })
         } else {
             Err(From::from("Could not parse filename."[..].to_owned()))
         }
@@ -109,11 +108,12 @@ impl<B: StoreBackend> PathHandler<Option<u64>> for InsertPathHandler<B> {
                 let full_path = file_entry.full_path.clone();
 
                 let ks = self.key_store.lock().unwrap();
-                match ks.send_reply(key::Msg::Insert(file_entry.key_entry,
-                                                     if is_directory {
-                                                         None
-                                                     } else {
-                                                         Some(Box::new(move |()| {
+                match ks.send_reply(key::Msg::Insert(
+                    file_entry.key_entry,
+                    if is_directory {
+                        None
+                    } else {
+                        Some(Box::new(move |()| {
                         match FileIterator::new(&full_path) {
                             Err(e) => {
                                 println!("Skipping '{}': {}", local_root.display(), e.to_string());
@@ -122,7 +122,8 @@ impl<B: StoreBackend> PathHandler<Option<u64>> for InsertPathHandler<B> {
                             Ok(it) => Some(it),
                         }
                     }))
-                                                     })) {
+                    },
+                )) {
                     Ok(key::Reply::Id(id)) => {
                         if is_directory {
                             return Some(Some(id));

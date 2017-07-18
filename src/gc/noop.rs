@@ -32,26 +32,30 @@ impl<B: gc::GcBackend> gc::Gc<B> for GcNoop {
         false
     }
 
-    fn register_final(&mut self,
-                      _snapshot: &SnapshotInfo,
-                      _ref_final: gc::Id)
-                      -> Result<(), Self::Err> {
+    fn register_final(
+        &mut self,
+        _snapshot: &SnapshotInfo,
+        _ref_final: gc::Id,
+    ) -> Result<(), Self::Err> {
         Ok(())
     }
 
-    fn register_cleanup(&mut self,
-                        _snapshot: &SnapshotInfo,
-                        _ref_final: gc::Id)
-                        -> Result<(), Self::Err> {
+    fn register_cleanup(
+        &mut self,
+        _snapshot: &SnapshotInfo,
+        _ref_final: gc::Id,
+    ) -> Result<(), Self::Err> {
         Ok(())
     }
 
-    fn deregister<F>(&mut self,
-                     _snapshot: &SnapshotInfo,
-                     _final_ref: gc::Id,
-                     _refs: F)
-                     -> Result<(), Self::Err>
-        where F: FnOnce() -> mpsc::Receiver<gc::Id>
+    fn deregister<F>(
+        &mut self,
+        _snapshot: &SnapshotInfo,
+        _final_ref: gc::Id,
+        _refs: F,
+    ) -> Result<(), Self::Err>
+    where
+        F: FnOnce() -> mpsc::Receiver<gc::Id>,
     {
         Ok(())
     }

@@ -45,15 +45,17 @@ pub trait GcBackend {
 
     fn get_data(&self, hash_id: Id, family_id: Id) -> Result<GcData, Self::Err>;
 
-    fn update_data<F: UpdateFn>(&mut self,
-                                hash_id: Id,
-                                family_id: Id,
-                                f: F)
-                                -> Result<GcData, Self::Err>;
-    fn update_all_data_by_family<F: UpdateFn, I: Iterator<Item = F>>(&mut self,
-                                                                     family_id: Id,
-                                                                     fns: I)
-                                                                     -> Result<(), Self::Err>;
+    fn update_data<F: UpdateFn>(
+        &mut self,
+        hash_id: Id,
+        family_id: Id,
+        f: F,
+    ) -> Result<GcData, Self::Err>;
+    fn update_all_data_by_family<F: UpdateFn, I: Iterator<Item = F>>(
+        &mut self,
+        family_id: Id,
+        fns: I,
+    ) -> Result<(), Self::Err>;
 
     fn set_tag(&mut self, hash_id: Id, tag: tags::Tag) -> Result<(), Self::Err>;
     fn get_tag(&self, hash_id: Id) -> Result<Option<tags::Tag>, Self::Err>;
@@ -68,7 +70,8 @@ pub trait GcBackend {
 
 
 pub fn mark_tree<B>(backend: &mut B, root: Id, tag: tags::Tag) -> Result<(), B::Err>
-    where B: GcBackend
+where
+    B: GcBackend,
 {
     backend.set_tag(root, tag)?;
     for r in backend.reverse_refs(root)? {
@@ -92,17 +95,17 @@ pub trait Gc<B> {
     fn is_exact() -> bool;
 
     fn register_final(&mut self, snapshot: &SnapshotInfo, final_ref: Id) -> Result<(), Self::Err>;
-    fn register_cleanup(&mut self,
-                        snapshot: &SnapshotInfo,
-                        final_ref: Id)
-                        -> Result<(), Self::Err>;
+    fn register_cleanup(&mut self, snapshot: &SnapshotInfo, final_ref: Id)
+        -> Result<(), Self::Err>;
 
-    fn deregister<F>(&mut self,
-                     snapshot: &SnapshotInfo,
-                     final_ref: Id,
-                     refs: F)
-                     -> Result<(), Self::Err>
-        where F: FnOnce() -> mpsc::Receiver<Id>;
+    fn deregister<F>(
+        &mut self,
+        snapshot: &SnapshotInfo,
+        final_ref: Id,
+        refs: F,
+    ) -> Result<(), Self::Err>
+    where
+        F: FnOnce() -> mpsc::Receiver<Id>;
 
     fn list_unused_ids(&mut self, refs: mpsc::Sender<Id>) -> Result<(), Self::Err>;
 
@@ -146,11 +149,10 @@ impl SafeMemoryBackend {
     }
 
     fn insert_snapshot(&mut self, info: &SnapshotInfo, refs: Vec<Id>) {
-        self.backend
-            .lock()
-            .unwrap()
-            .snapshot_refs
-            .insert(info.unique_id, refs);
+        self.backend.lock().unwrap().snapshot_refs.insert(
+            info.unique_id,
+            refs,
+        );
     }
 
     fn list_snapshot_refs(&self, info: SnapshotInfo) -> mpsc::Receiver<Id> {
@@ -193,23 +195,26 @@ impl GcBackend for SafeMemoryBackend {
     type Err = String;
 
     fn get_data(&self, hash_id: Id, family_id: Id) -> Result<GcData, Self::Err> {
-        Ok(self.backend
-               .lock()
-               .unwrap()
-               .gc_data
-               .get(&(hash_id, family_id))
-               .unwrap_or(&GcData {
-                               num: 0,
-                               bytes: vec![],
-                           })
-               .clone())
+        Ok(
+            self.backend
+                .lock()
+                .unwrap()
+                .gc_data
+                .get(&(hash_id, family_id))
+                .unwrap_or(&GcData {
+                    num: 0,
+                    bytes: vec![],
+                })
+                .clone(),
+        )
     }
 
-    fn update_data<F: UpdateFn>(&mut self,
-                                hash_id: Id,
-                                family_id: Id,
-                                f: F)
-                                -> Result<GcData, Self::Err> {
+    fn update_data<F: UpdateFn>(
+        &mut self,
+        hash_id: Id,
+        family_id: Id,
+        f: F,
+    ) -> Result<GcData, Self::Err> {
         let new = match f(self.get_data(hash_id, family_id)?) {
             Some(d) => d,
             None => {
@@ -219,26 +224,26 @@ impl GcBackend for SafeMemoryBackend {
                 }
             }
         };
-        self.backend
-            .lock()
-            .unwrap()
-            .gc_data
-            .insert((hash_id, family_id), new.clone());
+        self.backend.lock().unwrap().gc_data.insert(
+            (hash_id, family_id),
+            new.clone(),
+        );
 
         Ok(new)
     }
 
-    fn update_all_data_by_family<F: UpdateFn, I: Iterator<Item = F>>(&mut self,
-                                                                     family_id: Id,
-                                                                     mut fns: I)
-                                                                     -> Result<(), Self::Err> {
+    fn update_all_data_by_family<F: UpdateFn, I: Iterator<Item = F>>(
+        &mut self,
+        family_id: Id,
+        mut fns: I,
+    ) -> Result<(), Self::Err> {
         for (k, v) in &mut self.backend.lock().unwrap().gc_data {
             if k.1 == family_id {
                 let f = fns.next().unwrap();
                 *v = f(v.clone()).unwrap_or(GcData {
-                                                num: 0,
-                                                bytes: vec![],
-                                            });
+                    num: 0,
+                    bytes: vec![],
+                });
             }
         }
 
@@ -251,12 +256,7 @@ impl GcBackend for SafeMemoryBackend {
     }
 
     fn get_tag(&self, hash_id: Id) -> Result<Option<tags::Tag>, Self::Err> {
-        Ok(self.backend
-               .lock()
-               .unwrap()
-               .tags
-               .get(&hash_id)
-               .cloned())
+        Ok(self.backend.lock().unwrap().tags.get(&hash_id).cloned())
     }
 
     fn set_all_tags(&mut self, tag: tags::Tag) -> Result<(), Self::Err> {
@@ -271,13 +271,15 @@ impl GcBackend for SafeMemoryBackend {
     }
 
     fn reverse_refs(&self, hash_id: Id) -> Result<Vec<Id>, Self::Err> {
-        Ok(self.backend
-               .lock()
-               .unwrap()
-               .parents
-               .get(&hash_id)
-               .unwrap_or(&vec![])
-               .clone())
+        Ok(
+            self.backend
+                .lock()
+                .unwrap()
+                .parents
+                .get(&hash_id)
+                .unwrap_or(&vec![])
+                .clone(),
+        )
     }
 
     fn list_ids_by_tag(&self, tag: tags::Tag) -> Result<mpsc::Receiver<Id>, Self::Err> {
@@ -303,8 +305,9 @@ impl GcBackend for SafeMemoryBackend {
 
 #[cfg(test)]
 pub fn gc_test<GC>(snapshots: Vec<Vec<u8>>)
-    where GC: Gc<SafeMemoryBackend>,
-          GC::Err: fmt::Debug
+where
+    GC: Gc<SafeMemoryBackend>,
+    GC::Err: fmt::Debug,
 {
     let mut backend = SafeMemoryBackend::new();
     let mut gc = GC::new(backend.clone());
@@ -364,17 +367,20 @@ pub fn gc_test<GC>(snapshots: Vec<Vec<u8>>)
         gc.list_unused_ids(sender).unwrap();
         let unused: Vec<Id> = receiver.iter().collect();
         if unused.len() != all_refs.len() {
-            panic!("Did not mark all IDs as unused. Wanted {:?}, got {:?}.",
-                   all_refs,
-                   unused);
+            panic!(
+                "Did not mark all IDs as unused. Wanted {:?}, got {:?}.",
+                all_refs,
+                unused
+            );
         }
     }
 }
 
 #[cfg(test)]
 pub fn resume_register_test<GC>()
-    where GC: Gc<SafeMemoryBackend>,
-          GC::Err: fmt::Debug
+where
+    GC: Gc<SafeMemoryBackend>,
+    GC::Err: fmt::Debug,
 {
     let mut backend = SafeMemoryBackend::new();
     let mut gc = GC::new(backend.clone());
@@ -424,8 +430,9 @@ pub fn resume_register_test<GC>()
 
 #[cfg(test)]
 pub fn resume_deregister_test<GC>()
-    where GC: Gc<SafeMemoryBackend>,
-          GC::Err: fmt::Debug
+where
+    GC: Gc<SafeMemoryBackend>,
+    GC::Err: fmt::Debug,
 {
     let mut backend = SafeMemoryBackend::new();
     let mut gc = GC::new(backend.clone());

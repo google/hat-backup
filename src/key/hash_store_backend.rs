@@ -39,10 +39,11 @@ impl<B> Clone for HashStoreBackend<B> {
 }
 
 impl<B: StoreBackend> HashStoreBackend<B> {
-    pub fn new(hash_index: Arc<hash::HashIndex>,
-               blob_store: Arc<blob::BlobStore<B>>,
-               keys: Arc<crypto::keys::Keeper>)
-               -> HashStoreBackend<B> {
+    pub fn new(
+        hash_index: Arc<hash::HashIndex>,
+        blob_store: Arc<blob::BlobStore<B>>,
+        keys: Arc<crypto::keys::Keeper>,
+    ) -> HashStoreBackend<B> {
         HashStoreBackend {
             hash_index: hash_index,
             blob_store: blob_store,
@@ -57,16 +58,16 @@ impl<B: StoreBackend> HashTreeBackend for HashStoreBackend<B> {
     fn fetch_chunk(&self, href: &hash::tree::HashRef) -> Result<Option<Vec<u8>>, MsgError> {
         assert!(!href.hash.bytes.is_empty());
 
-        Ok(self.blob_store
-               .retrieve(&href)?
-               .and_then(|data| {
+        Ok(self.blob_store.retrieve(&href)?.and_then(|data| {
             let actual_hash = hash::Hash::new(&self.keys, href.node, href.leaf, &data[..]);
             if href.hash == actual_hash {
                 Some(data)
             } else {
-                error!("Data hash does not match expectation: {:?} instead of {:?}",
-                       actual_hash,
-                       href.hash);
+                error!(
+                    "Data hash does not match expectation: {:?} instead of {:?}",
+                    actual_hash,
+                    href.hash
+                );
                 None
             }
         }))
@@ -90,13 +91,14 @@ impl<B: StoreBackend> HashTreeBackend for HashStoreBackend<B> {
         }
     }
 
-    fn insert_chunk(&self,
-                    chunk: &[u8],
-                    node: blob::NodeType,
-                    leaf: blob::LeafType,
-                    childs: Option<Vec<u64>>,
-                    info: Option<&key::Info>)
-                    -> Result<(u64, hash::tree::HashRef), MsgError> {
+    fn insert_chunk(
+        &self,
+        chunk: &[u8],
+        node: blob::NodeType,
+        leaf: blob::LeafType,
+        childs: Option<Vec<u64>>,
+        info: Option<&key::Info>,
+    ) -> Result<(u64, hash::tree::HashRef), MsgError> {
         let mut hash_entry = hash::Entry {
             hash: hash::Hash::new(&self.keys, node, leaf, chunk),
             node: node,
@@ -107,30 +109,37 @@ impl<B: StoreBackend> HashTreeBackend for HashStoreBackend<B> {
 
         match self.hash_index.reserve(&hash_entry) {
             hash::ReserveResult::HashKnown(id) => {
-                debug!("Reuse hash {}, {}/{:?}: {}",
-                       id,
-                       leaf as u64,
-                       node,
-                       chunk.len());
+                debug!(
+                    "Reuse hash {}, {}/{:?}: {}",
+                    id,
+                    leaf as u64,
+                    node,
+                    chunk.len()
+                );
 
                 // Someone came before us: piggyback on their result.
-                let pref = self.fetch_persistent_ref(&hash_entry.hash)
-                    .expect("Could not find persistent ref for known hash");
-                Ok((id,
+                let pref = self.fetch_persistent_ref(&hash_entry.hash).expect(
+                    "Could not find persistent ref for known hash",
+                );
+                Ok((
+                    id,
                     hash::tree::HashRef {
                         hash: hash_entry.hash,
                         node: node,
                         leaf: leaf,
                         info: None,
                         persistent_ref: pref,
-                    }))
+                    },
+                ))
             }
             hash::ReserveResult::ReserveOk(id) => {
-                debug!("New hash {}, {}/{:?}: {}",
-                       id,
-                       leaf as u64,
-                       node,
-                       chunk.len());
+                debug!(
+                    "New hash {}, {}/{:?}: {}",
+                    id,
+                    leaf as u64,
+                    node,
+                    chunk.len()
+                );
 
                 // We came first: this data-chunk is ours to process.
                 let local_hash_index = self.hash_index.clone();
@@ -146,8 +155,14 @@ impl<B: StoreBackend> HashTreeBackend for HashStoreBackend<B> {
                     drop(guard);
                 });
 
-                let href = self.blob_store
-                    .store(chunk, hash_entry.hash.clone(), node, leaf, info, callback);
+                let href = self.blob_store.store(
+                    chunk,
+                    hash_entry.hash.clone(),
+                    node,
+                    leaf,
+                    info,
+                    callback,
+                );
 
                 // Update the hash entry now to enable reuse before the hash is fully committed.
                 hash_entry.persistent_ref = Some(href.persistent_ref.clone());

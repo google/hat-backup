@@ -81,11 +81,12 @@ impl<B> Drop for StoreInner<B> {
 }
 
 impl<B: StoreBackend> StoreInner<B> {
-    fn new(keys: Arc<crypto::keys::Keeper>,
-           index: Arc<BlobIndex>,
-           backend: Arc<B>,
-           max_blob_size: usize)
-           -> StoreInner<B> {
+    fn new(
+        keys: Arc<crypto::keys::Keeper>,
+        index: Arc<BlobIndex>,
+        backend: Arc<B>,
+        max_blob_size: usize,
+    ) -> StoreInner<B> {
         let mut bs = StoreInner {
             keys: keys.clone(),
             backend: backend,
@@ -112,9 +113,9 @@ impl<B: StoreBackend> StoreInner<B> {
         let old_blob_desc = self.reserve_new_blob();
 
         self.blob_index.in_air(&old_blob_desc);
-        self.backend
-            .store(&old_blob_desc.name[..], &ct)
-            .expect("Store operation failed");
+        self.backend.store(&old_blob_desc.name[..], &ct).expect(
+            "Store operation failed",
+        );
         self.blob_index.commit_done(&old_blob_desc);
 
         // Go through callbacks
@@ -123,14 +124,15 @@ impl<B: StoreBackend> StoreInner<B> {
         }
     }
 
-    fn store(&mut self,
-             chunk: &[u8],
-             hash: Hash,
-             node: NodeType,
-             leaf: LeafType,
-             info: Option<&key::Info>,
-             callback: Box<FnBox<(), ()>>)
-             -> HashRef {
+    fn store(
+        &mut self,
+        chunk: &[u8],
+        hash: Hash,
+        node: NodeType,
+        leaf: LeafType,
+        info: Option<&key::Info>,
+        callback: Box<FnBox<(), ()>>,
+    ) -> HashRef {
         let mut href = HashRef {
             hash: hash,
             node: node,
@@ -177,8 +179,11 @@ impl<B: StoreBackend> StoreInner<B> {
         }
         match self.backend.retrieve(&href.persistent_ref.blob_name[..]) {
             Ok(Some(blob)) => {
-                Ok(Some(BlobReader::new(self.keys.clone(), crypto::CipherTextRef::new(&blob[..]))?
-                            .read_chunk(href)?))
+                Ok(Some(BlobReader::new(
+                    self.keys.clone(),
+                    crypto::CipherTextRef::new(&blob[..]),
+                )?
+                    .read_chunk(href)?))
             }
             Ok(None) => Ok(None),
             Err(e) => Err(e.into()),
@@ -209,12 +214,13 @@ impl<B: StoreBackend> StoreInner<B> {
     }
 
     fn tag(&mut self, chunk: ChunkRef, tag: tags::Tag) {
-        self.blob_index
-            .tag(&BlobDesc {
-                      id: chunk.blob_id.unwrap_or(0),
-                      name: chunk.blob_name,
-                  },
-                 tag);
+        self.blob_index.tag(
+            &BlobDesc {
+                id: chunk.blob_id.unwrap_or(0),
+                name: chunk.blob_name,
+            },
+            tag,
+        );
     }
 
     fn tag_all(&mut self, tag: tags::Tag) {
@@ -232,12 +238,15 @@ impl<B: StoreBackend> StoreInner<B> {
 }
 
 impl<B: StoreBackend> BlobStore<B> {
-    pub fn new(keys: Arc<crypto::keys::Keeper>,
-               index: Arc<BlobIndex>,
-               backend: Arc<B>,
-               max_blob_size: usize)
-               -> BlobStore<B> {
-        BlobStore(Arc::new(Mutex::new(StoreInner::new(keys, index, backend, max_blob_size))))
+    pub fn new(
+        keys: Arc<crypto::keys::Keeper>,
+        index: Arc<BlobIndex>,
+        backend: Arc<B>,
+        max_blob_size: usize,
+    ) -> BlobStore<B> {
+        BlobStore(Arc::new(Mutex::new(
+            StoreInner::new(keys, index, backend, max_blob_size),
+        )))
     }
 
     fn lock(&self) -> MutexGuard<StoreInner<B>> {
@@ -247,14 +256,15 @@ impl<B: StoreBackend> BlobStore<B> {
     /// Store a new data chunk into the current blob. The callback is triggered after the blob
     /// containing the chunk has been committed to persistent storage (it is then safe to use the
     /// `ChunkRef` as persistent reference).
-    pub fn store(&self,
-                 chunk: &[u8],
-                 hash: Hash,
-                 node: NodeType,
-                 leaf: LeafType,
-                 info: Option<&key::Info>,
-                 callback: Box<FnBox<(), ()>>)
-                 -> HashRef {
+    pub fn store(
+        &self,
+        chunk: &[u8],
+        hash: Hash,
+        node: NodeType,
+        leaf: LeafType,
+        info: Option<&key::Info>,
+        callback: Box<FnBox<(), ()>>,
+    ) -> HashRef {
         let mut guard = self.lock();
         guard.store(chunk, hash, node, leaf, info, callback)
     }
@@ -293,9 +303,9 @@ impl<B: StoreBackend> BlobStore<B> {
     pub fn find(&self, name: &[u8]) -> Option<BlobDesc> {
         if &name[..] == [0] {
             Some(BlobDesc {
-                     name: vec![0],
-                     id: 0,
-                 })
+                name: vec![0],
+                id: 0,
+            })
         } else {
             self.lock().blob_index.find(name)
         }

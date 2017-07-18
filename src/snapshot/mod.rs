@@ -15,6 +15,7 @@
 //! Local state for known snapshots.
 
 
+use chrono;
 use db;
 use hash;
 use std::sync::Arc;
@@ -37,13 +38,12 @@ impl SnapshotIndex {
     }
 
     /// Lookup exact snapshot info from family and snapshot id.
-    pub fn lookup(&mut self,
-                  family_name: &str,
-                  snapshot_id: u64)
-                  -> Option<(db::SnapshotInfo, hash::Hash, Option<hash::tree::HashRef>)> {
-        self.index
-            .lock()
-            .snapshot_lookup(family_name, snapshot_id)
+    pub fn lookup(
+        &mut self,
+        family_name: &str,
+        snapshot_id: u64,
+    ) -> Option<(db::SnapshotInfo, hash::Hash, Option<hash::tree::HashRef>)> {
+        self.index.lock().snapshot_lookup(family_name, snapshot_id)
     }
 
     pub fn reserve(&mut self, family: String) -> db::SnapshotInfo {
@@ -51,47 +51,57 @@ impl SnapshotIndex {
     }
 
     /// Update existing snapshot.
-    pub fn update(&mut self,
-                  snapshot: &db::SnapshotInfo,
-                  hash: &hash::Hash,
-                  hash_ref: &hash::tree::HashRef) {
-        self.index
-            .lock()
-            .snapshot_update(snapshot, "anonymous", hash, hash_ref);
+    pub fn update(
+        &mut self,
+        snapshot: &db::SnapshotInfo,
+        hash: &hash::Hash,
+        hash_ref: &hash::tree::HashRef,
+    ) {
+        self.index.lock().snapshot_update(
+            snapshot,
+            "anonymous",
+            hash,
+            hash_ref,
+        );
     }
 
     /// ReadyCommit.
     pub fn ready_commit(&mut self, snapshot: &db::SnapshotInfo) {
-        self.index
-            .lock()
-            .snapshot_set_tag(snapshot, tags::Tag::Complete)
+        self.index.lock().snapshot_set_tag(
+            snapshot,
+            tags::Tag::Complete,
+        )
     }
 
     /// Register a new snapshot by its family name, hash and persistent reference.
     pub fn commit(&mut self, snapshot: &db::SnapshotInfo) {
-        self.index
-            .lock()
-            .snapshot_set_tag(snapshot, tags::Tag::Done)
+        self.index.lock().snapshot_set_tag(
+            snapshot,
+            tags::Tag::Done,
+        )
     }
 
     /// We are deleting this snapshot.
     pub fn will_delete(&mut self, snapshot: &db::SnapshotInfo) {
-        self.index
-            .lock()
-            .snapshot_set_tag(snapshot, tags::Tag::WillDelete)
+        self.index.lock().snapshot_set_tag(
+            snapshot,
+            tags::Tag::WillDelete,
+        )
     }
 
     /// We are ready to delete of this snapshot.
     pub fn ready_delete(&mut self, snapshot: &db::SnapshotInfo) {
-        self.index
-            .lock()
-            .snapshot_set_tag(snapshot, tags::Tag::ReadyDelete)
+        self.index.lock().snapshot_set_tag(
+            snapshot,
+            tags::Tag::ReadyDelete,
+        )
     }
 
     /// Extract latest snapshot data for family.
-    pub fn latest(&mut self,
-                  family: &str)
-                  -> Option<(db::SnapshotInfo, hash::Hash, Option<hash::tree::HashRef>)> {
+    pub fn latest(
+        &mut self,
+        family: &str,
+    ) -> Option<(db::SnapshotInfo, hash::Hash, Option<hash::tree::HashRef>)> {
         self.index.lock().snapshot_latest(family)
     }
 
@@ -110,15 +120,23 @@ impl SnapshotIndex {
     }
 
     /// Recover snapshot information.
-    pub fn recover(&mut self,
-                   snapshot_id: u64,
-                   family: &str,
-                   msg: &str,
-                   hash_ref: &hash::tree::HashRef,
-                   work_opt: Option<db::SnapshotWorkStatus>) {
-        self.index
-            .lock()
-            .snapshot_recover(snapshot_id, family, msg, hash_ref, work_opt)
+    pub fn recover(
+        &mut self,
+        snapshot_id: u64,
+        family: &str,
+        created: chrono::DateTime<chrono::Utc>,
+        msg: &str,
+        hash_ref: &hash::tree::HashRef,
+        work_opt: Option<db::SnapshotWorkStatus>,
+    ) {
+        self.index.lock().snapshot_recover(
+            snapshot_id,
+            family,
+            created,
+            msg,
+            hash_ref,
+            work_opt,
+        )
     }
 
     /// Flush the hash index to clear internal buffers and commit the underlying database.
