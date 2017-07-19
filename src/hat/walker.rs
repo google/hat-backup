@@ -12,15 +12,21 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-
+use std::path::PathBuf;
 use hash;
 use key;
 use std::collections::VecDeque;
 
+#[derive(Clone)]
+pub enum Content {
+    Data(hash::tree::HashRef),
+    Dir(hash::tree::HashRef),
+    Link(PathBuf),
+}
 
 #[derive(Clone)]
 pub struct FileEntry {
-    pub hash_ref: hash::tree::HashRef,
+    pub hash_ref: Content,
     pub meta: key::Entry,
 }
 
@@ -106,14 +112,22 @@ where
 
         self.child = match self.stack.pop_front() {
             Some(StackItem::File(f)) => {
+                let href = match f.hash_ref {
+                    Content::Data(href) => href,
+                    _ => unreachable!("Expected file"),
+                };
                 Some(Child::File(
-                    hash::tree::Walker::new(self.backend.clone(), f.hash_ref)?
+                    hash::tree::Walker::new(self.backend.clone(), href)?
                         .unwrap(),
                 ))
             }
             Some(StackItem::Dir(f)) => {
+                let href = match f.hash_ref {
+                    Content::Dir(href) => href,
+                    _ => unreachable!("Expected dir"),
+                };
                 Some(Child::Dir(Box::new(
-                    Walker::new(self.backend.clone(), f.hash_ref).unwrap(),
+                    Walker::new(self.backend.clone(), href).unwrap(),
                 )))
             }
             None => None,

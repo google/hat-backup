@@ -100,8 +100,8 @@ pub mod recover {
 
     impl walker::LikesFiles for FileVisitor {
         fn include_file(&mut self, file: &walker::FileEntry) -> bool {
-            if file.meta.data_hash.is_some() {
-                self.tops.push(file.hash_ref.hash.clone());
+            if let walker::Content::Data(ref hash_ref) = file.hash_ref {
+                self.tops.push(hash_ref.hash.clone());
                 true
             } else {
                 false
@@ -109,8 +109,8 @@ pub mod recover {
         }
 
         fn include_dir(&mut self, file: &walker::FileEntry) -> bool {
-            if file.meta.data_hash.is_none() {
-                self.tops.push(file.hash_ref.hash.clone());
+            if let walker::Content::Dir(ref hash_ref) = file.hash_ref {
+                self.tops.push(hash_ref.hash.clone());
                 true
             } else {
                 false
@@ -191,19 +191,22 @@ fn parse_dir_data(chunk: &[u8], mut out: &mut Vec<walker::FileEntry>) -> Result<
                 root_capnp::file::content::Data(r) => {
                     Some(r.unwrap().get_hash().unwrap().to_owned())
                 }
-                root_capnp::file::content::Directory(_) => None,
+                root_capnp::file::content::Directory(_) |
+                root_capnp::file::content::SymbolicLink(_) => None,
             },
             parent_id: None,
             node_id: Some(f.get_id()),
         };
         let hash_ref = match f.get_content().which().unwrap() {
             root_capnp::file::content::Data(r) => {
-                hash::tree::HashRef::read_msg(&r.expect("File has no data reference"))
+                walker::Content::Data(hash::tree::HashRef::read_msg(&r.expect("File has no data reference")).unwrap())
             }
             root_capnp::file::content::Directory(d) => {
-                hash::tree::HashRef::read_msg(&d.expect("Directory has no listing reference"))
+                walker::Content::Dir(hash::tree::HashRef::read_msg(&d.expect("Directory has no listing reference")).unwrap())
             }
-        }.unwrap();
+            root_capnp::file::content::SymbolicLink(path) =>
+                walker::Content::Link(PathBuf::from(String::from_utf8(path?.to_owned()).unwrap())),
+        };
 
         out.push(walker::FileEntry {
             hash_ref: hash_ref,
@@ -388,7 +391,7 @@ impl<B: StoreBackend> Family<B> {
         &self,
         dir_hash: hash::tree::HashRef,
         backend: HTB,
-    ) -> Result<Vec<(key::Entry, hash::tree::HashRef)>, HatError> {
+    ) -> Result<Vec<(key::Entry, walker::Content)>, HatError> {
         let it = hash::tree::LeafIterator::new(backend, dir_hash)?.expect(
             "unable to open dir",
         );
