@@ -185,27 +185,26 @@ fn parse_dir_data(chunk: &[u8], mut out: &mut Vec<walker::FileEntry>) -> Result<
             // TODO(jos): Can we get rid of these?
             break;
         }
-        let entry = key::Entry {
-            info: key::Info::read(f.get_info()?.borrow())?,
-            data_hash: match f.get_content().which().unwrap() {
-                root_capnp::file::content::Data(r) => {
-                    Some(r.unwrap().get_hash().unwrap().to_owned())
-                }
-                root_capnp::file::content::Directory(_) |
-                root_capnp::file::content::SymbolicLink(_) => None,
-            },
-            parent_id: None,
-            node_id: Some(f.get_id()),
-        };
+
         let hash_ref = match f.get_content().which().unwrap() {
             root_capnp::file::content::Data(r) => {
-                walker::Content::Data(hash::tree::HashRef::read_msg(&r.expect("File has no data reference")).unwrap())
+                walker::Content::Data(
+                    hash::tree::HashRef::read_msg(&r.expect("File has no data reference")).unwrap())
             }
             root_capnp::file::content::Directory(d) => {
-                walker::Content::Dir(hash::tree::HashRef::read_msg(&d.expect("Directory has no listing reference")).unwrap())
+                walker::Content::Dir(
+                    hash::tree::HashRef::read_msg(&d.expect("Directory has no listing reference")).unwrap())
             }
             root_capnp::file::content::SymbolicLink(path) =>
-                walker::Content::Link(PathBuf::from(String::from_utf8(path?.to_owned()).unwrap())),
+                walker::Content::Link(
+                    PathBuf::from(String::from_utf8(path?.to_owned()).unwrap())),
+        };
+
+        let entry = key::Entry {
+            info: key::Info::read(f.get_info()?.borrow())?,
+            data: key::Data::None,
+            parent_id: None,
+            node_id: Some(f.get_id()),
         };
 
         out.push(walker::FileEntry {
@@ -454,48 +453,50 @@ impl<B: StoreBackend> Family<B> {
                         );
                     }
 
-                    if let Some(hash_bytes) = entry.data_hash {
-                        // This is a file, store its data hash:
-                        let mut hash_ref_msg = capnp::message::Builder::new_default();
-                        let mut hash_ref_root = hash_ref_msg
-                            .init_root::<root_capnp::hash_ref::Builder>();
+                    match entry.data {
+                        key::Data::FilePlaceholder => {
+                            // This is a file, store its data hash:
+                            let mut hash_ref_msg = capnp::message::Builder::new_default();
+                            let mut hash_ref_root = hash_ref_msg
+                                .init_root::<root_capnp::hash_ref::Builder>();
 
-                        // Populate data hash and ChunkRef.
-                        data_ref.expect("has data").populate_msg(
-                            hash_ref_root.borrow(),
-                        );
-                        // Set as file content.
-                        file_msg.borrow().init_content().set_data(
-                            hash_ref_root.as_reader(),
-                        )?;
+                            // Populate data hash and ChunkRef.
+                            let href = data_ref.expect("Data::File");
+                            href.populate_msg(hash_ref_root.borrow());
+                            // Set as file content.
+                            file_msg.borrow().init_content().set_data(
+                                hash_ref_root.as_reader(),
+                            )?;
 
-                        top_hash_fn(&hash::Hash { bytes: hash_bytes });
-                    } else {
-                        drop(data_ref); // May not use data reference without hash.
+                            top_hash_fn(&hash::Hash { bytes: href.hash.bytes });
+                        }
+                        key::Data::DirPlaceholder => {
+                            // This is a directory, recurse!
+                            let mut inner_tree =
+                                self.key_store.hash_tree_writer(blob::LeafType::TreeList);
+                            self.commit_to_tree(
+                                &mut inner_tree,
+                                entry.node_id,
+                                top_hash_fn,
+                            )?;
+                            // Store a reference for the sub-tree in our tree:
+                            let dir_hash_ref = inner_tree.hash(Some(&entry.info))?;
 
-                        // This is a directory, recurse!
-                        let mut inner_tree =
-                            self.key_store.hash_tree_writer(blob::LeafType::TreeList);
-                        self.commit_to_tree(
-                            &mut inner_tree,
-                            entry.node_id,
-                            top_hash_fn,
-                        )?;
-                        // Store a reference for the sub-tree in our tree:
-                        let dir_hash_ref = inner_tree.hash(Some(&entry.info))?;
+                            let mut hash_ref_msg = capnp::message::Builder::new_default();
+                            let mut hash_ref_root = hash_ref_msg
+                                .init_root::<root_capnp::hash_ref::Builder>();
 
-                        let mut hash_ref_msg = capnp::message::Builder::new_default();
-                        let mut hash_ref_root = hash_ref_msg
-                            .init_root::<root_capnp::hash_ref::Builder>();
+                            // Populate directory hash and ChunkRef.
+                            dir_hash_ref.populate_msg(hash_ref_root.borrow());
+                            // Set as directory content.
+                            file_msg.borrow().init_content().set_directory(
+                                hash_ref_root.as_reader(),
+                            )?;
 
-                        // Populate directory hash and ChunkRef.
-                        dir_hash_ref.populate_msg(hash_ref_root.borrow());
-                        // Set as directory content.
-                        file_msg.borrow().init_content().set_directory(
-                            hash_ref_root.as_reader(),
-                        )?;
-
-                        top_hash_fn(&dir_hash_ref.hash);
+                            top_hash_fn(&dir_hash_ref.hash);
+                        }
+                        key::Data::Symlink(_) => {}
+                        _ => unreachable!("Unexpected key::Data")
                     }
                 }
             }

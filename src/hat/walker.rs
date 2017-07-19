@@ -17,7 +17,7 @@ use hash;
 use key;
 use std::collections::VecDeque;
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub enum Content {
     Data(hash::tree::HashRef),
     Dir(hash::tree::HashRef),

@@ -32,17 +32,26 @@ use std::sync::{Mutex, MutexGuard};
 
 use super::schema;
 use time::Duration;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use util::{InfoWriter, PeriodicTimer};
 use tags::Tag;
 use root_capnp;
+
+#[derive(Clone, Eq, PartialEq, Debug)]
+pub enum Data {
+    FilePlaceholder,
+    FileHash(Vec<u8>),
+    DirPlaceholder,
+    Symlink(PathBuf),
+    None,
+}
 
 #[derive(Clone, Debug)]
 pub struct Entry {
     pub node_id: Option<u64>,
     pub parent_id: Option<u64>,
 
-    pub data_hash: Option<Vec<u8>>,
+    pub data: Data,
     pub info: Info,
 }
 
@@ -63,11 +72,11 @@ pub struct Info {
 }
 
 impl Entry {
-    pub fn new(parent: Option<u64>, name: Vec<u8>, meta: Option<&fs::Metadata>) -> Entry {
+    pub fn new(parent: Option<u64>, name: Vec<u8>, data: Data, meta: Option<&fs::Metadata>) -> Entry {
         Entry {
             node_id: None,
             parent_id: parent,
-            data_hash: None,
+            data: data,
             info: Info::new(name, meta),
         }
     }
@@ -322,7 +331,7 @@ impl InternalKeyIndex {
             Ok(Some(Entry {
                 node_id: node.node_id.map(|n| n as u64),
                 parent_id: node.parent_id.map(|p| p as u64),
-                data_hash: data.hash,
+                data: data.hash.map(|h| Data::FileHash(h)).unwrap_or(Data::DirPlaceholder),
                 info: Info {
                     name: name_,
                     created_ts_secs: data.created.map(|i| i as u64),
@@ -376,7 +385,8 @@ impl InternalKeyIndex {
                         Entry {
                             node_id: node.node_id.map(|n| n as u64),
                             parent_id: node.parent_id.map(|i| i as u64),
-                            data_hash: data.hash,
+                            data: if data.hash.is_some() { Data::FilePlaceholder }
+                                else { Data::DirPlaceholder },
                             info: Info {
                                 name: node.name,
                                 created_ts_secs: data.created.map(|i| i as u64),

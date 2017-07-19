@@ -39,7 +39,7 @@ fn setup_family() -> (Arc<MemoryBackend>, HatRc<MemoryBackend>, Family<MemoryBac
 }
 
 pub fn entry(name: Vec<u8>) -> key::Entry {
-    key::Entry::new(None, name, None)
+    key::Entry::new(None, name, key::Data::FilePlaceholder, None)
 }
 
 fn snapshot_files<B: StoreBackend>(

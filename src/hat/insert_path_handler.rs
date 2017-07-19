@@ -40,11 +40,22 @@ impl FileEntry {
 
         if filename_opt.is_some() {
             let meta = fs::symlink_metadata(&full_path)?;
+            let data = if meta.is_file() {
+                key::Data::FilePlaceholder
+            } else if meta.is_dir() {
+                key::Data::DirPlaceholder
+            } else if meta.file_type().is_symlink() {
+                let path = fs::read_link(&full_path)?;
+                key::Data::Symlink(path)
+            } else {
+                // Unsupported file type. Skipping.
+                return Err(From::from(format!("unknown file kind")));
+            };
             Ok(FileEntry {
-                key_entry: key::Entry::new(parent, filename_opt.unwrap(), Some(&meta)),
-                metadata: meta,
-                full_path: full_path,
-            })
+                    key_entry: key::Entry::new(parent, filename_opt.unwrap(), data, Some(&meta)),
+                    metadata: meta,
+                    full_path: full_path,
+                })
         } else {
             Err(From::from("Could not parse filename."[..].to_owned()))
         }
