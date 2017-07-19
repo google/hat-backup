@@ -182,7 +182,7 @@ impl<'a, B: StoreBackend> Iterator for SnapshotLister<'a, B> {
                             return Some(Err(e));
                         }
                     }
-                    _ => unreachable!("Expected dir")
+                    _ => unreachable!("Expected dir"),
                 }
                 Some(Ok(hash_ref.clone()))
             }

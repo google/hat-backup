@@ -80,7 +80,11 @@ fn rng_filesystem(size: usize) -> FileSystem {
                 Some(v)
             };
 
-            let data = if data_opt.is_some() { Data::FilePlaceholder } else { Data::DirPlaceholder };
+            let data = if data_opt.is_some() {
+                Data::FilePlaceholder
+            } else {
+                Data::DirPlaceholder
+            };
             let new_root = EntryStub {
                 data: data_opt,
                 key_entry: Entry {

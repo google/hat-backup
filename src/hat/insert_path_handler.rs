@@ -52,10 +52,10 @@ impl FileEntry {
                 return Err(From::from(format!("unknown file kind")));
             };
             Ok(FileEntry {
-                    key_entry: key::Entry::new(parent, filename_opt.unwrap(), data, Some(&meta)),
-                    metadata: meta,
-                    full_path: full_path,
-                })
+                key_entry: key::Entry::new(parent, filename_opt.unwrap(), data, Some(&meta)),
+                metadata: meta,
+                full_path: full_path,
+            })
         } else {
             Err(From::from("Could not parse filename."[..].to_owned()))
         }

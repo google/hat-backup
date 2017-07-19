@@ -126,9 +126,9 @@ where
                     Content::Dir(href) => href,
                     _ => unreachable!("Expected dir"),
                 };
-                Some(Child::Dir(Box::new(
-                    Walker::new(self.backend.clone(), href).unwrap(),
-                )))
+                Some(Child::Dir(
+                    Box::new(Walker::new(self.backend.clone(), href).unwrap()),
+                ))
             }
             None => None,
         };

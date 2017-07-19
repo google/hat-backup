@@ -189,15 +189,19 @@ fn parse_dir_data(chunk: &[u8], mut out: &mut Vec<walker::FileEntry>) -> Result<
         let hash_ref = match f.get_content().which().unwrap() {
             root_capnp::file::content::Data(r) => {
                 walker::Content::Data(
-                    hash::tree::HashRef::read_msg(&r.expect("File has no data reference")).unwrap())
+                    hash::tree::HashRef::read_msg(&r.expect("File has no data reference")).unwrap(),
+                )
             }
             root_capnp::file::content::Directory(d) => {
                 walker::Content::Dir(
-                    hash::tree::HashRef::read_msg(&d.expect("Directory has no listing reference")).unwrap())
+                    hash::tree::HashRef::read_msg(&d.expect("Directory has no listing reference"))
+                        .unwrap(),
+                )
             }
-            root_capnp::file::content::SymbolicLink(path) =>
-                walker::Content::Link(
-                    PathBuf::from(String::from_utf8(path?.to_owned()).unwrap())),
+            root_capnp::file::content::SymbolicLink(path) => walker::Content::Link(PathBuf::from(
+                String::from_utf8(path?.to_owned())
+                    .unwrap(),
+            )),
         };
 
         let entry = key::Entry {
@@ -457,8 +461,8 @@ impl<B: StoreBackend> Family<B> {
                         key::Data::FilePlaceholder => {
                             // This is a file, store its data hash:
                             let mut hash_ref_msg = capnp::message::Builder::new_default();
-                            let mut hash_ref_root = hash_ref_msg
-                                .init_root::<root_capnp::hash_ref::Builder>();
+                            let mut hash_ref_root =
+                                hash_ref_msg.init_root::<root_capnp::hash_ref::Builder>();
 
                             // Populate data hash and ChunkRef.
                             let href = data_ref.expect("Data::File");
@@ -483,8 +487,8 @@ impl<B: StoreBackend> Family<B> {
                             let dir_hash_ref = inner_tree.hash(Some(&entry.info))?;
 
                             let mut hash_ref_msg = capnp::message::Builder::new_default();
-                            let mut hash_ref_root = hash_ref_msg
-                                .init_root::<root_capnp::hash_ref::Builder>();
+                            let mut hash_ref_root =
+                                hash_ref_msg.init_root::<root_capnp::hash_ref::Builder>();
 
                             // Populate directory hash and ChunkRef.
                             dir_hash_ref.populate_msg(hash_ref_root.borrow());
@@ -496,7 +500,7 @@ impl<B: StoreBackend> Family<B> {
                             top_hash_fn(&dir_hash_ref.hash);
                         }
                         key::Data::Symlink(_) => {}
-                        _ => unreachable!("Unexpected key::Data")
+                        _ => unreachable!("Unexpected key::Data"),
                     }
                 }
             }

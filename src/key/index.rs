@@ -72,7 +72,12 @@ pub struct Info {
 }
 
 impl Entry {
-    pub fn new(parent: Option<u64>, name: Vec<u8>, data: Data, meta: Option<&fs::Metadata>) -> Entry {
+    pub fn new(
+        parent: Option<u64>,
+        name: Vec<u8>,
+        data: Data,
+        meta: Option<&fs::Metadata>,
+    ) -> Entry {
         Entry {
             node_id: None,
             parent_id: parent,
@@ -331,7 +336,9 @@ impl InternalKeyIndex {
             Ok(Some(Entry {
                 node_id: node.node_id.map(|n| n as u64),
                 parent_id: node.parent_id.map(|p| p as u64),
-                data: data.hash.map(|h| Data::FileHash(h)).unwrap_or(Data::DirPlaceholder),
+                data: data.hash.map(|h| Data::FileHash(h)).unwrap_or(
+                    Data::DirPlaceholder,
+                ),
                 info: Info {
                     name: name_,
                     created_ts_secs: data.created.map(|i| i as u64),
@@ -385,8 +392,11 @@ impl InternalKeyIndex {
                         Entry {
                             node_id: node.node_id.map(|n| n as u64),
                             parent_id: node.parent_id.map(|i| i as u64),
-                            data: if data.hash.is_some() { Data::FilePlaceholder }
-                                else { Data::DirPlaceholder },
+                            data: if data.hash.is_some() {
+                                Data::FilePlaceholder
+                            } else {
+                                Data::DirPlaceholder
+                            },
                             info: Info {
                                 name: node.name,
                                 created_ts_secs: data.created.map(|i| i as u64),

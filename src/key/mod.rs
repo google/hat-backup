@@ -231,14 +231,12 @@ impl<IT: io::Read, B: StoreBackend> MsgHandler<Msg<IT>, Reply<B>> for Store<B> {
                     Ok(entries) => {
                         let mut my_entries: Vec<DirElem<B>> = Vec::with_capacity(entries.len());
                         for (entry, hash_ref_opt) in entries {
-                            let hash_ref = hash_ref_opt.or_else(|| {
-                                match entry.data {
-                                    Data::FileHash(ref hash_bytes) => {
-                                        let h = hash::Hash { bytes: hash_bytes.clone() };
-                                        self.hash_index.fetch_hash_ref(&h).expect("Unknown hash")
-                                    }
-                                    _ => None
+                            let hash_ref = hash_ref_opt.or_else(|| match entry.data {
+                                Data::FileHash(ref hash_bytes) => {
+                                    let h = hash::Hash { bytes: hash_bytes.clone() };
+                                    self.hash_index.fetch_hash_ref(&h).expect("Unknown hash")
                                 }
+                                _ => None,
                             });
                             let open_fn = hash_ref.as_ref().map(|r| {
                                 HashTreeReaderInitializer {
@@ -287,7 +285,7 @@ impl<IT: io::Read, B: StoreBackend> MsgHandler<Msg<IT>, Reply<B>> for Store<B> {
                                 self.index.mark_reserved(&stored_entry)?;
                                 return reply_ok!(Reply::Id(stored_entry.node_id.unwrap()));
                             }
-                            _ => ()
+                            _ => (),
                         }
                         // Our stored entry is incomplete.
                         Entry {
