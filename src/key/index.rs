@@ -15,6 +15,7 @@
 //! Local state for keys in the snapshot in progress (the "index").
 
 
+use std::str;
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
 
@@ -43,7 +44,6 @@ pub enum Data {
     FileHash(Vec<u8>),
     DirPlaceholder,
     Symlink(PathBuf),
-    None,
 }
 
 #[derive(Clone, Debug)]
@@ -277,6 +277,13 @@ impl InternalKeyIndex {
         }
 
         {
+            let link_path = match &entry.data {
+               &Data::DirPlaceholder | &Data::FilePlaceholder => None,
+               &Data::Symlink(ref path) => path.to_str(),
+               &Data::FileHash(_) => unreachable!("Unexpected FileHash"),
+            } ;
+            assert!(!(link_path.is_some() && hash_ref_opt.is_some()));
+
             let hash_ref_bytes = hash_ref_opt.map(|r| r.as_bytes());
             let new = schema::NewKeyData {
                 node_id: entry.node_id.map(|i| i as i64),
@@ -288,6 +295,7 @@ impl InternalKeyIndex {
                 permissions: entry.info.permissions.as_ref().map(|p| p.mode() as i64),
                 group_id: entry.info.group_id.map(|u| u as i64),
                 user_id: entry.info.user_id.map(|u| u as i64),
+                symbolic_link_path: link_path.map(|s| s.as_bytes()),
                 hash: hash_ref_opt.map(|h| &h.hash.bytes[..]),
                 hash_ref: hash_ref_bytes.as_ref().map(|v| &v[..]),
             };
@@ -392,10 +400,14 @@ impl InternalKeyIndex {
                         Entry {
                             node_id: node.node_id.map(|n| n as u64),
                             parent_id: node.parent_id.map(|i| i as u64),
-                            data: if data.hash.is_some() {
-                                Data::FilePlaceholder
-                            } else {
-                                Data::DirPlaceholder
+                            data: match (data.hash.as_ref(), data.symbolic_link_path) {
+                                (Some(_), None) => Data::FilePlaceholder,
+                                (None, None) => Data::DirPlaceholder,
+                                (None, Some(path)) => {
+                                    Data::Symlink(PathBuf::from(str::from_utf8(&path[..]).unwrap()))
+                                }
+                                (Some(_), Some(lp)) =>
+                                    unreachable!("Cannot have both file data and link path: {:?}", lp)
                             },
                             info: Info {
                                 name: node.name,

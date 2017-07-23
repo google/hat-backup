@@ -22,6 +22,8 @@ CREATE TABLE key_data (
 	user_id        Integer,
 	group_id       Integer,
 
+	symbolic_link_path BLOB,
+
 	hash           BLOB,
 	hash_ref       BLOB,
 

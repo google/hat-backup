@@ -302,9 +302,6 @@ impl<IT: io::Read, B: StoreBackend> MsgHandler<Msg<IT>, Reply<B>> for Store<B> {
                     None => insert_entry,
                 };
 
-                // Setup hash tree structure
-                let mut tree = self.hash_tree_writer(blob::LeafType::FileChunk);
-
                 // Check if we have an data source:
                 let it_opt = chunk_it_opt.and_then(|open| open.call(()));
                 if it_opt.is_none() {
@@ -315,6 +312,9 @@ impl<IT: io::Read, B: StoreBackend> MsgHandler<Msg<IT>, Reply<B>> for Store<B> {
                     // Bail out before storing data that does not exist:
                     return reply_ok!(Reply::Id(entry.node_id.unwrap()));
                 }
+
+                // Setup hash tree structure
+                let mut tree = self.hash_tree_writer(blob::LeafType::FileChunk);
 
                 // Read and insert all file chunks:
                 // (see HashStoreBackend::insert_chunk above)

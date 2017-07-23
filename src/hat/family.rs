@@ -186,27 +186,31 @@ fn parse_dir_data(chunk: &[u8], mut out: &mut Vec<walker::FileEntry>) -> Result<
             break;
         }
 
-        let hash_ref = match f.get_content().which().unwrap() {
+        let (data, hash_ref) = match f.get_content().which().unwrap() {
             root_capnp::file::content::Data(r) => {
+                (key::Data::FilePlaceholder,
                 walker::Content::Data(
                     hash::tree::HashRef::read_msg(&r.expect("File has no data reference")).unwrap(),
-                )
+                ))
             }
             root_capnp::file::content::Directory(d) => {
+                (key::Data::DirPlaceholder,
                 walker::Content::Dir(
                     hash::tree::HashRef::read_msg(&d.expect("Directory has no listing reference"))
                         .unwrap(),
-                )
+                ))
             }
-            root_capnp::file::content::SymbolicLink(path) => walker::Content::Link(PathBuf::from(
-                String::from_utf8(path?.to_owned())
-                    .unwrap(),
-            )),
+            root_capnp::file::content::SymbolicLink(path) => {
+                let link = PathBuf::from(
+                    String::from_utf8(path?.to_owned())
+                        .unwrap());
+                (key::Data::Symlink(link.clone()), walker::Content::Link(link))
+            }
         };
 
         let entry = key::Entry {
             info: key::Info::read(f.get_info()?.borrow())?,
-            data: key::Data::None,
+            data: data,
             parent_id: None,
             node_id: Some(f.get_id()),
         };
@@ -346,19 +350,24 @@ impl<B: StoreBackend> Family<B> {
             // Extend directory with filename:
             path.push(str::from_utf8(&entry.info.name[..]).unwrap());
 
-            match read_fn_opt {
-                None => {
+            match entry.data {
+                key::Data::DirPlaceholder => {
                     // This is a directory, recurse!
                     fs::create_dir_all(&path).unwrap();
                     self.checkout_in_dir(path.clone(), entry.node_id)?;
                 }
-                Some(read_fn) => {
+                key::Data::FilePlaceholder => {
                     // This is a file, write it
                     let mut fd = fs::File::create(&path).unwrap();
-                    if let Some(tree) = read_fn.init()? {
+                    if let Some(tree) = read_fn_opt.expect("File has data").init()? {
                         self.write_file_chunks(&mut fd, tree);
                     }
                 }
+                key::Data::Symlink(link_path) => {
+                    use std::os::unix::fs::symlink;
+                    symlink(link_path, &path).unwrap()
+                }
+                _ => unreachable!("Unexpected data entry")
             }
 
             if let Some(perms) = entry.info.permissions {
@@ -499,7 +508,12 @@ impl<B: StoreBackend> Family<B> {
 
                             top_hash_fn(&dir_hash_ref.hash);
                         }
-                        key::Data::Symlink(_) => {}
+                        key::Data::Symlink(path) => {
+                            // Set symbolic link content.
+                            file_msg.borrow().init_content().set_symbolic_link(
+                                path.to_str().unwrap().as_ref()
+                            );
+                        }
                         _ => unreachable!("Unexpected key::Data"),
                     }
                 }

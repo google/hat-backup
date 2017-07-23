@@ -883,7 +883,10 @@ impl<B: StoreBackend> HatRc<B> {
                 walker::Content::Dir(hash_ref) => {
                     self.checkout_dir_ref(family, output, hash_ref)?;
                 }
-                walker::Content::Link(_) => {}
+                walker::Content::Link(link_path) => {
+                    use std::os::unix::fs::symlink;
+                    symlink(link_path, &output)?
+                }
             }
 
             if let Some(perms) = entry.info.permissions {
@@ -893,7 +896,7 @@ impl<B: StoreBackend> HatRc<B> {
             if let (Some(m), Some(a)) = (entry.info.modified_ts_secs, entry.info.accessed_ts_secs) {
                 let atime = filetime::FileTime::from_seconds_since_1970(a, 0 /* nanos */);
                 let mtime = filetime::FileTime::from_seconds_since_1970(m, 0 /* nanos */);
-                filetime::set_file_times(&output, atime, mtime).unwrap();
+                filetime::set_file_times(&output, atime, mtime)?;
             }
 
             output.pop();
