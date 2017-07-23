@@ -129,7 +129,9 @@ impl<B: StoreBackend> PathHandler<Option<u64>> for InsertPathHandler<B> {
                             Ok(it) => Some(it),
                         }
                     }))
-                    } else { None },
+                    } else {
+                        None
+                    },
                 )) {
                     Ok(key::Reply::Id(id)) => {
                         if is_directory {

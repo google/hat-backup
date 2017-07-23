@@ -188,23 +188,30 @@ fn parse_dir_data(chunk: &[u8], mut out: &mut Vec<walker::FileEntry>) -> Result<
 
         let (data, hash_ref) = match f.get_content().which().unwrap() {
             root_capnp::file::content::Data(r) => {
-                (key::Data::FilePlaceholder,
-                walker::Content::Data(
-                    hash::tree::HashRef::read_msg(&r.expect("File has no data reference")).unwrap(),
-                ))
+                (
+                    key::Data::FilePlaceholder,
+                    walker::Content::Data(
+                        hash::tree::HashRef::read_msg(&r.expect("File has no data reference"))
+                            .unwrap(),
+                    ),
+                )
             }
             root_capnp::file::content::Directory(d) => {
-                (key::Data::DirPlaceholder,
-                walker::Content::Dir(
-                    hash::tree::HashRef::read_msg(&d.expect("Directory has no listing reference"))
-                        .unwrap(),
-                ))
+                (
+                    key::Data::DirPlaceholder,
+                    walker::Content::Dir(
+                        hash::tree::HashRef::read_msg(
+                            &d.expect("Directory has no listing reference"),
+                        ).unwrap(),
+                    ),
+                )
             }
             root_capnp::file::content::SymbolicLink(path) => {
-                let link = PathBuf::from(
-                    String::from_utf8(path?.to_owned())
-                        .unwrap());
-                (key::Data::Symlink(link.clone()), walker::Content::Link(link))
+                let link = PathBuf::from(String::from_utf8(path?.to_owned()).unwrap());
+                (
+                    key::Data::Symlink(link.clone()),
+                    walker::Content::Link(link),
+                )
             }
         };
 
@@ -367,7 +374,7 @@ impl<B: StoreBackend> Family<B> {
                     use std::os::unix::fs::symlink;
                     symlink(link_path, &path).unwrap()
                 }
-                _ => unreachable!("Unexpected data entry")
+                _ => unreachable!("Unexpected data entry"),
             }
 
             if let Some(perms) = entry.info.permissions {
@@ -511,7 +518,9 @@ impl<B: StoreBackend> Family<B> {
                         key::Data::Symlink(path) => {
                             // Set symbolic link content.
                             file_msg.borrow().init_content().set_symbolic_link(
-                                path.to_str().unwrap().as_ref()
+                                path.to_str()
+                                    .unwrap()
+                                    .as_ref(),
                             );
                         }
                         _ => unreachable!("Unexpected key::Data"),

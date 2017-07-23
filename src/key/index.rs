@@ -278,10 +278,11 @@ impl InternalKeyIndex {
 
         {
             let link_path = match &entry.data {
-               &Data::DirPlaceholder | &Data::FilePlaceholder => None,
-               &Data::Symlink(ref path) => path.to_str(),
-               &Data::FileHash(_) => unreachable!("Unexpected FileHash"),
-            } ;
+                &Data::DirPlaceholder |
+                &Data::FilePlaceholder => None,
+                &Data::Symlink(ref path) => path.to_str(),
+                &Data::FileHash(_) => unreachable!("Unexpected FileHash"),
+            };
             assert!(!(link_path.is_some() && hash_ref_opt.is_some()));
 
             let hash_ref_bytes = hash_ref_opt.map(|r| r.as_bytes());
@@ -406,8 +407,12 @@ impl InternalKeyIndex {
                                 (None, Some(path)) => {
                                     Data::Symlink(PathBuf::from(str::from_utf8(&path[..]).unwrap()))
                                 }
-                                (Some(_), Some(lp)) =>
-                                    unreachable!("Cannot have both file data and link path: {:?}", lp)
+                                (Some(_), Some(lp)) => {
+                                    unreachable!(
+                                        "Cannot have both file data and link path: {:?}",
+                                        lp
+                                    )
+                                }
                             },
                             info: Info {
                                 name: node.name,

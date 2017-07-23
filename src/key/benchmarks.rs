@@ -34,7 +34,12 @@ fn insert_1_key_x_128000_zeros(bench: &mut Bencher) {
 
         let entry = EntryStub {
             data: Some(vec![bytes.clone()]),
-            key_entry: Entry::new(None, format!("{}", i).as_bytes().to_vec(), Data::FilePlaceholder, None),
+            key_entry: Entry::new(
+                None,
+                format!("{}", i).as_bytes().to_vec(),
+                Data::FilePlaceholder,
+                None,
+            ),
         };
 
         ks_p.send_reply(Msg::Insert(entry.key_entry.clone(),
@@ -65,7 +70,12 @@ fn insert_1_key_x_128000_unique(bench: &mut Bencher) {
 
         let entry = EntryStub {
             data: Some(vec![my_bytes]),
-            key_entry: Entry::new(None, format!("{}", i).as_bytes().to_vec(), Data::FilePlaceholder, None),
+            key_entry: Entry::new(
+                None,
+                format!("{}", i).as_bytes().to_vec(),
+                Data::FilePlaceholder,
+                None,
+            ),
         };
 
         ks_p.send_reply(Msg::Insert(entry.key_entry.clone(),
@@ -210,7 +220,12 @@ fn insert_1_key_unique_empty(bench: &mut Bencher) {
         i += 1;
         let entry = EntryStub {
             data: None,
-            key_entry: Entry::new(None, format!("{}", i).as_bytes().to_vec(), Data::DirPlaceholder, None),
+            key_entry: Entry::new(
+                None,
+                format!("{}", i).as_bytes().to_vec(),
+                Data::DirPlaceholder,
+                None,
+            ),
         };
         ks_p.send_reply(Msg::Insert(entry.key_entry.clone(), None))
             .unwrap();
