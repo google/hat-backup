@@ -34,11 +34,11 @@ impl FileEntry {
     fn new(full_path: PathBuf, parent: Option<u64>) -> Result<FileEntry, Box<Error>> {
         debug!("FileEntry::new({:?})", full_path);
 
-        let filename_opt = full_path.file_name().and_then(|n| n.to_str()).map(|n| {
-            n.bytes().collect()
+        let filename_opt = full_path.file_name().and_then(|n| n.to_str()).map(|s| {
+            s.as_bytes().to_vec()
         });
 
-        if filename_opt.is_some() {
+        if let Some(filename) = filename_opt {
             let meta = fs::symlink_metadata(&full_path)?;
             let data = if meta.is_file() {
                 key::Data::FilePlaceholder
@@ -52,7 +52,7 @@ impl FileEntry {
                 return Err(From::from(format!("unknown file kind")));
             };
             Ok(FileEntry {
-                key_entry: key::Entry::new(parent, filename_opt.unwrap(), data, Some(&meta)),
+                key_entry: key::Entry::new(parent, filename, data, Some(&meta)),
                 metadata: meta,
                 full_path: full_path,
             })
