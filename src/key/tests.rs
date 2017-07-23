@@ -80,12 +80,17 @@ fn rng_filesystem(size: usize) -> FileSystem {
                 Some(v)
             };
 
+            let data = if data_opt.is_some() {
+                Data::FilePlaceholder
+            } else {
+                Data::DirPlaceholder
+            };
             let new_root = EntryStub {
                 data: data_opt,
                 key_entry: Entry {
                     node_id: None,
                     parent_id: None, // updated by insert_and_update_fs()
-                    data_hash: None,
+                    data: data,
 
                     info: Info {
                         name: random_ascii_bytes(),
@@ -118,7 +123,7 @@ fn rng_filesystem(size: usize) -> FileSystem {
         key_entry: Entry {
             parent_id: None,
             node_id: None, // updated by insert_and_update_fs()
-            data_hash: None,
+            data: Data::DirPlaceholder,
             info: Info {
                 name: b"root".to_vec(),
                 created_ts_secs: thread_rng().gen(),
@@ -207,7 +212,7 @@ fn verify_filesystem<B: StoreBackend>(fs: &FileSystem, ks_p: &StoreProcess<Entry
                         assert_eq!(original_all, recovered_all);
                     }
                     None => {
-                        assert!(entry.data_hash.is_none());
+                        assert_eq!(Data::DirPlaceholder, entry.data);
                         assert!(persistent_ref.is_none());
                     }
                 }

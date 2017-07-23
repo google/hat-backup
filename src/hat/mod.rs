@@ -151,29 +151,38 @@ struct SnapshotLister<'a, B: StoreBackend> {
     backend: &'a key::HashStoreBackend<B>,
     family: &'a Family<B>,
     // Invariant: Only save the chunkref if it is a directory
-    queue: Vec<(hash::tree::HashRef, bool)>,
+    queue: Vec<(walker::Content, bool)>,
 }
 
 impl<'a, B: StoreBackend> SnapshotLister<'a, B> {
     fn fetch(&mut self, hash_ref: hash::tree::HashRef) -> Result<(), HatError> {
         let res = self.family.fetch_dir_data(hash_ref, self.backend.clone())?;
-        for (entry, hash_ref) in res.into_iter().rev() {
-            self.queue.push((hash_ref, !entry.data_hash.is_some()));
+        for (_entry, hash_ref) in res.into_iter().rev() {
+            let is_dir = match &hash_ref {
+                &walker::Content::Dir(_) => true,
+                _ => false,
+            };
+            self.queue.push((hash_ref, is_dir));
         }
         Ok(())
     }
 }
 
 impl<'a, B: StoreBackend> Iterator for SnapshotLister<'a, B> {
-    type Item = Result<hash::tree::HashRef, HatError>;
-    fn next(&mut self) -> Option<Result<hash::tree::HashRef, HatError>> {
+    type Item = Result<walker::Content, HatError>;
+    fn next(&mut self) -> Option<Result<walker::Content, HatError>> {
         match self.queue.pop() {
             Some((ref hash_ref, ref fetch_dir)) if *fetch_dir => {
-                if let Err(e) = self.fetch(hash_ref.clone()) {
-                    // We yield the error now, but save the hash so
-                    // we can output it next time (without recursion)
-                    self.queue.push((hash_ref.clone(), false));
-                    return Some(Err(e));
+                match hash_ref {
+                    &walker::Content::Dir(ref href) => {
+                        if let Err(e) = self.fetch(href.clone()) {
+                            // We yield the error now, but save the hash so
+                            // we can output it next time (without recursion)
+                            self.queue.push((hash_ref.clone(), false));
+                            return Some(Err(e));
+                        }
+                    }
+                    _ => unreachable!("Expected dir"),
                 }
                 Some(Ok(hash_ref.clone()))
             }
@@ -191,7 +200,7 @@ fn list_snapshot<'a, B: StoreBackend>(
     SnapshotLister {
         backend: backend,
         family: family,
-        queue: vec![(dir_hash, true)],
+        queue: vec![(walker::Content::Dir(dir_hash), true)],
     }
 }
 
@@ -863,14 +872,21 @@ impl<B: StoreBackend> HatRc<B> {
             output.push(str::from_utf8(&entry.info.name[..]).unwrap());
             println!("{}", output.display());
 
-            if entry.data_hash.is_some() {
-                let mut fd = fs::File::create(&output).unwrap();
-                let tree_opt = hash::tree::LeafIterator::new(self.hash_backend(), hash_ref)?;
-                if let Some(tree) = tree_opt {
-                    family.write_file_chunks(&mut fd, tree);
+            match hash_ref {
+                walker::Content::Data(hash_ref) => {
+                    let mut fd = fs::File::create(&output).unwrap();
+                    let tree_opt = hash::tree::LeafIterator::new(self.hash_backend(), hash_ref)?;
+                    if let Some(tree) = tree_opt {
+                        family.write_file_chunks(&mut fd, tree);
+                    }
                 }
-            } else {
-                self.checkout_dir_ref(family, output, hash_ref)?;
+                walker::Content::Dir(hash_ref) => {
+                    self.checkout_dir_ref(family, output, hash_ref)?;
+                }
+                walker::Content::Link(link_path) => {
+                    use std::os::unix::fs::symlink;
+                    symlink(link_path, &output)?
+                }
             }
 
             if let Some(perms) = entry.info.permissions {
@@ -880,7 +896,7 @@ impl<B: StoreBackend> HatRc<B> {
             if let (Some(m), Some(a)) = (entry.info.modified_ts_secs, entry.info.accessed_ts_secs) {
                 let atime = filetime::FileTime::from_seconds_since_1970(a, 0 /* nanos */);
                 let mtime = filetime::FileTime::from_seconds_since_1970(m, 0 /* nanos */);
-                filetime::set_file_times(&output, atime, mtime).unwrap();
+                filetime::set_file_times(&output, atime, mtime)?;
             }
 
             output.pop();
@@ -936,8 +952,13 @@ impl<B: StoreBackend> HatRc<B> {
                         // Recursive tree structure.
                         // We need all top hashes from all sub-trees.
                         for hash in list_snapshot(&hash_backend, &family, top_ref) {
-                            let hash = hash.expect("Invalid hash ref");
-                            match hash_index.get_id(&hash.hash) {
+                            let res = hash.expect("Invalid hash ref");
+                            let href = match res {
+                                walker::Content::Data(href) => href,
+                                walker::Content::Dir(href) => href,
+                                walker::Content::Link(_) => continue,
+                            };
+                            match hash_index.get_id(&href.hash) {
                                 Some(id) => id_sender.send(id).unwrap(),
                                 None => panic!("Unexpected reply from hash index."),
                             }

@@ -37,7 +37,7 @@ mod tests;
 mod benchmarks;
 
 pub use self::hash_store_backend::HashStoreBackend;
-pub use self::index::{Entry, Info, KeyIndex};
+pub use self::index::{Data, Entry, Info, KeyIndex};
 
 
 error_type! {
@@ -231,11 +231,12 @@ impl<IT: io::Read, B: StoreBackend> MsgHandler<Msg<IT>, Reply<B>> for Store<B> {
                     Ok(entries) => {
                         let mut my_entries: Vec<DirElem<B>> = Vec::with_capacity(entries.len());
                         for (entry, hash_ref_opt) in entries {
-                            let hash_ref = hash_ref_opt.or_else(|| {
-                                entry.data_hash.as_ref().and_then(|bytes| {
-                                    let h = hash::Hash { bytes: bytes.clone() };
+                            let hash_ref = hash_ref_opt.or_else(|| match entry.data {
+                                Data::FileHash(ref hash_bytes) => {
+                                    let h = hash::Hash { bytes: hash_bytes.clone() };
                                     self.hash_index.fetch_hash_ref(&h).expect("Unknown hash")
-                                })
+                                }
+                                _ => None,
                             });
                             let open_fn = hash_ref.as_ref().map(|r| {
                                 HashTreeReaderInitializer {
@@ -262,43 +263,44 @@ impl<IT: io::Read, B: StoreBackend> MsgHandler<Msg<IT>, Reply<B>> for Store<B> {
                 return reply_ok!(Reply::Ok);
             }
 
-            Msg::Insert(org_entry, chunk_it_opt) => {
+            Msg::Insert(insert_entry, chunk_it_opt) => {
                 let entry = match self.index.lookup(
-                    org_entry.parent_id,
-                    org_entry.info.name.clone(),
+                    insert_entry.parent_id,
+                    insert_entry.info.name.clone(),
                 )? {
-                    Some(ref entry) if org_entry.data_looks_unchanged(entry) => {
-                        if chunk_it_opt.is_some() && entry.data_hash.is_some() {
-                            let hash = hash::Hash { bytes: entry.data_hash.clone().unwrap() };
-                            if self.hash_index.hash_exists(&hash) {
-                                // Short-circuit: We have the data.
-                                debug!("Skip entry: {:?}", entry.info.name);
-                                self.index.mark_reserved(&entry)?;
-                                return reply_ok!(Reply::Id(entry.node_id.unwrap()));
+                    Some(ref stored_entry) if insert_entry.data_looks_unchanged(stored_entry) => {
+                        match &stored_entry.data {
+                            &Data::FileHash(ref hash_bytes) if chunk_it_opt.is_some() => {
+                                let hash = hash::Hash { bytes: hash_bytes.to_vec() };
+                                if self.hash_index.hash_exists(&hash) {
+                                    // Short-circuit: We have the data.
+                                    debug!("Skip entry: {:?}", stored_entry.info.name);
+                                    self.index.mark_reserved(&stored_entry)?;
+                                    return reply_ok!(Reply::Id(stored_entry.node_id.unwrap()));
+                                }
                             }
-                        } else if chunk_it_opt.is_none() && entry.data_hash.is_none() {
-                            // Short-circuit: No data needed.
-                            debug!("Skip empty entry: {:?}", entry.info.name);
-                            self.index.mark_reserved(&entry)?;
-                            return reply_ok!(Reply::Id(entry.node_id.unwrap()));
+                            _ if chunk_it_opt.is_none() => {
+                                // Short-circuit: No data needed.
+                                debug!("Skip empty entry: {:?}", stored_entry.info.name);
+                                self.index.mark_reserved(&stored_entry)?;
+                                return reply_ok!(Reply::Id(stored_entry.node_id.unwrap()));
+                            }
+                            _ => (),
                         }
                         // Our stored entry is incomplete.
                         Entry {
-                            node_id: entry.node_id,
-                            ..org_entry
+                            node_id: stored_entry.node_id,
+                            ..insert_entry
                         }
                     }
                     Some(entry) => {
                         Entry {
                             node_id: entry.node_id,
-                            ..org_entry
+                            ..insert_entry
                         }
                     }
-                    None => org_entry,
+                    None => insert_entry,
                 };
-
-                // Setup hash tree structure
-                let mut tree = self.hash_tree_writer(blob::LeafType::FileChunk);
 
                 // Check if we have an data source:
                 let it_opt = chunk_it_opt.and_then(|open| open.call(()));
@@ -310,6 +312,9 @@ impl<IT: io::Read, B: StoreBackend> MsgHandler<Msg<IT>, Reply<B>> for Store<B> {
                     // Bail out before storing data that does not exist:
                     return reply_ok!(Reply::Id(entry.node_id.unwrap()));
                 }
+
+                // Setup hash tree structure
+                let mut tree = self.hash_tree_writer(blob::LeafType::FileChunk);
 
                 // Read and insert all file chunks:
                 // (see HashStoreBackend::insert_chunk above)

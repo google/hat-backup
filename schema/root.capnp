@@ -106,6 +106,7 @@ struct File {
 	content :union {
 		data @2 :HashRef;
 		directory @3 :HashRef;
+		symbolicLink @4 :Data;
 	}
 }
 

@@ -38,6 +38,8 @@ table! {
         user_id -> Nullable<BigInt>,
         group_id -> Nullable<BigInt>,
 
+         symbolic_link_path -> Nullable<Binary>,
+
         hash -> Nullable<Binary>,
         hash_ref -> Nullable<Binary>,
     }
@@ -76,6 +78,8 @@ pub struct KeyData {
     pub user_id: Option<i64>,
     pub group_id: Option<i64>,
 
+    pub symbolic_link_path: Option<Vec<u8>>,
+
     pub hash: Option<Vec<u8>>,
     pub hash_ref: Option<Vec<u8>>,
 }
@@ -94,6 +98,8 @@ pub struct NewKeyData<'a> {
     pub permissions: Option<i64>,
     pub user_id: Option<i64>,
     pub group_id: Option<i64>,
+
+    pub symbolic_link_path: Option<&'a [u8]>,
 
     pub hash: Option<&'a [u8]>,
     pub hash_ref: Option<&'a [u8]>,

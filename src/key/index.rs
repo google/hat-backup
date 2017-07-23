@@ -15,6 +15,7 @@
 //! Local state for keys in the snapshot in progress (the "index").
 
 
+use std::str;
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
 
@@ -32,17 +33,25 @@ use std::sync::{Mutex, MutexGuard};
 
 use super::schema;
 use time::Duration;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use util::{InfoWriter, PeriodicTimer};
 use tags::Tag;
 use root_capnp;
+
+#[derive(Clone, Eq, PartialEq, Debug)]
+pub enum Data {
+    FilePlaceholder,
+    FileHash(Vec<u8>),
+    DirPlaceholder,
+    Symlink(PathBuf),
+}
 
 #[derive(Clone, Debug)]
 pub struct Entry {
     pub node_id: Option<u64>,
     pub parent_id: Option<u64>,
 
-    pub data_hash: Option<Vec<u8>>,
+    pub data: Data,
     pub info: Info,
 }
 
@@ -63,11 +72,16 @@ pub struct Info {
 }
 
 impl Entry {
-    pub fn new(parent: Option<u64>, name: Vec<u8>, meta: Option<&fs::Metadata>) -> Entry {
+    pub fn new(
+        parent: Option<u64>,
+        name: Vec<u8>,
+        data: Data,
+        meta: Option<&fs::Metadata>,
+    ) -> Entry {
         Entry {
             node_id: None,
             parent_id: parent,
-            data_hash: None,
+            data: data,
             info: Info::new(name, meta),
         }
     }
@@ -263,6 +277,14 @@ impl InternalKeyIndex {
         }
 
         {
+            let link_path = match &entry.data {
+                &Data::DirPlaceholder |
+                &Data::FilePlaceholder => None,
+                &Data::Symlink(ref path) => path.to_str(),
+                &Data::FileHash(_) => unreachable!("Unexpected FileHash"),
+            };
+            assert!(!(link_path.is_some() && hash_ref_opt.is_some()));
+
             let hash_ref_bytes = hash_ref_opt.map(|r| r.as_bytes());
             let new = schema::NewKeyData {
                 node_id: entry.node_id.map(|i| i as i64),
@@ -274,6 +296,7 @@ impl InternalKeyIndex {
                 permissions: entry.info.permissions.as_ref().map(|p| p.mode() as i64),
                 group_id: entry.info.group_id.map(|u| u as i64),
                 user_id: entry.info.user_id.map(|u| u as i64),
+                symbolic_link_path: link_path.map(|s| s.as_bytes()),
                 hash: hash_ref_opt.map(|h| &h.hash.bytes[..]),
                 hash_ref: hash_ref_bytes.as_ref().map(|v| &v[..]),
             };
@@ -322,7 +345,9 @@ impl InternalKeyIndex {
             Ok(Some(Entry {
                 node_id: node.node_id.map(|n| n as u64),
                 parent_id: node.parent_id.map(|p| p as u64),
-                data_hash: data.hash,
+                data: data.hash.map(|h| Data::FileHash(h)).unwrap_or(
+                    Data::DirPlaceholder,
+                ),
                 info: Info {
                     name: name_,
                     created_ts_secs: data.created.map(|i| i as u64),
@@ -376,7 +401,19 @@ impl InternalKeyIndex {
                         Entry {
                             node_id: node.node_id.map(|n| n as u64),
                             parent_id: node.parent_id.map(|i| i as u64),
-                            data_hash: data.hash,
+                            data: match (data.hash.as_ref(), data.symbolic_link_path) {
+                                (Some(_), None) => Data::FilePlaceholder,
+                                (None, None) => Data::DirPlaceholder,
+                                (None, Some(path)) => {
+                                    Data::Symlink(PathBuf::from(str::from_utf8(&path[..]).unwrap()))
+                                }
+                                (Some(_), Some(lp)) => {
+                                    unreachable!(
+                                        "Cannot have both file data and link path: {:?}",
+                                        lp
+                                    )
+                                }
+                            },
                             info: Info {
                                 name: node.name,
                                 created_ts_secs: data.created.map(|i| i as u64),

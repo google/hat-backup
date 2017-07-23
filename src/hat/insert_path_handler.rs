@@ -40,8 +40,19 @@ impl FileEntry {
 
         if filename_opt.is_some() {
             let meta = fs::symlink_metadata(&full_path)?;
+            let data = if meta.is_file() {
+                key::Data::FilePlaceholder
+            } else if meta.is_dir() {
+                key::Data::DirPlaceholder
+            } else if meta.file_type().is_symlink() {
+                let path = fs::read_link(&full_path)?;
+                key::Data::Symlink(path)
+            } else {
+                // Unsupported file type. Skipping.
+                return Err(From::from(format!("unknown file kind")));
+            };
             Ok(FileEntry {
-                key_entry: key::Entry::new(parent, filename_opt.unwrap(), Some(&meta)),
+                key_entry: key::Entry::new(parent, filename_opt.unwrap(), data, Some(&meta)),
                 metadata: meta,
                 full_path: full_path,
             })
@@ -50,11 +61,11 @@ impl FileEntry {
         }
     }
 
+    fn is_file(&self) -> bool {
+        self.metadata.is_file()
+    }
     fn is_directory(&self) -> bool {
         self.metadata.is_dir()
-    }
-    fn is_symlink(&self) -> bool {
-        self.metadata.file_type().is_symlink()
     }
 }
 
@@ -100,9 +111,7 @@ impl<B: StoreBackend> PathHandler<Option<u64>> for InsertPathHandler<B> {
                 println!("Skipping '{}': {}", path.display(), e);
             }
             Ok(file_entry) => {
-                if file_entry.is_symlink() {
-                    return None;
-                }
+                let is_file = file_entry.is_file();
                 let is_directory = file_entry.is_directory();
                 let local_root = path.clone();
                 let full_path = file_entry.full_path.clone();
@@ -110,9 +119,7 @@ impl<B: StoreBackend> PathHandler<Option<u64>> for InsertPathHandler<B> {
                 let ks = self.key_store.lock().unwrap();
                 match ks.send_reply(key::Msg::Insert(
                     file_entry.key_entry,
-                    if is_directory {
-                        None
-                    } else {
+                    if is_file {
                         Some(Box::new(move |()| {
                         match FileIterator::new(&full_path) {
                             Err(e) => {
@@ -122,6 +129,8 @@ impl<B: StoreBackend> PathHandler<Option<u64>> for InsertPathHandler<B> {
                             Ok(it) => Some(it),
                         }
                     }))
+                    } else {
+                        None
                     },
                 )) {
                     Ok(key::Reply::Id(id)) => {
@@ -129,6 +138,7 @@ impl<B: StoreBackend> PathHandler<Option<u64>> for InsertPathHandler<B> {
                             return Some(Some(id));
                         }
                     }
+                    Err(e) => panic!("Error from key store: {:?}", e),
                     _ => panic!("Unexpected reply from key store."),
                 }
             }
