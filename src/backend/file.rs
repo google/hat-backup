@@ -15,7 +15,7 @@
 
 use backend::StoreBackend;
 use crypto::CipherText;
-use hex::{self, FromHex, ToHex};
+use hex::{self, FromHex};
 use std::collections::BTreeMap;
 use std::fs;
 use std::io;
