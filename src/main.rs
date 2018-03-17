@@ -46,7 +46,7 @@ fn license() {
 
 
 fn main() {
-    env_logger::init().unwrap();
+    env_logger::init();
 
     // Because "snapshot" and "checkout" use the exact same type of arguments, we can make a
     // template. This template defines two positional arguments, both are required

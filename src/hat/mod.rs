@@ -33,7 +33,7 @@ use std::sync::{Arc, mpsc};
 use tags;
 use util::Process;
 use void::Void;
-use hex::ToHex;
+use hex;
 
 mod family;
 mod insert_path_handler;
@@ -430,7 +430,7 @@ impl<B: StoreBackend> HatRc<B> {
         let blobs = self.blob_store.list_by_tag(tags::Tag::Done);
         info!("{} blobs to investigate", blobs.len());
         for b in blobs.into_iter() {
-            info!("Inspecting blob: {}", b.name.to_hex());
+            info!("Inspecting blob: {}", hex::encode(&b.name));
             for r in self.blob_store.retrieve_refs(b)?.unwrap_or(vec![]) {
                 match r.leaf {
                     blob::LeafType::SnapshotList => {
@@ -439,10 +439,10 @@ impl<B: StoreBackend> HatRc<B> {
                     }
                     // FIXME(jos): Recover file-listings stored after commit
                     blob::LeafType::TreeList => {
-                        warn!("Skipping directory listing: {}", r.hash.bytes.to_hex())
+                        warn!("Skipping directory listing: {}", hex::encode(&r.hash.bytes))
                     }
                     blob::LeafType::FileChunk => {
-                        warn!("Skipping file contents: {}", r.hash.bytes.to_hex())
+                        warn!("Skipping file contents: {}", hex::encode(&r.hash.bytes))
                     }
                 }
             }
@@ -456,10 +456,10 @@ impl<B: StoreBackend> HatRc<B> {
             "Failed to find a commit-ed root.",
         );
 
-        info!("Recovering using root: {}", root_href.hash.bytes.to_hex());
+        info!("Recovering using root: {}", hex::encode(&root_href.hash.bytes));
         info!(
             ".. from blob: {}",
-            root_href.persistent_ref.blob_name.to_hex()
+            hex::encode(&root_href.persistent_ref.blob_name)
         );
 
         use chrono::TimeZone;

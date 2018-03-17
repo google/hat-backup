@@ -15,7 +15,7 @@
 
 use backend::StoreBackend;
 use crypto::CipherText;
-use hex::{FromHex, ToHex};
+use hex::{self, FromHex, ToHex};
 use std::collections::BTreeMap;
 use std::fs;
 use std::io;
@@ -50,7 +50,7 @@ impl FileBackend {
         // Read key:
         let path = {
             let mut p = self.root.clone();
-            p.push(&name.to_hex());
+            p.push(&hex::encode(&name));
             p
         };
 
@@ -84,7 +84,7 @@ impl StoreBackend for FileBackend {
         use self::io::Write;
 
         let mut path = self.root.clone();
-        path.push(&name.to_hex());
+        path.push(&hex::encode(&name));
 
         let mut file = match fs::File::create(&path) {
             Err(e) => return Err(e.to_string()),
@@ -120,7 +120,7 @@ impl StoreBackend for FileBackend {
 
         let path = {
             let mut p = self.root.clone();
-            p.push(&name.to_hex());
+            p.push(&hex::encode(&name));
             p
         };
 
