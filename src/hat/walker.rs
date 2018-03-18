@@ -78,8 +78,8 @@ where
 
     pub fn resume_child<FV, DV>(
         &mut self,
-        mut file_v: &mut FV,
-        mut dir_v: &mut DV,
+        file_v: &mut FV,
+        dir_v: &mut DV,
     ) -> Result<bool, B::Err>
     where
         FV: LikesFiles,
@@ -96,8 +96,8 @@ where
 
     pub fn resume<FV, DV>(
         &mut self,
-        mut file_v: &mut FV,
-        mut dir_v: &mut DV,
+        file_v: &mut FV,
+        dir_v: &mut DV,
     ) -> Result<bool, B::Err>
     where
         FV: LikesFiles,

@@ -127,8 +127,8 @@ impl InternalHashIndex {
     fn reserve(
         &self,
         hash_entry: &Entry,
-        mut queue: &mut MutexGuard<Queue>,
-        mut index: &mut db::IndexGuard,
+        queue: &mut MutexGuard<Queue>,
+        index: &mut db::IndexGuard,
     ) -> u64 {
         index.maybe_flush();
 
@@ -160,7 +160,7 @@ impl InternalHashIndex {
         queue.find_key(&hash.bytes).cloned()
     }
 
-    fn update_reserved(&self, id: u64, hash_entry: Entry, mut queue: &mut MutexGuard<Queue>) {
+    fn update_reserved(&self, id: u64, hash_entry: Entry, queue: &mut MutexGuard<Queue>) {
         let Entry {
             hash,
             node,
@@ -187,8 +187,8 @@ impl InternalHashIndex {
 
     fn insert_completed_in_order(
         &self,
-        mut queue: &mut MutexGuard<Queue>,
-        mut index: &mut db::IndexGuard,
+        queue: &mut MutexGuard<Queue>,
+        index: &mut db::IndexGuard,
     ) {
         while let Some((id_, _, queue_entry)) = queue.pop_min_if_complete() {
             assert_eq!(id_, queue_entry.id);

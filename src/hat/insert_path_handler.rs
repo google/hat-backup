@@ -18,7 +18,6 @@ use std::error::Error;
 use std::fs;
 use std::io;
 use std::path::PathBuf;
-use std::str;
 use std::sync::{atomic, Mutex};
 use time;
 use util::{FileIterator, PathHandler, SyncPool};

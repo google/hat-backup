@@ -14,7 +14,6 @@
 
 use chrono;
 use diesel::sql_types::BigInt;
-use diesel::prelude::*;
 
 // Table schemas.
 

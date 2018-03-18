@@ -167,7 +167,7 @@ pub mod recover {
     }
 }
 
-fn parse_dir_data(chunk: &[u8], mut out: &mut Vec<walker::FileEntry>) -> Result<(), HatError> {
+fn parse_dir_data(chunk: &[u8], out: &mut Vec<walker::FileEntry>) -> Result<(), HatError> {
     if chunk.is_empty() {
         return Ok(());
     }

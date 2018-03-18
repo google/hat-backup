@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use diesel::sql_types::BigInt;
-use diesel::prelude::*;
 
 // Table schemas.
 
