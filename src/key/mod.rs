@@ -133,10 +133,10 @@ impl<B: StoreBackend> Store<B> {
         keys: Arc<crypto::keys::Keeper>,
     ) -> Store<B> {
         Store {
-            index: index,
-            hash_index: hash_index,
-            blob_store: blob_store,
-            keys: keys,
+            index,
+            hash_index,
+            blob_store,
+            keys,
         }
     }
 
@@ -263,22 +263,22 @@ impl<IT: io::Read, B: StoreBackend> MsgHandler<Msg<IT>, Reply<B>> for Store<B> {
                     .lookup(insert_entry.parent_id, insert_entry.info.name.clone())?
                 {
                     Some(ref stored_entry) if insert_entry.data_looks_unchanged(stored_entry) => {
-                        match &stored_entry.data {
-                            &Data::FileHash(ref hash_bytes) if chunk_it_opt.is_some() => {
+                        match stored_entry.data {
+                            Data::FileHash(ref hash_bytes) if chunk_it_opt.is_some() => {
                                 let hash = hash::Hash {
                                     bytes: hash_bytes.to_vec(),
                                 };
                                 if self.hash_index.hash_exists(&hash) {
                                     // Short-circuit: We have the data.
                                     debug!("Skip entry: {:?}", stored_entry.info.name);
-                                    self.index.mark_reserved(&stored_entry)?;
+                                    self.index.mark_reserved(stored_entry)?;
                                     return reply_ok!(Reply::Id(stored_entry.node_id.unwrap()));
                                 }
                             }
                             _ if chunk_it_opt.is_none() => {
                                 // Short-circuit: No data needed.
                                 debug!("Skip empty entry: {:?}", stored_entry.info.name);
-                                self.index.mark_reserved(&stored_entry)?;
+                                self.index.mark_reserved(stored_entry)?;
                                 return reply_ok!(Reply::Id(stored_entry.node_id.unwrap()));
                             }
                             _ => (),

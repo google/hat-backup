@@ -422,7 +422,7 @@ impl InternalKeyIndex {
         use super::schema::key_data::dsl::*;
         diesel::update(
             key_data.filter(node_id.eq(entry.node_id.expect("Need ID to reserve entry") as i64)),
-        ).set((tag.eq(Tag::Reserved as i64)))
+        ).set(tag.eq(Tag::Reserved as i64))
             .execute(&self.conn)?;
         Ok(())
     }
