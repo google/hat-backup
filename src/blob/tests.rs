@@ -321,7 +321,7 @@ fn blob_ciphertext_authed_allbytes() {
     };
 
     fn with_modified<F>(
-        mut bytes: &mut [u8],
+        bytes: &mut [u8],
         i: usize,
         b: u8,
         f: F,
