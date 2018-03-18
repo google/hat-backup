@@ -15,7 +15,6 @@
 mod counter;
 mod file_iterator;
 mod fnbox;
-mod infowriter;
 mod listdir;
 mod sync_pool;
 mod ordered_collection;
@@ -26,7 +25,6 @@ mod unique_priority_queue;
 pub use self::counter::Counter;
 pub use self::file_iterator::FileIterator;
 pub use self::fnbox::FnBox;
-pub use self::infowriter::InfoWriter;
 pub use self::listdir::{HasPath, PathHandler};
 pub use self::periodic_timer::PeriodicTimer;
 pub use self::process::{MsgHandler, Process};

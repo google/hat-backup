@@ -84,6 +84,7 @@ mod hat_error {
 
 mod diesel_error {
     use diesel;
+    use diesel_migrations;
 
     error_type! {
         #[derive(Debug)]
@@ -91,10 +92,10 @@ mod diesel_error {
             SqlConnection(diesel::ConnectionError) {
                 cause;
             },
-            SqlMigration(diesel::migrations::MigrationError) {
+            SqlMigration(diesel_migrations::MigrationError) {
                 cause;
             },
-            SqlRunMigration(diesel::migrations::RunMigrationsError) {
+            SqlRunMigration(diesel_migrations::RunMigrationsError) {
                 cause;
             },
             SqlExecute(diesel::result::Error) {

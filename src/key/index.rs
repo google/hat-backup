@@ -33,8 +33,8 @@ use std::sync::{Mutex, MutexGuard};
 
 use super::schema;
 use time::Duration;
-use std::path::{Path, PathBuf};
-use util::{InfoWriter, PeriodicTimer};
+use std::path::PathBuf;
+use util::PeriodicTimer;
 use tags::Tag;
 use root_capnp;
 
@@ -196,9 +196,10 @@ pub struct InternalKeyIndex {
     flush_timer: PeriodicTimer,
 }
 
+embed_migrations!();
 
 impl InternalKeyIndex {
-    fn new(migrations_dir: &Path, path: &str) -> Result<InternalKeyIndex, DieselError> {
+    fn new(path: &str) -> Result<InternalKeyIndex, DieselError> {
         let conn = SqliteConnection::establish(path)?;
 
         let ki = InternalKeyIndex {
@@ -208,15 +209,11 @@ impl InternalKeyIndex {
 
         {
             // Enable foreign key support.
-            diesel::expression::sql::<diesel::types::Integer>("PRAGMA foreign_keys = ON;")
+            diesel::sql_query("PRAGMA foreign_keys = ON;")
                 .execute(&ki.conn)?;
         }
 
-        diesel::migrations::run_pending_migrations_in_directory(
-            &ki.conn,
-            &migrations_dir,
-            &mut InfoWriter,
-        )?;
+        embedded_migrations::run(&ki.conn)?;
 
         {
             let tm = ki.conn.transaction_manager();
@@ -235,9 +232,12 @@ impl InternalKeyIndex {
     }
 
     fn last_insert_rowid(&self) -> Result<i64, DieselError> {
-        let id = diesel::select(diesel::expression::sql("last_insert_rowid()"))
-            .first::<i64>(&self.conn)?;
-        Ok(id)
+        let rows: Vec<self::schema::RowId> = diesel::sql_query("SELECT last_insert_rowid() AS row_id")
+            .load(&self.conn)?;
+
+        assert_eq!(1, rows.len());
+
+        Ok(rows[0].row_id)
     }
 
     fn maybe_flush(&mut self) -> Result<(), DieselError> {
@@ -272,7 +272,7 @@ impl InternalKeyIndex {
                 name: &entry.info.name[..],
             };
             use super::schema::key_tree::dsl::*;
-            diesel::insert(&new).into(key_tree).execute(&self.conn)?;
+            diesel::insert_into(key_tree).values(&new).execute(&self.conn)?;
             entry.node_id = Some(self.last_insert_rowid()? as u64);
         }
 
@@ -303,7 +303,7 @@ impl InternalKeyIndex {
 
             // Insert replaces when (node_id, committed) already exists.
             use super::schema::key_data::dsl::*;
-            diesel::insert(&new).into(key_data).execute(&self.conn)?;
+            diesel::insert_into(key_data).values(&new).execute(&self.conn)?;
             self.maybe_flush()?;
         }
 
@@ -502,13 +502,13 @@ impl InternalKeyIndex {
 }
 
 impl KeyIndex {
-    pub fn new(migration_dir: &Path, name: &str) -> Result<KeyIndex, DieselError> {
-        InternalKeyIndex::new(migration_dir, name).map(|index| KeyIndex(Mutex::new(index)))
+    pub fn new(name: &str) -> Result<KeyIndex, DieselError> {
+        InternalKeyIndex::new(name).map(|index| KeyIndex(Mutex::new(index)))
     }
 
     #[cfg(test)]
     pub fn new_for_testing() -> Result<KeyIndex, DieselError> {
-        KeyIndex::new(Path::new("migrations"), ":memory:")
+        KeyIndex::new(":memory:")
     }
 
     fn lock(&self) -> MutexGuard<InternalKeyIndex> {

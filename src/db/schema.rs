@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use chrono;
+use diesel::sql_types::BigInt;
 use diesel::prelude::*;
 
 // Table schemas.
@@ -72,7 +73,22 @@ table! {
 joinable!(snapshots -> family (family_id));
 joinable!(hashes -> blobs (blob_id));
 
+allow_tables_to_appear_in_same_query!(
+    blobs,
+    family,
+    gc_metadata,
+    hashes,
+    snapshots,
+);
+
+
 // Rust models.
+
+#[derive(Queryable, QueryableByName)]
+pub struct RowId {
+    #[sql_type = "BigInt"]
+    pub row_id: i64,
+}
 
 #[derive(Queryable)]
 pub struct Hash {

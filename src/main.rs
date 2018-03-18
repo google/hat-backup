@@ -29,7 +29,7 @@ use clap::{App, SubCommand};
 use hat::backend;
 use std::borrow::ToOwned;
 use std::convert::From;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::Arc;
 
 static MAX_BLOB_SIZE: usize = 4 * 1024 * 1024;
@@ -59,7 +59,6 @@ fn main() {
         .about("Create backup snapshots")
         .args_from_usage(
             "-l, --license 'Display the license'
-                          --hat_migrations_dir=[DIR] 'Location of Hat SQL migrations'
                           --hat_cache_dir=[DIR] 'Location of Hat local state'",
         )
         .subcommand(
@@ -111,8 +110,6 @@ fn main() {
     };
 
     // Setup config variables that can take their value from either flag or environment.
-    let migrations_dir_str = flag_or_env("hat_migrations_dir");
-    let migrations_dir = Path::new(&migrations_dir_str);
     let cache_dir = PathBuf::from(flag_or_env("hat_cache_dir"));
 
     // Initialize sodium (must only be called once)
@@ -122,7 +119,7 @@ fn main() {
         ("resume", Some(_cmd)) => {
             // Setting up the repository triggers automatic resume.
             let backend = Arc::new(backend::FileBackend::new(blob_dir()));
-            hat::Hat::open_repository(migrations_dir, cache_dir, backend, MAX_BLOB_SIZE).unwrap();
+            hat::Hat::open_repository(cache_dir, backend, MAX_BLOB_SIZE).unwrap();
         }
         ("commit", Some(cmd)) => {
             let name = cmd.value_of("NAME").unwrap().to_owned();
@@ -130,7 +127,7 @@ fn main() {
 
             let backend = Arc::new(backend::FileBackend::new(blob_dir()));
             let mut hat =
-                hat::Hat::open_repository(migrations_dir, cache_dir, backend, MAX_BLOB_SIZE)
+                hat::Hat::open_repository(cache_dir, backend, MAX_BLOB_SIZE)
                     .unwrap();
 
             // Update the family index.
@@ -155,7 +152,7 @@ fn main() {
 
             let backend = Arc::new(backend::FileBackend::new(blob_dir()));
             let mut hat =
-                hat::Hat::open_repository(migrations_dir, cache_dir, backend, MAX_BLOB_SIZE)
+                hat::Hat::open_repository(cache_dir, backend, MAX_BLOB_SIZE)
                     .unwrap();
 
             hat.checkout_in_dir(name, PathBuf::from(path)).unwrap();
@@ -163,7 +160,7 @@ fn main() {
         ("recover", Some(_cmd)) => {
             let backend = Arc::new(backend::FileBackend::new(blob_dir()));
             let mut hat =
-                hat::Hat::open_repository(migrations_dir, cache_dir, backend, MAX_BLOB_SIZE)
+                hat::Hat::open_repository(cache_dir, backend, MAX_BLOB_SIZE)
                     .unwrap();
 
             hat.recover().unwrap();
@@ -174,7 +171,7 @@ fn main() {
 
             let backend = Arc::new(backend::FileBackend::new(blob_dir()));
             let mut hat =
-                hat::Hat::open_repository(migrations_dir, cache_dir, backend, MAX_BLOB_SIZE)
+                hat::Hat::open_repository(cache_dir, backend, MAX_BLOB_SIZE)
                     .unwrap();
 
             hat.deregister_by_name(name, id.parse::<u64>().unwrap())
@@ -183,7 +180,7 @@ fn main() {
         ("gc", Some(_cmd)) => {
             let backend = Arc::new(backend::FileBackend::new(blob_dir()));
             let mut hat =
-                hat::Hat::open_repository(migrations_dir, cache_dir, backend, MAX_BLOB_SIZE)
+                hat::Hat::open_repository(cache_dir, backend, MAX_BLOB_SIZE)
                     .unwrap();
             let (deleted_hashes, live_blobs) = hat.gc().unwrap();
             println!("Deleted hashes: {:?}", deleted_hashes);

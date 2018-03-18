@@ -29,10 +29,9 @@ use errors::DieselError;
 use hash;
 use root_capnp;
 use std::sync::{Mutex, MutexGuard};
-use std::path::Path;
 use tags;
 use time::Duration;
-use util::{Counter, InfoWriter, PeriodicTimer};
+use util::{Counter, PeriodicTimer};
 
 mod schema;
 
@@ -41,8 +40,8 @@ pub struct Index(Mutex<InternalIndex>);
 pub type IndexGuard<'a> = MutexGuard<'a, InternalIndex>;
 
 impl Index {
-    pub fn new(migrations_dir: &Path, path: &str) -> Result<Index, DieselError> {
-        Ok(Index(Mutex::new(InternalIndex::new(migrations_dir, path)?)))
+    pub fn new(path: &str) -> Result<Index, DieselError> {
+        Ok(Index(Mutex::new(InternalIndex::new(path)?)))
     }
     pub fn lock(&self) -> MutexGuard<InternalIndex> {
         self.0.lock().expect("Database mutex is poisoned")
@@ -50,7 +49,7 @@ impl Index {
     #[cfg(test)]
     pub fn new_for_testing() -> Index {
         Index(Mutex::new(
-            InternalIndex::new(Path::new("migrations"), ":memory:")
+            InternalIndex::new(":memory:")
                 .unwrap(),
         ))
     }
@@ -198,9 +197,10 @@ pub struct InternalIndex {
     flush_periodically: bool,
 }
 
+embed_migrations!();
 
 impl InternalIndex {
-    fn new(migrations_dir: &Path, path: &str) -> Result<InternalIndex, DieselError> {
+    fn new(path: &str) -> Result<InternalIndex, DieselError> {
         let conn = SqliteConnection::establish(path)?;
 
         let mut idx = InternalIndex {
@@ -210,11 +210,7 @@ impl InternalIndex {
             flush_periodically: true,
         };
 
-        diesel::migrations::run_pending_migrations_in_directory(
-            &idx.conn,
-            &migrations_dir,
-            &mut InfoWriter,
-        )?;
+        embedded_migrations::run(&idx.conn)?;
 
         {
             let tm = idx.conn.transaction_manager();
@@ -284,7 +280,7 @@ impl InternalIndex {
 
     pub fn hash_refresh_id_counter(&mut self) {
         use self::schema::hashes::dsl::*;
-        use diesel::expression::max;
+        use diesel::dsl::max;
 
         let id_opt = hashes
             .select(max(id))
@@ -319,8 +315,7 @@ impl InternalIndex {
             ready: false,
         };
 
-        diesel::insert(&new)
-            .into(hashes)
+        diesel::insert_into(hashes).values(&new)
             .execute(&self.conn)
             .expect("Error inserting new hash");
     }
@@ -455,8 +450,7 @@ impl InternalIndex {
                 gc_vec: &data.bytes,
             };
 
-            diesel::insert(&new)
-                .into(gc_metadata)
+            diesel::insert_into(gc_metadata).values(&new)
                 .execute(&self.conn)
                 .expect("Error inserting GC metadata");
         }
@@ -569,7 +563,7 @@ impl InternalIndex {
 
     pub fn blob_next_id(&mut self) -> i64 {
         // TODO(jos): use an id_counter.
-        use diesel::expression::max;
+        use diesel::dsl::max;
         use self::schema::blobs::dsl::*;
 
         blobs
@@ -589,8 +583,7 @@ impl InternalIndex {
             name: &blob.name,
             tag: tags::Tag::InProgress as i32,
         };
-        diesel::insert(&new)
-            .into(blobs)
+        diesel::insert_into(blobs).values(&new)
             .execute(&self.conn)
             .expect("Error inserting blob");
 
@@ -673,9 +666,13 @@ impl InternalIndex {
     }
 
     pub fn last_insert_rowid(&self) -> i64 {
-        diesel::select(diesel::expression::sql("last_insert_rowid()"))
-            .first::<i64>(&self.conn)
-            .unwrap()
+        let rows: Vec<self::schema::RowId> = diesel::sql_query("SELECT last_insert_rowid() AS row_id")
+            .load(&self.conn)
+            .unwrap();
+
+        assert_eq!(1, rows.len());
+
+        rows[0].row_id
     }
 
     pub fn family_id_from_name(&mut self, name_: &str) -> Option<i64> {
@@ -712,8 +709,7 @@ impl InternalIndex {
 
                 let new = self::schema::NewFamily { name: name_ };
 
-                diesel::insert(&new)
-                    .into(family)
+                diesel::insert_into(family).values(&new)
                     .execute(&self.conn)
                     .expect("Error inserting family");
                 self.last_insert_rowid()
@@ -723,8 +719,7 @@ impl InternalIndex {
 
     pub fn snapshot_latest_id(&mut self, family_id_: i64) -> Option<i64> {
         use self::schema::snapshots::dsl::*;
-        use diesel::expression::max;
-
+        use diesel::dsl::max; 
         snapshots
             .filter(family_id.eq(family_id_))
             .select(max(snapshot_id))
@@ -792,8 +787,7 @@ impl InternalIndex {
             hash_ref: None,
         };
 
-        diesel::insert(&new)
-            .into(snapshots)
+        diesel::insert_into(snapshots).values(&new)
             .execute(&self.conn)
             .expect("Error inserting snapshot");
 
@@ -947,8 +941,7 @@ impl InternalIndex {
                 tag: work_opt_.map_or(tags::Tag::Done, work_status_to_tag) as i32,
             };
 
-            diesel::insert(&new)
-                .into(snapshots)
+            diesel::insert_into(snapshots).values(&new)
                 .execute(&self.conn)
                 .expect("Error inserting new snapshot");
         }

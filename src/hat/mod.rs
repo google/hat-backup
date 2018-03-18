@@ -27,7 +27,7 @@ use root_capnp;
 use snapshot;
 use std::cmp;
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::str;
 use std::sync::{Arc, mpsc};
 use tags;
@@ -120,7 +120,6 @@ impl gc::GcBackend for GcBackend {
 pub struct Hat<B: StoreBackend, G: gc::Gc<GcBackend>> {
     keys: Arc<crypto::keys::Keeper>,
     repository_root: Option<PathBuf>,
-    migrations_dir: PathBuf,
     families: Vec<Family<B>>,
     db: Arc<db::Index>,
     snapshot_index: snapshot::SnapshotIndex,
@@ -207,16 +206,14 @@ fn list_snapshot<'a, B: StoreBackend>(
 
 impl<B: StoreBackend> HatRc<B> {
     pub fn open_repository(
-        migrations_dir: &Path,
         repository_root: PathBuf,
         backend: Arc<B>,
         max_blob_size: usize,
     ) -> Result<HatRc<B>, HatError> {
         let keys = Arc::new(crypto::keys::Keeper::new("hat-master-key"));
-        let migrations_path = migrations_dir.canonicalize().unwrap();
 
         let hash_index_path = hash_index_name(repository_root.clone());
-        let db_p = Arc::new(db::Index::new(&migrations_path, &hash_index_path)?);
+        let db_p = Arc::new(db::Index::new(&hash_index_path)?);
 
         let si_p = snapshot::SnapshotIndex::new(db_p.clone());
         let hi_p = Arc::new(hash::HashIndex::new(db_p.clone())?);
@@ -235,7 +232,6 @@ impl<B: StoreBackend> HatRc<B> {
         let mut hat = Hat {
             keys: keys,
             repository_root: Some(repository_root),
-            migrations_dir: migrations_path,
             families: vec![],
             db: db_p,
             snapshot_index: si_p,
@@ -275,7 +271,6 @@ impl<B: StoreBackend> HatRc<B> {
         let mut hat = Hat {
             keys: keys,
             repository_root: None,
-            migrations_dir: PathBuf::from("migrations"),
             families: vec![],
             db: db_p,
             snapshot_index: si_p,
@@ -316,7 +311,7 @@ impl<B: StoreBackend> HatRc<B> {
             None => ":memory:".to_string(),
         };
 
-        let ki_p = Arc::new(key::KeyIndex::new(&self.migrations_dir, &key_index_path)?);
+        let ki_p = Arc::new(key::KeyIndex::new(&key_index_path)?);
 
         let mut kss = vec![];
         for _ in 0..2 {

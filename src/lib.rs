@@ -46,6 +46,8 @@ extern crate error_type;
 extern crate diesel;
 #[macro_use]
 extern crate diesel_codegen;
+#[macro_use]
+extern crate diesel_migrations;
 
 // Testing utilities.
 #[cfg(test)]
