@@ -185,11 +185,7 @@ impl InternalHashIndex {
         });
     }
 
-    fn insert_completed_in_order(
-        &self,
-        queue: &mut MutexGuard<Queue>,
-        index: &mut db::IndexGuard,
-    ) {
+    fn insert_completed_in_order(&self, queue: &mut MutexGuard<Queue>, index: &mut db::IndexGuard) {
         while let Some((id_, _, queue_entry)) = queue.pop_min_if_complete() {
             assert_eq!(id_, queue_entry.id);
             index.hash_set_ready(id_, &queue_entry);

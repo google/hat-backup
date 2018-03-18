@@ -76,11 +76,7 @@ where
         })
     }
 
-    pub fn resume_child<FV, DV>(
-        &mut self,
-        file_v: &mut FV,
-        dir_v: &mut DV,
-    ) -> Result<bool, B::Err>
+    pub fn resume_child<FV, DV>(&mut self, file_v: &mut FV, dir_v: &mut DV) -> Result<bool, B::Err>
     where
         FV: LikesFiles,
         DV: HasFiles,
@@ -94,11 +90,7 @@ where
         })
     }
 
-    pub fn resume<FV, DV>(
-        &mut self,
-        file_v: &mut FV,
-        dir_v: &mut DV,
-    ) -> Result<bool, B::Err>
+    pub fn resume<FV, DV>(&mut self, file_v: &mut FV, dir_v: &mut DV) -> Result<bool, B::Err>
     where
         FV: LikesFiles,
         DV: HasFiles,

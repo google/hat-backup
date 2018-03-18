@@ -320,12 +320,7 @@ fn blob_ciphertext_authed_allbytes() {
         Ok(vs)
     };
 
-    fn with_modified<F>(
-        bytes: &mut [u8],
-        i: usize,
-        b: u8,
-        f: F,
-    ) -> Result<Vec<Vec<u8>>, BlobError>
+    fn with_modified<F>(bytes: &mut [u8], i: usize, b: u8, f: F) -> Result<Vec<Vec<u8>>, BlobError>
     where
         F: FnOnce(&[u8]) -> Result<Vec<Vec<u8>>, BlobError>,
     {
