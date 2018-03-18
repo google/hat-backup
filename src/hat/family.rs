@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-
 use backend::StoreBackend;
 use blob;
 use capnp;
@@ -187,25 +186,19 @@ fn parse_dir_data(chunk: &[u8], mut out: &mut Vec<walker::FileEntry>) -> Result<
         }
 
         let (data, hash_ref) = match f.get_content().which().unwrap() {
-            root_capnp::file::content::Data(r) => {
-                (
-                    key::Data::FilePlaceholder,
-                    walker::Content::Data(
-                        hash::tree::HashRef::read_msg(&r.expect("File has no data reference"))
-                            .unwrap(),
-                    ),
-                )
-            }
-            root_capnp::file::content::Directory(d) => {
-                (
-                    key::Data::DirPlaceholder,
-                    walker::Content::Dir(
-                        hash::tree::HashRef::read_msg(
-                            &d.expect("Directory has no listing reference"),
-                        ).unwrap(),
-                    ),
-                )
-            }
+            root_capnp::file::content::Data(r) => (
+                key::Data::FilePlaceholder,
+                walker::Content::Data(
+                    hash::tree::HashRef::read_msg(&r.expect("File has no data reference")).unwrap(),
+                ),
+            ),
+            root_capnp::file::content::Directory(d) => (
+                key::Data::DirPlaceholder,
+                walker::Content::Dir(
+                    hash::tree::HashRef::read_msg(&d.expect("Directory has no listing reference"))
+                        .unwrap(),
+                ),
+            ),
             root_capnp::file::content::SymbolicLink(path) => {
                 let link = PathBuf::from(String::from_utf8(path?.to_owned()).unwrap());
                 (
@@ -282,11 +275,8 @@ impl<B: StoreBackend> Family<B> {
         if !bailout && dir.is_dir() {
             handler.recurse(PathBuf::from(&dir), parent);
 
-            match self.key_store_process[0].send_reply(
-                key::Msg::CommitReservedNodes(
-                    Some(parent),
-                ),
-            ) {
+            match self.key_store_process[0].send_reply(key::Msg::CommitReservedNodes(Some(parent)))
+            {
                 Ok(key::Reply::Ok) => (),
                 _ => panic!("Unexpected reply from keystore"),
             }
@@ -398,9 +388,12 @@ impl<B: StoreBackend> Family<B> {
         &self,
         dir_id: Option<u64>,
     ) -> Result<Vec<key::DirElem<B>>, HatError> {
-        match self.key_store_process.iter().last().unwrap().send_reply(
-            key::Msg::ListDir(dir_id),
-        )? {
+        match self.key_store_process
+            .iter()
+            .last()
+            .unwrap()
+            .send_reply(key::Msg::ListDir(dir_id))?
+        {
             key::Reply::ListResult(ls) => Ok(ls),
             _ => Err(From::from("Unexpected result from key store")),
         }
@@ -411,9 +404,7 @@ impl<B: StoreBackend> Family<B> {
         dir_hash: hash::tree::HashRef,
         backend: HTB,
     ) -> Result<Vec<(key::Entry, walker::Content)>, HatError> {
-        let it = hash::tree::LeafIterator::new(backend, dir_hash)?.expect(
-            "unable to open dir",
-        );
+        let it = hash::tree::LeafIterator::new(backend, dir_hash)?.expect("unable to open dir");
 
         let mut out = Vec::new();
         for chunk in it {
@@ -445,7 +436,6 @@ impl<B: StoreBackend> Family<B> {
     where
         F: Fn(&hash::Hash),
     {
-
         let files_at_a_time = 1024;
         let mut it = self.list_from_key_store(dir_id)?.into_iter();
 
@@ -468,9 +458,9 @@ impl<B: StoreBackend> Family<B> {
                     file_msg.set_id(entry.node_id.unwrap_or(0));
 
                     {
-                        entry.info.populate_msg(
-                            file_msg.borrow().init_info().borrow(),
-                        );
+                        entry
+                            .info
+                            .populate_msg(file_msg.borrow().init_info().borrow());
                     }
 
                     match entry.data {
@@ -484,21 +474,20 @@ impl<B: StoreBackend> Family<B> {
                             let href = data_ref.expect("Data::File");
                             href.populate_msg(hash_ref_root.borrow());
                             // Set as file content.
-                            file_msg.borrow().init_content().set_data(
-                                hash_ref_root.as_reader(),
-                            )?;
+                            file_msg
+                                .borrow()
+                                .init_content()
+                                .set_data(hash_ref_root.as_reader())?;
 
-                            top_hash_fn(&hash::Hash { bytes: href.hash.bytes });
+                            top_hash_fn(&hash::Hash {
+                                bytes: href.hash.bytes,
+                            });
                         }
                         key::Data::DirPlaceholder => {
                             // This is a directory, recurse!
                             let mut inner_tree =
                                 self.key_store.hash_tree_writer(blob::LeafType::TreeList);
-                            self.commit_to_tree(
-                                &mut inner_tree,
-                                entry.node_id,
-                                top_hash_fn,
-                            )?;
+                            self.commit_to_tree(&mut inner_tree, entry.node_id, top_hash_fn)?;
                             // Store a reference for the sub-tree in our tree:
                             let dir_hash_ref = inner_tree.hash(Some(&entry.info))?;
 
@@ -509,19 +498,19 @@ impl<B: StoreBackend> Family<B> {
                             // Populate directory hash and ChunkRef.
                             dir_hash_ref.populate_msg(hash_ref_root.borrow());
                             // Set as directory content.
-                            file_msg.borrow().init_content().set_directory(
-                                hash_ref_root.as_reader(),
-                            )?;
+                            file_msg
+                                .borrow()
+                                .init_content()
+                                .set_directory(hash_ref_root.as_reader())?;
 
                             top_hash_fn(&dir_hash_ref.hash);
                         }
                         key::Data::Symlink(path) => {
                             // Set symbolic link content.
-                            file_msg.borrow().init_content().set_symbolic_link(
-                                path.to_str()
-                                    .unwrap()
-                                    .as_ref(),
-                            );
+                            file_msg
+                                .borrow()
+                                .init_content()
+                                .set_symbolic_link(path.to_str().unwrap().as_ref());
                         }
                         _ => unreachable!("Unexpected key::Data"),
                     }

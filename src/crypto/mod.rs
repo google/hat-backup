@@ -30,7 +30,6 @@ pub struct CipherText {
 }
 pub struct CipherTextRef<'a>(&'a [u8]);
 
-
 pub mod authed {
     pub mod desc {
         use libsodium_sys;
@@ -316,9 +315,7 @@ impl<'a> CipherTextRef<'a> {
     }
 }
 
-
 pub struct RefKey {}
-
 
 impl RefKey {
     pub fn seal(
@@ -351,7 +348,8 @@ impl RefKey {
         );
         match href.persistent_ref.key {
             Some(Key::AeadChacha20Poly1305(ref key))
-                if href.hash.bytes.len() >= authed::desc::NONCEBYTES => {
+                if href.hash.bytes.len() >= authed::desc::NONCEBYTES =>
+            {
                 let nonce = authed::desc::Nonce::from(&href.hash.bytes[..authed::desc::NONCEBYTES]);
 
                 let additional_data = keys::compute_salt(href.node, href.leaf);
@@ -444,10 +442,8 @@ impl<'k> FixedKey<'k> {
         let mut access_pt = self.unseal_blob_access(access_ct).into_vec();
         assert_eq!(access_pt.len(), sealed::desc::access_plain_bytes());
 
-        let access_key = access_pt.split_off(
-            sealed::desc::access_plain_bytes() -
-                ::crypto::authed::desc::KEYBYTES,
-        );
+        let access_key = access_pt
+            .split_off(sealed::desc::access_plain_bytes() - ::crypto::authed::desc::KEYBYTES);
         Ok((
             ::crypto::authed::desc::Key::from(&access_key[..]),
             CipherText::new(access_pt),
@@ -465,22 +461,20 @@ impl<'k> FixedKey<'k> {
         assert_eq!(foot_pt.len(), sealed::desc::footer_plain_bytes());
 
         // Read length as LittleEndian and inner key.
-        let (foot_len, inner_key) = foot_pt.as_ref().split_from_right(
-            ::crypto::authed::desc::KEYBYTES,
-        )?;
+        let (foot_len, inner_key) = foot_pt
+            .as_ref()
+            .split_from_right(::crypto::authed::desc::KEYBYTES)?;
 
         // Parse length of inner symmetric cipher text.
-        let ct_len = foot_len.read_i64().map_err(
-            |_| "crypto read failed: unseal",
-        )?;
+        let ct_len = foot_len
+            .read_i64()
+            .map_err(|_| "crypto read failed: unseal")?;
         assert!(ct_len > 0);
 
         // Read and unseal inner symmetric cipher text.
         let additional_data: &[u8] = b"hat_blob_seal~";
         let (rest, ct_and_nonce) = ct.split_from_right(ct_len as usize)?;
-        let (ct, nonce) = ct_and_nonce.split_from_right(
-            ::crypto::authed::desc::NONCEBYTES,
-        )?;
+        let (ct, nonce) = ct_and_nonce.split_from_right(::crypto::authed::desc::NONCEBYTES)?;
         Ok((
             rest,
             ct.to_plaintext(

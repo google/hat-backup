@@ -20,8 +20,7 @@ use std::path::PathBuf;
 pub enum FileIterator {
     File(io::BufReader<fs::File>),
     Buf(Vec<u8>, usize),
-    #[cfg(all(test, feature = "benchmarks"))]
-    Reader(Box<Read + Send>),
+    #[cfg(all(test, feature = "benchmarks"))] Reader(Box<Read + Send>),
 }
 
 impl FileIterator {

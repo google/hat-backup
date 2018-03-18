@@ -16,7 +16,6 @@ use capnp;
 use root_capnp;
 use secstr;
 
-
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub enum Packing {
     GZip,
@@ -152,9 +151,9 @@ impl ChunkRef {
         msg.set_length(self.length as u64);
 
         if let Some(Key::AeadChacha20Poly1305(ref chacha)) = self.key {
-            msg.borrow().init_key().set_aead_chacha20_poly1305(
-                chacha.unsecure(),
-            );
+            msg.borrow()
+                .init_key()
+                .set_aead_chacha20_poly1305(chacha.unsecure());
         } else {
             msg.borrow().init_key().set_none(());
         }

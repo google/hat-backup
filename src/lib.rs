@@ -30,12 +30,12 @@ extern crate argon2rs;
 extern crate byteorder;
 extern crate capnp;
 extern crate chrono;
-extern crate libsodium_sys;
-extern crate hex;
-extern crate secstr;
-extern crate scoped_pool;
-extern crate void;
 extern crate filetime;
+extern crate hex;
+extern crate libsodium_sys;
+extern crate scoped_pool;
+extern crate secstr;
+extern crate void;
 
 // Error definition macros.
 #[macro_use]

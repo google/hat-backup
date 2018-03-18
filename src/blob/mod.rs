@@ -14,7 +14,6 @@
 
 //! Combines data chunks into larger blobs to be stored externally.
 
-
 use backend::StoreBackend;
 use capnp;
 use crypto;
@@ -29,7 +28,6 @@ use tags;
 use util::FnBox;
 use key;
 
-
 mod chunk;
 mod blob;
 mod index;
@@ -39,11 +37,9 @@ pub mod tests;
 #[cfg(all(test, feature = "benchmarks"))]
 mod benchmarks;
 
-
 pub use self::blob::{Blob, BlobReader};
-pub use self::chunk::{ChunkRef, Key, NodeType, LeafType, Packing};
+pub use self::chunk::{ChunkRef, Key, LeafType, NodeType, Packing};
 pub use self::index::{BlobDesc, BlobIndex};
-
 
 error_type! {
     #[derive(Debug)]
@@ -113,9 +109,9 @@ impl<B: StoreBackend> StoreInner<B> {
         let old_blob_desc = self.reserve_new_blob();
 
         self.blob_index.in_air(&old_blob_desc);
-        self.backend.store(&old_blob_desc.name[..], &ct).expect(
-            "Store operation failed",
-        );
+        self.backend
+            .store(&old_blob_desc.name[..], &ct)
+            .expect("Store operation failed");
         self.blob_index.commit_done(&old_blob_desc);
 
         // Go through callbacks
@@ -178,13 +174,10 @@ impl<B: StoreBackend> StoreInner<B> {
             return Ok(Some(Vec::new()));
         }
         match self.backend.retrieve(&href.persistent_ref.blob_name[..]) {
-            Ok(Some(blob)) => {
-                Ok(Some(BlobReader::new(
-                    self.keys.clone(),
-                    crypto::CipherTextRef::new(&blob[..]),
-                )?
-                    .read_chunk(href)?))
-            }
+            Ok(Some(blob)) => Ok(Some(BlobReader::new(
+                self.keys.clone(),
+                crypto::CipherTextRef::new(&blob[..]),
+            )?.read_chunk(href)?)),
             Ok(None) => Ok(None),
             Err(e) => Err(e.into()),
         }
@@ -244,9 +237,12 @@ impl<B: StoreBackend> BlobStore<B> {
         backend: Arc<B>,
         max_blob_size: usize,
     ) -> BlobStore<B> {
-        BlobStore(Arc::new(Mutex::new(
-            StoreInner::new(keys, index, backend, max_blob_size),
-        )))
+        BlobStore(Arc::new(Mutex::new(StoreInner::new(
+            keys,
+            index,
+            backend,
+            max_blob_size,
+        ))))
     }
 
     fn lock(&self) -> MutexGuard<StoreInner<B>> {

@@ -44,7 +44,6 @@ fn license() {
     println!(include_str!("../LICENSE-CLAP"));
 }
 
-
 fn main() {
     env_logger::init();
 
@@ -71,9 +70,7 @@ fn main() {
                 .about("Checkout a snapshot")
                 .args_from_usage(arg_template),
         )
-        .subcommand(SubCommand::with_name("recover").about(
-            "Recover list of commit'ed snapshots",
-        ))
+        .subcommand(SubCommand::with_name("recover").about("Recover list of commit'ed snapshots"))
         .subcommand(
             SubCommand::with_name("delete")
                 .about("Delete a snapshot")
@@ -88,9 +85,7 @@ fn main() {
                 .about("Garbage collect: identify and remove unused data blocks.")
                 .args_from_usage("-p --pretend 'Do not modify any data'"),
         )
-        .subcommand(SubCommand::with_name("resume").about(
-            "Resume previous failed command.",
-        ))
+        .subcommand(SubCommand::with_name("resume").about("Resume previous failed command."))
         .get_matches();
 
     // Check for license flag
@@ -103,9 +98,7 @@ fn main() {
         matches
             .value_of(name)
             .map(|x| x.to_string())
-            .or_else(|| {
-                env::var_os(name.to_uppercase()).map(|s| s.into_string().unwrap())
-            })
+            .or_else(|| env::var_os(name.to_uppercase()).map(|s| s.into_string().unwrap()))
             .expect(&format!("{} required", name))
     };
 
@@ -126,15 +119,11 @@ fn main() {
             let path = cmd.value_of("PATH").unwrap();
 
             let backend = Arc::new(backend::FileBackend::new(blob_dir()));
-            let mut hat =
-                hat::Hat::open_repository(cache_dir, backend, MAX_BLOB_SIZE)
-                    .unwrap();
+            let mut hat = hat::Hat::open_repository(cache_dir, backend, MAX_BLOB_SIZE).unwrap();
 
             // Update the family index.
-            let mut family = hat.open_family(name.clone()).expect(&format!(
-                "Could not open family '{}'",
-                name
-            ));
+            let mut family = hat.open_family(name.clone())
+                .expect(&format!("Could not open family '{}'", name));
             family.snapshot_dir(PathBuf::from(path));
 
             // Commit the updated index.
@@ -151,17 +140,13 @@ fn main() {
             let path = cmd.value_of("PATH").unwrap();
 
             let backend = Arc::new(backend::FileBackend::new(blob_dir()));
-            let mut hat =
-                hat::Hat::open_repository(cache_dir, backend, MAX_BLOB_SIZE)
-                    .unwrap();
+            let mut hat = hat::Hat::open_repository(cache_dir, backend, MAX_BLOB_SIZE).unwrap();
 
             hat.checkout_in_dir(name, PathBuf::from(path)).unwrap();
         }
         ("recover", Some(_cmd)) => {
             let backend = Arc::new(backend::FileBackend::new(blob_dir()));
-            let mut hat =
-                hat::Hat::open_repository(cache_dir, backend, MAX_BLOB_SIZE)
-                    .unwrap();
+            let mut hat = hat::Hat::open_repository(cache_dir, backend, MAX_BLOB_SIZE).unwrap();
 
             hat.recover().unwrap();
         }
@@ -170,22 +155,17 @@ fn main() {
             let id = cmd.value_of("ID").unwrap().to_owned();
 
             let backend = Arc::new(backend::FileBackend::new(blob_dir()));
-            let mut hat =
-                hat::Hat::open_repository(cache_dir, backend, MAX_BLOB_SIZE)
-                    .unwrap();
+            let mut hat = hat::Hat::open_repository(cache_dir, backend, MAX_BLOB_SIZE).unwrap();
 
             hat.deregister_by_name(name, id.parse::<u64>().unwrap())
                 .unwrap();
         }
         ("gc", Some(_cmd)) => {
             let backend = Arc::new(backend::FileBackend::new(blob_dir()));
-            let mut hat =
-                hat::Hat::open_repository(cache_dir, backend, MAX_BLOB_SIZE)
-                    .unwrap();
+            let mut hat = hat::Hat::open_repository(cache_dir, backend, MAX_BLOB_SIZE).unwrap();
             let (deleted_hashes, live_blobs) = hat.gc().unwrap();
             println!("Deleted hashes: {:?}", deleted_hashes);
             println!("Live data blobs after deletion: {:?}", live_blobs);
-
         }
         _ => {
             println!(

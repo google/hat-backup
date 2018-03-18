@@ -16,7 +16,6 @@ pub struct Counter {
     previous: i64,
 }
 
-
 impl Counter {
     pub fn new(previous: i64) -> Counter {
         Counter { previous: previous }

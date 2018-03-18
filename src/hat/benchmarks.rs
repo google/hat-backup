@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-
 use backend::DevNullBackend;
 use hat::HatRc;
 use hat::family::Family;
@@ -21,7 +20,6 @@ use std::io;
 use std::sync::{Arc, Mutex};
 use test::Bencher;
 use util::FileIterator;
-
 
 fn setup_family() -> (HatRc<DevNullBackend>, Family<DevNullBackend>) {
     let backend = Arc::new(DevNullBackend);

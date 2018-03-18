@@ -48,17 +48,12 @@ table! {
 
 joinable!(key_data -> key_tree (node_id));
 
-allow_tables_to_appear_in_same_query!(
-    key_data,
-    key_tree,
-);
-
+allow_tables_to_appear_in_same_query!(key_data, key_tree,);
 
 // Rust models.
 #[derive(Queryable, QueryableByName)]
 pub struct RowId {
-    #[sql_type = "BigInt"]
-    pub row_id: i64,
+    #[sql_type = "BigInt"] pub row_id: i64,
 }
 
 #[derive(Queryable)]

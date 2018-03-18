@@ -17,9 +17,8 @@
 //! This module implements two structures for handling hash trees: A streaming hash-tree writer, and
 //! a streaming hash-tree reader.
 
-
 use key;
-use blob::{ChunkRef, NodeType, LeafType};
+use blob::{ChunkRef, LeafType, NodeType};
 
 use capnp;
 use hash::Hash;
@@ -29,7 +28,6 @@ use quickcheck;
 use root_capnp;
 use std::collections::VecDeque;
 use std::fmt;
-
 
 #[derive(Clone, Debug)]
 pub struct HashRef {
@@ -64,7 +62,9 @@ impl HashRef {
 
     pub fn read_msg(msg: &root_capnp::hash_ref::Reader) -> Result<HashRef, capnp::Error> {
         Ok(HashRef {
-            hash: Hash { bytes: msg.get_hash()?.to_owned() },
+            hash: Hash {
+                bytes: msg.get_hash()?.to_owned(),
+            },
             node: From::from(msg.get_height()),
             leaf: LeafType::read_msg(msg.get_leaf_type().which()?),
             persistent_ref: ChunkRef::read_msg(&msg.get_chunk_ref()?)?,
@@ -96,7 +96,6 @@ impl HashRef {
     }
 }
 
-
 pub trait HashTreeBackend: Clone {
     type Err: fmt::Debug;
 
@@ -112,7 +111,6 @@ pub trait HashTreeBackend: Clone {
         Option<&key::Info>,
     ) -> Result<(u64, HashRef), Self::Err>;
 }
-
 
 fn hash_refs_to_bytes(refs: &Vec<HashRef>) -> Vec<u8> {
     let mut message = capnp::message::Builder::new_default();
@@ -163,7 +161,9 @@ fn test_hash_refs_identity() {
         let mut v = vec![];
         for i in 1..count + 1 {
             v.push(HashRef {
-                hash: Hash { bytes: hash.clone() },
+                hash: Hash {
+                    bytes: hash.clone(),
+                },
                 node: NodeType::Branch(i as u64),
                 leaf: LeafType::FileChunk,
                 info: None,
@@ -189,7 +189,6 @@ fn test_hash_refs_identity() {
     quickcheck::quickcheck(prop as fn(u8, Vec<u8>, Vec<u8>, usize) -> bool);
 }
 
-
 /// A simple implementation of a hash-tree stream writer.
 ///
 /// The hash-tree is "created" as append-only and is streamed from first to last data-block. The
@@ -208,7 +207,6 @@ pub struct SimpleHashTreeWriter<B> {
     leaf: LeafType,
     levels: Vec<Vec<(u64, HashRef)>>, // Representation of rightmost path to root
 }
-
 
 impl<B: HashTreeBackend> SimpleHashTreeWriter<B> {
     /// Create a new hash-tree to be stored through 'backend' with node order 'order'.
@@ -248,13 +246,9 @@ impl<B: HashTreeBackend> SimpleHashTreeWriter<B> {
         childs: Option<Vec<u64>>,
         info: Option<&key::Info>,
     ) -> Result<(), B::Err> {
-        let (id, hash_ref) = self.backend.insert_chunk(
-            &data,
-            From::from(level as u64),
-            self.leaf,
-            childs,
-            info,
-        )?;
+        let (id, hash_ref) =
+            self.backend
+                .insert_chunk(&data, From::from(level as u64), self.leaf, childs, info)?;
         self.append_hashref_at(level, id, hash_ref, info)
     }
 
@@ -332,7 +326,6 @@ impl<B: HashTreeBackend> SimpleHashTreeWriter<B> {
     }
 }
 
-
 pub trait Visitor {
     fn branch_enter(&mut self, _href: &HashRef, _childs: &Vec<HashRef>) -> bool {
         true
@@ -400,9 +393,9 @@ where
                 Some(ref hash) => assert!(hash != &node.hash),
             }
             let fetch_chunk = |backend: &B, child: &HashRef| {
-                backend.fetch_chunk(child).map(|opt| {
-                    opt.expect("Invalid hash ref")
-                })
+                backend
+                    .fetch_chunk(child)
+                    .map(|opt| opt.expect("Invalid hash ref"))
             };
 
             match node.node {
@@ -420,9 +413,8 @@ where
                     if visitor.branch_enter(&node, &new_childs) {
                         self.stack.push(StackItem::LeaveBranch(node));
                         new_childs.reverse();
-                        self.stack.extend(
-                            new_childs.into_iter().map(StackItem::Enter),
-                        );
+                        self.stack
+                            .extend(new_childs.into_iter().map(StackItem::Enter));
                     }
                 }
             }
@@ -443,11 +435,11 @@ where
     B: HashTreeBackend,
 {
     pub fn new(backend: B, root_ref: HashRef) -> Result<Option<LeafIterator<B>>, B::Err> {
-        Ok(Walker::new(backend, root_ref)?.map(|w| {
-            LeafIterator {
-                walker: w,
-                visitor: LeafVisitor { leafs: VecDeque::new() },
-            }
+        Ok(Walker::new(backend, root_ref)?.map(|w| LeafIterator {
+            walker: w,
+            visitor: LeafVisitor {
+                leafs: VecDeque::new(),
+            },
         }))
     }
 }

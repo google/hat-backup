@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-
 use backend::{MemoryBackend, StoreBackend};
 use key::*;
 
@@ -69,7 +68,6 @@ fn rng_filesystem(size: usize) -> FileSystem {
 
         let mut files = Vec::new();
         for _ in 0..children as usize {
-
             let data_opt = if thread_rng().gen() {
                 None
             } else {
@@ -153,7 +151,8 @@ fn insert_and_update_fs<B: StoreBackend>(fs: &mut FileSystem, ks_p: &StoreProces
         } else {
             None
         },
-    )).unwrap() {
+    )).unwrap()
+    {
         Reply::Id(id) => Some(id),
         _ => panic!("unexpected reply from key store"),
     };
@@ -166,7 +165,8 @@ fn insert_and_update_fs<B: StoreBackend>(fs: &mut FileSystem, ks_p: &StoreProces
 
 fn verify_filesystem<B: StoreBackend>(fs: &FileSystem, ks_p: &StoreProcess<EntryStub, B>) -> usize {
     let listing = match ks_p.send_reply(Msg::ListDir(fs.file.key_entry.node_id))
-        .unwrap() {
+        .unwrap()
+    {
         Reply::ListResult(ls) => ls,
         _ => panic!("Unexpected result from key store."),
     };

@@ -12,8 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-
-use db::{GcData, UpdateFn, SnapshotInfo};
+use db::{GcData, SnapshotInfo, UpdateFn};
 #[cfg(test)]
 use std::collections::HashMap;
 #[cfg(test)]
@@ -32,7 +31,6 @@ pub use self::noop::GcNoop;
 pub use self::rc::GcRc;
 
 pub type Id = u64;
-
 
 #[derive(PartialEq, Debug)]
 pub enum Status {
@@ -67,7 +65,6 @@ pub trait GcBackend {
 
     fn manual_commit(&mut self) -> Result<(), Self::Err>;
 }
-
 
 pub fn mark_tree<B>(backend: &mut B, root: Id, tag: tags::Tag) -> Result<(), B::Err>
 where
@@ -112,7 +109,6 @@ pub trait Gc<B> {
     fn status(&mut self, final_ref: Id) -> Result<Option<Status>, Self::Err>;
 }
 
-
 #[cfg(test)]
 #[derive(Clone)]
 pub struct MemoryBackend {
@@ -145,14 +141,17 @@ pub struct SafeMemoryBackend {
 #[cfg(test)]
 impl SafeMemoryBackend {
     fn new() -> SafeMemoryBackend {
-        SafeMemoryBackend { backend: Arc::new(Mutex::new(MemoryBackend::new())) }
+        SafeMemoryBackend {
+            backend: Arc::new(Mutex::new(MemoryBackend::new())),
+        }
     }
 
     fn insert_snapshot(&mut self, info: &SnapshotInfo, refs: Vec<Id>) {
-        self.backend.lock().unwrap().snapshot_refs.insert(
-            info.unique_id,
-            refs,
-        );
+        self.backend
+            .lock()
+            .unwrap()
+            .snapshot_refs
+            .insert(info.unique_id, refs);
     }
 
     fn list_snapshot_refs(&self, info: SnapshotInfo) -> mpsc::Receiver<Id> {
@@ -195,18 +194,16 @@ impl GcBackend for SafeMemoryBackend {
     type Err = String;
 
     fn get_data(&self, hash_id: Id, family_id: Id) -> Result<GcData, Self::Err> {
-        Ok(
-            self.backend
-                .lock()
-                .unwrap()
-                .gc_data
-                .get(&(hash_id, family_id))
-                .unwrap_or(&GcData {
-                    num: 0,
-                    bytes: vec![],
-                })
-                .clone(),
-        )
+        Ok(self.backend
+            .lock()
+            .unwrap()
+            .gc_data
+            .get(&(hash_id, family_id))
+            .unwrap_or(&GcData {
+                num: 0,
+                bytes: vec![],
+            })
+            .clone())
     }
 
     fn update_data<F: UpdateFn>(
@@ -217,17 +214,16 @@ impl GcBackend for SafeMemoryBackend {
     ) -> Result<GcData, Self::Err> {
         let new = match f(self.get_data(hash_id, family_id)?) {
             Some(d) => d,
-            None => {
-                GcData {
-                    num: 0,
-                    bytes: vec![],
-                }
-            }
+            None => GcData {
+                num: 0,
+                bytes: vec![],
+            },
         };
-        self.backend.lock().unwrap().gc_data.insert(
-            (hash_id, family_id),
-            new.clone(),
-        );
+        self.backend
+            .lock()
+            .unwrap()
+            .gc_data
+            .insert((hash_id, family_id), new.clone());
 
         Ok(new)
     }
@@ -271,15 +267,13 @@ impl GcBackend for SafeMemoryBackend {
     }
 
     fn reverse_refs(&self, hash_id: Id) -> Result<Vec<Id>, Self::Err> {
-        Ok(
-            self.backend
-                .lock()
-                .unwrap()
-                .parents
-                .get(&hash_id)
-                .unwrap_or(&vec![])
-                .clone(),
-        )
+        Ok(self.backend
+            .lock()
+            .unwrap()
+            .parents
+            .get(&hash_id)
+            .unwrap_or(&vec![])
+            .clone())
     }
 
     fn list_ids_by_tag(&self, tag: tags::Tag) -> Result<mpsc::Receiver<Id>, Self::Err> {
@@ -301,7 +295,6 @@ impl GcBackend for SafeMemoryBackend {
         Ok(())
     }
 }
-
 
 #[cfg(test)]
 pub fn gc_test<GC>(snapshots: Vec<Vec<u8>>)
@@ -369,8 +362,7 @@ where
         if unused.len() != all_refs.len() {
             panic!(
                 "Did not mark all IDs as unused. Wanted {:?}, got {:?}.",
-                all_refs,
-                unused
+                all_refs, unused
             );
         }
     }
@@ -404,7 +396,6 @@ where
     assert_eq!(gc.status(final_ref).ok(), Some(Some(Status::InProgress)));
     gc.register_cleanup(&info, final_ref).unwrap();
     assert_eq!(gc.status(final_ref).ok(), Some(None));
-
 
     let receiver = |n| {
         let (sender, receiver) = mpsc::channel();

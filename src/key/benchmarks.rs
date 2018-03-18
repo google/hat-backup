@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-
 use backend::DevNullBackend;
 use key::*;
 use key::tests::*;
@@ -42,9 +41,10 @@ fn insert_1_key_x_128000_zeros(bench: &mut Bencher) {
             ),
         };
 
-        ks_p.send_reply(Msg::Insert(entry.key_entry.clone(),
-                                    Some(Box::new(move |()| Some(entry)))))
-            .unwrap();
+        ks_p.send_reply(Msg::Insert(
+            entry.key_entry.clone(),
+            Some(Box::new(move |()| Some(entry))),
+        )).unwrap();
     });
 
     ks_p.send_reply(Msg::Flush).unwrap();
@@ -78,9 +78,10 @@ fn insert_1_key_x_128000_unique(bench: &mut Bencher) {
             ),
         };
 
-        ks_p.send_reply(Msg::Insert(entry.key_entry.clone(),
-                                    Some(Box::new(move |()| Some(entry)))))
-            .unwrap();
+        ks_p.send_reply(Msg::Insert(
+            entry.key_entry.clone(),
+            Some(Box::new(move |()| Some(entry))),
+        )).unwrap();
     });
 
     ks_p.send_reply(Msg::Flush).unwrap();
@@ -100,9 +101,10 @@ fn insert_1_key_x_16_x_128000_zeros(bench: &mut Bencher) {
             data: Some(vec![bytes; 16]),
             key_entry: Entry::new(None, vec![1u8, 2, 3].to_vec(), Data::FilePlaceholder, None),
         };
-        ks_p.send_reply(Msg::Insert(entry.key_entry.clone(),
-                                    Some(Box::new(move |()| Some(entry)))))
-            .unwrap();
+        ks_p.send_reply(Msg::Insert(
+            entry.key_entry.clone(),
+            Some(Box::new(move |()| Some(entry))),
+        )).unwrap();
 
         match ks_p.send_reply(Msg::Flush).unwrap() {
             Reply::FlushOk => (),
@@ -143,9 +145,10 @@ fn insert_1_key_x_16_x_128000_unique(bench: &mut Bencher) {
             key_entry: Entry::new(None, vec![1u8, 2, 3], Data::FilePlaceholder, None),
         };
 
-        ks_p.send_reply(Msg::Insert(entry.key_entry.clone(),
-                                    Some(Box::new(move |()| Some(entry)))))
-            .unwrap();
+        ks_p.send_reply(Msg::Insert(
+            entry.key_entry.clone(),
+            Some(Box::new(move |()| Some(entry))),
+        )).unwrap();
 
         match ks_p.send_reply(Msg::Flush).unwrap() {
             Reply::FlushOk => (),

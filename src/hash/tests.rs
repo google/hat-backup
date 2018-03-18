@@ -12,8 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-
-use blob::{ChunkRef, NodeType, LeafType};
+use blob::{ChunkRef, LeafType, NodeType};
 use crypto;
 use hash::Hash;
 use hash::tree::*;
@@ -47,36 +46,29 @@ impl HashTreeBackend for MemoryBackend {
 
     fn fetch_chunk(&self, href: &HashRef) -> Result<Option<Vec<u8>>, Self::Err> {
         let guarded_chunks = self.chunks.lock().unwrap();
-        Ok(guarded_chunks.get(&href.hash.bytes).map(|&(_,
-           _,
-           _,
-           ref chunk)| {
-            chunk.clone()
-        }))
+        Ok(guarded_chunks
+            .get(&href.hash.bytes)
+            .map(|&(_, _, _, ref chunk)| chunk.clone()))
     }
 
     fn fetch_childs(&self, hash: &Hash) -> Option<Vec<u64>> {
         let guarded_chunks = self.chunks.lock().unwrap();
-        guarded_chunks.get(&hash.bytes).and_then(
-            |&(_, _, ref childs, _)| {
-                childs.clone()
-            },
-        )
+        guarded_chunks
+            .get(&hash.bytes)
+            .and_then(|&(_, _, ref childs, _)| childs.clone())
     }
 
     fn fetch_persistent_ref(&self, hash: &Hash) -> Option<ChunkRef> {
         let guarded_chunks = self.chunks.lock().unwrap();
         match guarded_chunks.get(&hash.bytes) {
-            Some(&(_, _, _, ref chunk)) => {
-                Some(ChunkRef {
-                    blob_id: None,
-                    blob_name: hash.bytes.clone(),
-                    offset: 0,
-                    length: chunk.len(),
-                    packing: None,
-                    key: None,
-                })
-            }
+            Some(&(_, _, _, ref chunk)) => Some(ChunkRef {
+                blob_id: None,
+                blob_name: hash.bytes.clone(),
+                offset: 0,
+                length: chunk.len(),
+                packing: None,
+                key: None,
+            }),
             None => None,
         }
     }
@@ -132,9 +124,9 @@ fn identity_many_small_blocks() {
         let hash_ref = ht.hash(None).unwrap();
         assert_eq!(hash_ref.leaf, LeafType::FileChunk);
 
-        let mut tree_it = LeafIterator::new(backend, hash_ref).unwrap().expect(
-            "tree not found",
-        );
+        let mut tree_it = LeafIterator::new(backend, hash_ref)
+            .unwrap()
+            .expect("tree not found");
 
         if chunks_count == 0 {
             // An empty tree is a tree with a single empty chunk (as opposed to no chunks).
@@ -167,9 +159,9 @@ fn identity_empty() {
 
     let hash_ref = ht.hash(None).unwrap();
 
-    let mut it = LeafIterator::new(backend, hash_ref).unwrap().expect(
-        "tree not found",
-    );
+    let mut it = LeafIterator::new(backend, hash_ref)
+        .unwrap()
+        .expect("tree not found");
 
     assert_eq!(Some(block), it.next());
     assert_eq!(0, it.count());
@@ -186,9 +178,9 @@ fn identity_append1() {
 
     let hash_ref = ht.hash(None).unwrap();
 
-    let mut it = LeafIterator::new(backend, hash_ref).unwrap().expect(
-        "tree not found",
-    );
+    let mut it = LeafIterator::new(backend, hash_ref)
+        .unwrap()
+        .expect("tree not found");
     assert_eq!(Some(block), it.next());
     assert_eq!(0, it.count());
 }
@@ -243,9 +235,9 @@ fn identity_implicit_flush() {
 
     let hash_ref = ht.hash(None).unwrap();
 
-    let it = LeafIterator::new(backend, hash_ref).unwrap().expect(
-        "tree not found",
-    );
+    let it = LeafIterator::new(backend, hash_ref)
+        .unwrap()
+        .expect("tree not found");
 
     for (i, chunk) in it.enumerate() {
         bytes[0] = (i + 1) as u8;
@@ -271,9 +263,9 @@ fn identity_1_short_of_flush() {
         assert!(backend.saw_chunk(&vec![i]));
     }
 
-    let it = LeafIterator::new(backend, hash_ref).unwrap().expect(
-        "tree not found",
-    );
+    let it = LeafIterator::new(backend, hash_ref)
+        .unwrap()
+        .expect("tree not found");
 
     for (i, chunk) in it.enumerate() {
         bytes[0] = (i + 1) as u8;

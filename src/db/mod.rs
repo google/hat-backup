@@ -14,7 +14,6 @@
 
 //! Communication with SQLite.
 
-
 use blob;
 
 use capnp;
@@ -35,7 +34,6 @@ use util::{Counter, PeriodicTimer};
 
 mod schema;
 
-
 pub struct Index(Mutex<InternalIndex>);
 pub type IndexGuard<'a> = MutexGuard<'a, InternalIndex>;
 
@@ -48,13 +46,9 @@ impl Index {
     }
     #[cfg(test)]
     pub fn new_for_testing() -> Index {
-        Index(Mutex::new(
-            InternalIndex::new(":memory:")
-                .unwrap(),
-        ))
+        Index(Mutex::new(InternalIndex::new(":memory:").unwrap()))
     }
 }
-
 
 fn encode_childs(childs: &[u64]) -> Vec<u8> {
     let mut message = capnp::message::Builder::new_default();
@@ -144,8 +138,7 @@ fn tag_to_work_status(tag: tags::Tag) -> SnapshotWorkStatus {
         tags::Tag::Reserved | tags::Tag::InProgress => SnapshotWorkStatus::CommitInProgress,
         tags::Tag::Complete | tags::Tag::Done => SnapshotWorkStatus::CommitComplete,
         tags::Tag::WillDelete => SnapshotWorkStatus::DeleteInProgress,
-        tags::Tag::ReadyDelete |
-        tags::Tag::DeleteComplete => SnapshotWorkStatus::DeleteComplete,
+        tags::Tag::ReadyDelete | tags::Tag::DeleteComplete => SnapshotWorkStatus::DeleteComplete,
         tags::Tag::RecoverInProgress => SnapshotWorkStatus::RecoverInProgress,
     }
 }
@@ -234,10 +227,12 @@ impl InternalIndex {
             .expect("Error querying hashes");
 
         result_opt.map(|(hash_, blob_)| {
-            let childs_ = hash_.childs.and_then(|b| if b.is_empty() {
-                None
-            } else {
-                Some(decode_childs(&b).unwrap())
+            let childs_ = hash_.childs.and_then(|b| {
+                if b.is_empty() {
+                    None
+                } else {
+                    Some(decode_childs(&b).unwrap())
+                }
             });
             let persistent_ref = decode_chunk_ref(hash_.blob_ref.as_ref(), blob_);
             QueueEntry {
@@ -262,19 +257,19 @@ impl InternalIndex {
             .optional()
             .expect("Error querying hashes");
 
-        result_opt.map(|(hash_, blob_)| {
-            Entry {
-                hash: self::hash::Hash { bytes: hash_.hash },
-                node: From::from(hash_.height as u64),
-                leaf: From::from(hash_.leaf_type as u64),
-                childs: hash_.childs.and_then(|p| if p.is_empty() {
+        result_opt.map(|(hash_, blob_)| Entry {
+            hash: self::hash::Hash { bytes: hash_.hash },
+            node: From::from(hash_.height as u64),
+            leaf: From::from(hash_.leaf_type as u64),
+            childs: hash_.childs.and_then(|p| {
+                if p.is_empty() {
                     None
                 } else {
                     Some(decode_childs(&p).unwrap())
-                }),
-                persistent_ref: decode_chunk_ref(hash_.blob_ref.as_ref(), blob_),
-                ready: hash_.ready,
-            }
+                }
+            }),
+            persistent_ref: decode_chunk_ref(hash_.blob_ref.as_ref(), blob_),
+            ready: hash_.ready,
         })
     }
 
@@ -315,7 +310,8 @@ impl InternalIndex {
             ready: false,
         };
 
-        diesel::insert_into(hashes).values(&new)
+        diesel::insert_into(hashes)
+            .values(&new)
             .execute(&self.conn)
             .expect("Error inserting new hash");
     }
@@ -324,18 +320,14 @@ impl InternalIndex {
         use self::schema::hashes::dsl::*;
 
         match id_opt {
-            None => {
-                diesel::update(hashes)
-                    .set(tag.eq(tag_ as i64))
-                    .execute(&self.conn)
-                    .expect("Error updating hash tags")
-            }
-            Some(id_) => {
-                diesel::update(hashes.find(id_ as i64))
-                    .set(tag.eq(tag_ as i64))
-                    .execute(&self.conn)
-                    .expect("Error updating specific hash tag")
-            }
+            None => diesel::update(hashes)
+                .set(tag.eq(tag_ as i64))
+                .execute(&self.conn)
+                .expect("Error updating hash tags"),
+            Some(id_) => diesel::update(hashes.find(id_ as i64))
+                .set(tag.eq(tag_ as i64))
+                .execute(&self.conn)
+                .expect("Error updating specific hash tag"),
         };
     }
 
@@ -417,27 +409,25 @@ impl InternalIndex {
             .optional()
             .expect("Error querying GC metadata");
         match result_opt {
-            None => {
-                GcData {
-                    num: 0,
-                    bytes: vec![],
-                }
-            }
-            Some(row) => {
-                GcData {
-                    num: row.gc_int,
-                    bytes: row.gc_vec,
-                }
-            }
+            None => GcData {
+                num: 0,
+                bytes: vec![],
+            },
+            Some(row) => GcData {
+                num: row.gc_int,
+                bytes: row.gc_vec,
+            },
         }
     }
 
     pub fn hash_set_gc_data(&mut self, hash_id_: u64, family_id_: u64, data: GcData) {
         use self::schema::gc_metadata::dsl::*;
 
-        let count = diesel::update(gc_metadata.filter(hash_id.eq(hash_id_ as i64)).filter(
-            family_id.eq(family_id_ as i64),
-        )).set((gc_int.eq(data.num), gc_vec.eq(&data.bytes)))
+        let count = diesel::update(
+            gc_metadata
+                .filter(hash_id.eq(hash_id_ as i64))
+                .filter(family_id.eq(family_id_ as i64)),
+        ).set((gc_int.eq(data.num), gc_vec.eq(&data.bytes)))
             .execute(&self.conn)
             .expect("Error updating GC metadata");
         assert!(count <= 1);
@@ -450,7 +440,8 @@ impl InternalIndex {
                 gc_vec: &data.bytes,
             };
 
-            diesel::insert_into(gc_metadata).values(&new)
+            diesel::insert_into(gc_metadata)
+                .values(&new)
                 .execute(&self.conn)
                 .expect("Error inserting GC metadata");
         }
@@ -497,9 +488,11 @@ impl InternalIndex {
     pub fn hash_delete_gc_data(&mut self, hash_id_: u64, family_id_: u64) {
         use self::schema::gc_metadata::dsl::*;
 
-        diesel::delete(gc_metadata.filter(hash_id.eq(hash_id_ as i64)).filter(
-            family_id.eq(family_id_ as i64),
-        )).execute(&self.conn)
+        diesel::delete(
+            gc_metadata
+                .filter(hash_id.eq(hash_id_ as i64))
+                .filter(family_id.eq(family_id_ as i64)),
+        ).execute(&self.conn)
             .expect("Error deleting GC metadata");
     }
 
@@ -512,15 +505,13 @@ impl InternalIndex {
             .load::<(self::schema::Hash, Option<self::schema::Blob>)>(&self.conn)
             .expect("Error listing hashes")
             .into_iter()
-            .map(|(hash_, blob_)| {
-                Entry {
-                    hash: self::hash::Hash { bytes: hash_.hash },
-                    node: From::from(hash_.height as u64),
-                    leaf: From::from(hash_.leaf_type as u64),
-                    childs: hash_.childs.as_ref().map(|p| decode_childs(p).unwrap()),
-                    persistent_ref: decode_chunk_ref(hash_.blob_ref.as_ref(), blob_),
-                    ready: hash_.ready,
-                }
+            .map(|(hash_, blob_)| Entry {
+                hash: self::hash::Hash { bytes: hash_.hash },
+                node: From::from(hash_.height as u64),
+                leaf: From::from(hash_.leaf_type as u64),
+                childs: hash_.childs.as_ref().map(|p| decode_childs(p).unwrap()),
+                persistent_ref: decode_chunk_ref(hash_.blob_ref.as_ref(), blob_),
+                ready: hash_.ready,
             })
             .collect()
     }
@@ -583,7 +574,8 @@ impl InternalIndex {
             name: &blob.name,
             tag: tags::Tag::InProgress as i32,
         };
-        diesel::insert_into(blobs).values(&new)
+        diesel::insert_into(blobs)
+            .values(&new)
             .execute(&self.conn)
             .expect("Error inserting blob");
 
@@ -613,31 +605,23 @@ impl InternalIndex {
     pub fn blob_set_tag(&self, tag_: tags::Tag, target: Option<&blob::BlobDesc>) {
         use self::schema::blobs::dsl::*;
         match target {
-            None => {
-                diesel::update(blobs)
-                    .set(tag.eq(tag_ as i32))
-                    .execute(&self.conn)
-                    .expect("Error updating blob tags")
-            }
-            Some(t) if t.id > 0 => {
-                diesel::update(blobs.find(t.id))
-                    .set(tag.eq(tag_ as i32))
-                    .execute(&self.conn)
-                    .expect("Error updating blob tags")
-            }
-            Some(t) if !t.name.is_empty() => {
-                diesel::update(blobs.filter(name.eq(&t.name)))
-                    .set(tag.eq(tag_ as i32))
-                    .execute(&self.conn)
-                    .expect("Error updating blob tags")
-            }
-            Some(t) => {
-                unreachable!(
-                    "blob with neither id nor name: id={}, name={}",
-                    t.id,
-                    t.name.len()
-                )
-            }
+            None => diesel::update(blobs)
+                .set(tag.eq(tag_ as i32))
+                .execute(&self.conn)
+                .expect("Error updating blob tags"),
+            Some(t) if t.id > 0 => diesel::update(blobs.find(t.id))
+                .set(tag.eq(tag_ as i32))
+                .execute(&self.conn)
+                .expect("Error updating blob tags"),
+            Some(t) if !t.name.is_empty() => diesel::update(blobs.filter(name.eq(&t.name)))
+                .set(tag.eq(tag_ as i32))
+                .execute(&self.conn)
+                .expect("Error updating blob tags"),
+            Some(t) => unreachable!(
+                "blob with neither id nor name: id={}, name={}",
+                t.id,
+                t.name.len()
+            ),
         };
     }
 
@@ -656,18 +640,17 @@ impl InternalIndex {
             .load::<schema::Blob>(&self.conn)
             .expect("Error listing blobs")
             .into_iter()
-            .map(|blob_| {
-                blob::BlobDesc {
-                    id: blob_.id,
-                    name: blob_.name,
-                }
+            .map(|blob_| blob::BlobDesc {
+                id: blob_.id,
+                name: blob_.name,
             })
             .collect()
     }
 
     pub fn last_insert_rowid(&self) -> i64 {
-        let rows: Vec<self::schema::RowId> = diesel::sql_query("SELECT last_insert_rowid() AS row_id")
-            .load(&self.conn)
+        let rows: Vec<self::schema::RowId> = diesel::sql_query(
+            "SELECT last_insert_rowid() AS row_id",
+        ).load(&self.conn)
             .unwrap();
 
         assert_eq!(1, rows.len());
@@ -709,7 +692,8 @@ impl InternalIndex {
 
                 let new = self::schema::NewFamily { name: name_ };
 
-                diesel::insert_into(family).values(&new)
+                diesel::insert_into(family)
+                    .values(&new)
                     .execute(&self.conn)
                     .expect("Error inserting family");
                 self.last_insert_rowid()
@@ -719,7 +703,7 @@ impl InternalIndex {
 
     pub fn snapshot_latest_id(&mut self, family_id_: i64) -> Option<i64> {
         use self::schema::snapshots::dsl::*;
-        use diesel::dsl::max; 
+        use diesel::dsl::max;
         snapshots
             .filter(family_id.eq(family_id_))
             .select(max(snapshot_id))
@@ -763,10 +747,11 @@ impl InternalIndex {
                     family_id: snap.family_id as u64,
                     snapshot_id: snap.snapshot_id as u64,
                 },
-                ::hash::Hash { bytes: snap.hash.unwrap().to_vec() },
-                snap.hash_ref.and_then(|r| {
-                    ::hash::tree::HashRef::from_bytes(&mut &r[..]).ok()
-                }),
+                ::hash::Hash {
+                    bytes: snap.hash.unwrap().to_vec(),
+                },
+                snap.hash_ref
+                    .and_then(|r| ::hash::tree::HashRef::from_bytes(&mut &r[..]).ok()),
             )
         })
     }
@@ -787,7 +772,8 @@ impl InternalIndex {
             hash_ref: None,
         };
 
-        diesel::insert_into(snapshots).values(&new)
+        diesel::insert_into(snapshots)
+            .values(&new)
             .execute(&self.conn)
             .expect("Error inserting snapshot");
 
@@ -851,10 +837,11 @@ impl InternalIndex {
                         family_id: snap.family_id as u64,
                         snapshot_id: snap.snapshot_id as u64,
                     },
-                    ::hash::Hash { bytes: snap.hash.expect("Snapshot without top hash") },
-                    snap.hash_ref.and_then(|r| {
-                        ::hash::tree::HashRef::from_bytes(&mut &r[..]).ok()
-                    }),
+                    ::hash::Hash {
+                        bytes: snap.hash.expect("Snapshot without top hash"),
+                    },
+                    snap.hash_ref
+                        .and_then(|r| ::hash::tree::HashRef::from_bytes(&mut &r[..]).ok()),
                 )
             })
         })
@@ -865,29 +852,25 @@ impl InternalIndex {
         use self::schema::snapshots::dsl::*;
         use self::schema::family::dsl::family;
         let rows = match skip_tag {
-            None => {
-                snapshots
-                    .inner_join(family)
-                    .load::<(self::schema::Snapshot, self::schema::Family)>(&self.conn)
-            }
-            Some(skip) => {
-                snapshots
-                    .inner_join(family)
-                    .filter(tag.ne(skip as i32))
-                    .load::<(self::schema::Snapshot, self::schema::Family)>(&self.conn)
-            }
+            None => snapshots
+                .inner_join(family)
+                .load::<(self::schema::Snapshot, self::schema::Family)>(&self.conn),
+            Some(skip) => snapshots
+                .inner_join(family)
+                .filter(tag.ne(skip as i32))
+                .load::<(self::schema::Snapshot, self::schema::Family)>(&self.conn),
         }.unwrap();
 
         rows.into_iter()
             .map(|(snap, fam)| {
-                let status = tags::tag_from_num(snap.tag as i64).map_or(
-                    SnapshotWorkStatus::CommitComplete,
-                    tag_to_work_status,
-                );
-                let hash_ = snap.hash.and_then(|bytes| if bytes.is_empty() {
-                    None
-                } else {
-                    Some(::hash::Hash { bytes: bytes })
+                let status = tags::tag_from_num(snap.tag as i64)
+                    .map_or(SnapshotWorkStatus::CommitComplete, tag_to_work_status);
+                let hash_ = snap.hash.and_then(|bytes| {
+                    if bytes.is_empty() {
+                        None
+                    } else {
+                        Some(::hash::Hash { bytes: bytes })
+                    }
                 });
 
                 SnapshotStatus {
@@ -941,7 +924,8 @@ impl InternalIndex {
                 tag: work_opt_.map_or(tags::Tag::Done, work_status_to_tag) as i32,
             };
 
-            diesel::insert_into(snapshots).values(&new)
+            diesel::insert_into(snapshots)
+                .values(&new)
                 .execute(&self.conn)
                 .expect("Error inserting new snapshot");
         }

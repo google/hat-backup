@@ -12,8 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-
-use blob::{Blob, ChunkRef, NodeType, LeafType};
+use blob::{Blob, ChunkRef, LeafType, NodeType};
 use crypto;
 use hash::Hash;
 use hash::tree::HashRef;
@@ -22,10 +21,8 @@ use std::sync::Arc;
 
 use test::Bencher;
 
-
 const BLOBSIZE: usize = 5 * 1024 * 1024;
 const CHUNKSIZE: usize = 128 * 1024;
-
 
 fn dummy_hashref(keys: &crypto::keys::Keeper) -> HashRef {
     let node = NodeType::Leaf;
@@ -45,7 +42,6 @@ fn dummy_hashref(keys: &crypto::keys::Keeper) -> HashRef {
         info: None,
     }
 }
-
 
 #[bench]
 fn insert_128_kb_chunks(bench: &mut Bencher) {

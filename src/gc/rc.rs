@@ -12,17 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-
 use db::{GcData, SnapshotInfo};
 use gc;
 use std::sync::mpsc;
 use tags;
 
-
 // This GC does not store per-family data.
 // Instead this constant family ID is always used.
 const DATA_FAMILY: u64 = 0;
-
 
 pub struct GcRc<B> {
     backend: B,
@@ -54,16 +51,13 @@ impl<B: gc::GcBackend> gc::Gc<B> for GcRc<B> {
         self.backend.set_tag(ref_final, tags::Tag::Reserved)?;
 
         for r in self.backend.list_ids_by_tag(tags::Tag::Reserved)? {
-            self.backend.update_data(
-                r,
-                DATA_FAMILY,
-                move |GcData { num, bytes }| {
+            self.backend
+                .update_data(r, DATA_FAMILY, move |GcData { num, bytes }| {
                     Some(GcData {
                         num: num + 1,
                         bytes: bytes,
                     })
-                },
-            )?;
+                })?;
         }
 
         self.backend.set_tag(ref_final, tags::Tag::InProgress)?;
@@ -102,22 +96,18 @@ impl<B: gc::GcBackend> gc::Gc<B> for GcRc<B> {
         self.backend.manual_commit()?;
 
         for r in self.backend.list_ids_by_tag(tags::Tag::Reserved)? {
-            self.backend.update_data(
-                r,
-                DATA_FAMILY,
-                move |GcData { num, bytes }| {
+            self.backend
+                .update_data(r, DATA_FAMILY, move |GcData { num, bytes }| {
                     Some(GcData {
                         num: num - 1,
                         bytes: bytes,
                     })
-                },
-            )?;
+                })?;
         }
         self.backend.set_tag(ref_final, tags::Tag::ReadyDelete)?;
 
         Ok(())
     }
-
 
     fn list_unused_ids(&mut self, refs: mpsc::Sender<gc::Id>) -> Result<(), Self::Err> {
         self.backend.set_all_tags(tags::Tag::Done)?;
@@ -141,8 +131,7 @@ impl<B: gc::GcBackend> gc::Gc<B> for GcRc<B> {
 
     fn status(&mut self, final_ref: gc::Id) -> Result<Option<gc::Status>, Self::Err> {
         Ok(match self.backend.get_tag(final_ref)? {
-            Some(tags::Tag::Complete) |
-            Some(tags::Tag::ReadyDelete) => Some(gc::Status::Complete),
+            Some(tags::Tag::Complete) | Some(tags::Tag::ReadyDelete) => Some(gc::Status::Complete),
             Some(tags::Tag::InProgress) => Some(gc::Status::InProgress),
             _ => None,
         })

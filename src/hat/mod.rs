@@ -29,7 +29,7 @@ use std::cmp;
 use std::fs;
 use std::path::PathBuf;
 use std::str;
-use std::sync::{Arc, mpsc};
+use std::sync::{mpsc, Arc};
 use tags;
 use util::Process;
 use void::Void;
@@ -44,8 +44,6 @@ use self::family::Family;
 mod tests;
 #[cfg(all(test, feature = "benchmarks"))]
 mod benchmarks;
-
-
 
 pub struct GcBackend {
     hash_index: Arc<hash::HashIndex>,
@@ -115,7 +113,6 @@ impl gc::GcBackend for GcBackend {
         Ok(())
     }
 }
-
 
 pub struct Hat<B: StoreBackend, G: gc::Gc<GcBackend>> {
     keys: Arc<crypto::keys::Keeper>,
@@ -203,7 +200,6 @@ fn list_snapshot<'a, B: StoreBackend>(
     }
 }
 
-
 impl<B: StoreBackend> HatRc<B> {
     pub fn open_repository(
         repository_root: PathBuf,
@@ -226,7 +222,9 @@ impl<B: StoreBackend> HatRc<B> {
             max_blob_size,
         ));
 
-        let gc_backend = GcBackend { hash_index: hi_p.clone() };
+        let gc_backend = GcBackend {
+            hash_index: hi_p.clone(),
+        };
         let gc = gc::Gc::new(gc_backend);
 
         let mut hat = Hat {
@@ -265,7 +263,9 @@ impl<B: StoreBackend> HatRc<B> {
             max_blob_size,
         ));
 
-        let gc_backend = GcBackend { hash_index: hi_p.clone() };
+        let gc_backend = GcBackend {
+            hash_index: hi_p.clone(),
+        };
         let gc = gc::Gc::new(gc_backend);
 
         let mut hat = Hat {
@@ -393,18 +393,15 @@ impl<B: StoreBackend> HatRc<B> {
         tree.append(&listing[..])?;
 
         let top_ref = tree.hash(None)?;
-        let top_id = self.hash_index.get_id(&top_ref.hash).expect(
-            "Top hash missing",
-        );
+        let top_id = self.hash_index
+            .get_id(&top_ref.hash)
+            .expect("Top hash missing");
 
         // Create synthetic snapshot so GC can track the needed blobs and keep them alive.
         self.hash_index.set_tag(top_id, tags::Tag::Reserved);
         let snap_info = self.snapshot_index.reserve(synthetic_roots_family());
-        self.snapshot_index.update(
-            &snap_info,
-            &top_ref.hash,
-            &top_ref,
-        );
+        self.snapshot_index
+            .update(&snap_info, &top_ref.hash, &top_ref);
         self.meta_flush();
 
         self.gc.register_final(&snap_info, top_id)?;
@@ -447,11 +444,13 @@ impl<B: StoreBackend> HatRc<B> {
 
     pub fn recover(&mut self) -> Result<(), HatError> {
         self.blob_store.recover()?;
-        let root_href = self.recover_root()?.expect(
-            "Failed to find a commit-ed root.",
-        );
+        let root_href = self.recover_root()?
+            .expect("Failed to find a commit-ed root.");
 
-        info!("Recovering using root: {}", hex::encode(&root_href.hash.bytes));
+        info!(
+            "Recovering using root: {}",
+            hex::encode(&root_href.hash.bytes)
+        );
         info!(
             ".. from blob: {}",
             hex::encode(&root_href.persistent_ref.blob_name)
@@ -460,9 +459,7 @@ impl<B: StoreBackend> HatRc<B> {
         use chrono::TimeZone;
         let mut max_created = chrono::Utc.timestamp(0, 0);
 
-        for msg in hash::tree::LeafIterator::new(self.hash_backend(), root_href.clone())?
-            .unwrap()
-        {
+        for msg in hash::tree::LeafIterator::new(self.hash_backend(), root_href.clone())?.unwrap() {
             let message_reader = capnp::serialize_packed::read_message(
                 &mut &msg[..],
                 capnp::message::ReaderOptions::new(),
@@ -493,7 +490,9 @@ impl<B: StoreBackend> HatRc<B> {
         // Register the newly found root. This is needed because root cannot contain itself.
         let latest = self.snapshot_index.latest(&synthetic_roots_family());
         let next_id = match latest {
-            Some((_, _, Some(ref href))) if href.hash == root_href.hash => return Ok(()),  // already have it.
+            Some((_, _, Some(ref href))) if href.hash == root_href.hash => {
+                return Ok(()); // already have it.
+            }
             Some((info, _, _)) => info.snapshot_id + 1,
             None => 1,
         };
@@ -523,10 +522,12 @@ impl<B: StoreBackend> HatRc<B> {
             node: family::recover::Node,
         ) {
             let mut pref = node.href.persistent_ref.clone();
-            pref.blob_id = Some(blobs.find(&pref.blob_name).map(|b| b.id).expect(&format!(
-                "unknown blob: {:?}",
-                pref.blob_name
-            )));
+            pref.blob_id = Some(
+                blobs
+                    .find(&pref.blob_name)
+                    .map(|b| b.id)
+                    .expect(&format!("unknown blob: {:?}", pref.blob_name)),
+            );
 
             fn entry(href: hash::tree::HashRef, childs: Option<Vec<u64>>) -> hash::Entry {
                 hash::Entry {
@@ -540,16 +541,14 @@ impl<B: StoreBackend> HatRc<B> {
 
             // Convert child hashes to child IDs.
             let child_ids = match node.childs {
-                Some(ref hs) => {
-                    Some(
-                        hs.iter()
-                            .map(|h| match hashes.reserve(&entry(h.clone(), None)) {
-                                hash::ReserveResult::HashKnown(id) |
-                                hash::ReserveResult::ReserveOk(id) => id,
-                            })
-                            .collect(),
-                    )
-                }
+                Some(ref hs) => Some(
+                    hs.iter()
+                        .map(|h| match hashes.reserve(&entry(h.clone(), None)) {
+                            hash::ReserveResult::HashKnown(id)
+                            | hash::ReserveResult::ReserveOk(id) => id,
+                        })
+                        .collect(),
+                ),
                 None => None,
             };
 
@@ -590,8 +589,7 @@ impl<B: StoreBackend> HatRc<B> {
                 recover_entry(&self.hash_index, &self.blob_store, node);
             }
             walk.resume(&mut file_v, &mut dir_v)?
-        }
-        {}
+        } {}
 
         // Recover hashes for tree-tops. These are also registered with the GC.
         self.hash_index.set_all_tags(tags::Tag::Done);
@@ -603,9 +601,9 @@ impl<B: StoreBackend> HatRc<B> {
         }
         self.flush_blob_store();
 
-        let final_id = self.hash_index.get_id(&final_hash.hash).expect(
-            "final hash has no id",
-        );
+        let final_id = self.hash_index
+            .get_id(&final_hash.hash)
+            .expect("final hash has no id");
         self.gc.register_final(&info, final_id)?;
         self.commit_finalize(info, &final_hash.hash)?;
         Ok(())
@@ -616,8 +614,8 @@ impl<B: StoreBackend> HatRc<B> {
 
         for snapshot in need_work {
             match snapshot.status {
-                db::SnapshotWorkStatus::CommitInProgress |
-                db::SnapshotWorkStatus::RecoverInProgress => {
+                db::SnapshotWorkStatus::CommitInProgress
+                | db::SnapshotWorkStatus::RecoverInProgress => {
                     let done_hash_opt = match snapshot.hash {
                         None => None,
                         Some(ref h) => {
@@ -627,9 +625,10 @@ impl<B: StoreBackend> HatRc<B> {
                                 Some(res) => res?,
                             };
                             match status_opt {
-                                None => None,  // We did not fully commit.
-                                Some(gc::Status::InProgress) |
-                                Some(gc::Status::Complete) => Some(h),
+                                None => None, // We did not fully commit.
+                                Some(gc::Status::InProgress) | Some(gc::Status::Complete) => {
+                                    Some(h)
+                                }
                             }
                         }
                     };
@@ -639,24 +638,22 @@ impl<B: StoreBackend> HatRc<B> {
                         }
                         (None, db::SnapshotWorkStatus::CommitInProgress) => {
                             println!("Resuming commit of: {}", snapshot.family_name);
-                            self.commit_by_name(
-                                snapshot.family_name,
-                                Some(snapshot.info),
-                            )?
+                            self.commit_by_name(snapshot.family_name, Some(snapshot.info))?
                         }
                         (None, db::SnapshotWorkStatus::RecoverInProgress) => {
                             println!("Resuming recovery of: {}", snapshot.family_name);
-                            let hash_ref_bytes = snapshot.hash_ref.ok_or(
-                                "Recovered hash tree has no root hash",
-                            )?;
+                            let hash_ref_bytes = snapshot
+                                .hash_ref
+                                .ok_or("Recovered hash tree has no root hash")?;
                             let hash_ref =
                                 hash::tree::HashRef::from_bytes(&mut &hash_ref_bytes[..])?;
                             self.recover_snapshot(snapshot.info, &hash_ref)?
                         }
                         (hash, status) => {
-                            return Err(From::from(
-                                format!("unexpected state: ({:?}, {:?})", hash, status),
-                            ))
+                            return Err(From::from(format!(
+                                "unexpected state: ({:?}, {:?})",
+                                hash, status
+                            )))
                         }
                     }
                 }
@@ -667,7 +664,7 @@ impl<B: StoreBackend> HatRc<B> {
                             // This should not happen.
                             return Err(From::from(format!(
                                 "Snapshot {:?} is fully registered \
-                                                           in GC, but has no hash",
+                                 in GC, but has no hash",
                                 snapshot
                             )));
                         }
@@ -675,42 +672,34 @@ impl<B: StoreBackend> HatRc<B> {
                 }
                 db::SnapshotWorkStatus::DeleteInProgress => {
                     let hash = snapshot.hash.expect("Snapshot has no hash");
-                    let hash_id = self.hash_index.get_id(&hash).expect(
-                        "Snapshot hash not recognized",
-                    );
+                    let hash_id = self.hash_index
+                        .get_id(&hash)
+                        .expect("Snapshot hash not recognized");
                     let status = self.gc.status(hash_id)?;
                     match status {
-                        None |
-                        Some(gc::Status::InProgress) => {
+                        None | Some(gc::Status::InProgress) => {
                             println!(
                                 "Resuming delete of: {} #{:?}",
-                                snapshot.family_name,
-                                snapshot.info.snapshot_id
+                                snapshot.family_name, snapshot.info.snapshot_id
                             );
                             self.deregister_by_name(
                                 snapshot.family_name,
                                 snapshot.info.snapshot_id,
                             )?
                         }
-                        Some(gc::Status::Complete) => {
-                            self.deregister_finalize_by_name(
-                                snapshot.family_name,
-                                snapshot.info,
-                                hash_id,
-                            )?
-                        }
+                        Some(gc::Status::Complete) => self.deregister_finalize_by_name(
+                            snapshot.family_name,
+                            snapshot.info,
+                            hash_id,
+                        )?,
                     }
                 }
                 db::SnapshotWorkStatus::DeleteComplete => {
                     let hash = snapshot.hash.expect("Snapshot has no hash");
-                    let hash_id = self.hash_index.get_id(&hash).expect(
-                        "Snapshot hash not recognized",
-                    );
-                    self.deregister_finalize_by_name(
-                        snapshot.family_name,
-                        snapshot.info,
-                        hash_id,
-                    )?
+                    let hash_id = self.hash_index
+                        .get_id(&hash)
+                        .expect("Snapshot hash not recognized");
+                    self.deregister_finalize_by_name(snapshot.family_name, snapshot.info, hash_id)?
                 }
             }
         }
@@ -743,7 +732,7 @@ impl<B: StoreBackend> HatRc<B> {
         //  Register all but the last hashes.
         //  (the last hash is a special-case, as the GC use it to save meta-data for resuming)
         let snap_info = match resume_info {
-            Some(info) => info,  // Resume already started commit.
+            Some(info) => info, // Resume already started commit.
             None => {
                 // Create new commit.
                 self.snapshot_index.reserve(family.name.clone())
@@ -755,10 +744,9 @@ impl<B: StoreBackend> HatRc<B> {
         let top_ref = {
             let local_hash_index = self.hash_index.clone();
             family.commit(&|hash| {
-                let id = local_hash_index.get_id(hash).expect(&format!(
-                    "Top hash: {:?}",
-                    hash.bytes
-                ));
+                let id = local_hash_index
+                    .get_id(hash)
+                    .expect(&format!("Top hash: {:?}", hash.bytes));
                 local_hash_index.set_tag(id, tags::Tag::Reserved);
             })?
         };
@@ -766,20 +754,17 @@ impl<B: StoreBackend> HatRc<B> {
         // Tag 2:
         // We update the snapshot entry with the tree hash, which we then register.
         // When the GC has seen the final hash, we flush everything so far.
-        self.snapshot_index.update(
-            &snap_info,
-            &top_ref.hash,
-            &top_ref,
-        );
+        self.snapshot_index
+            .update(&snap_info, &top_ref.hash, &top_ref);
         self.meta_flush();
 
         // Register the final hash.
         // At this point, the GC should still be able to either resume or rollback safely.
         // After a successful flush, all GC work is done.
         // The GC must be able to tell if it has completed or not.
-        let hash_id = self.hash_index.get_id(&top_ref.hash).expect(
-            "Hash does not exist",
-        );
+        let hash_id = self.hash_index
+            .get_id(&top_ref.hash)
+            .expect("Hash does not exist");
         self.gc.register_final(&snap_info, hash_id)?;
         self.meta_flush();
 
@@ -837,18 +822,14 @@ impl<B: StoreBackend> HatRc<B> {
         // Extract latest snapshot info:
         let (_info, _dir_hash, dir_ref) = match self.snapshot_index.latest(&family_name) {
             Some((i, h, Some(r))) => (i, h, r),
-            _ => {
-                panic!(
-                    "Tried to checkout family '{}' before first completed commit",
-                    family_name
-                )
-            }
+            _ => panic!(
+                "Tried to checkout family '{}' before first completed commit",
+                family_name
+            ),
         };
 
-        let family = self.open_family(family_name.clone()).expect(&format!(
-            "Could not open family '{}'",
-            family_name
-        ));
+        let family = self.open_family(family_name.clone())
+            .expect(&format!("Could not open family '{}'", family_name));
 
         let mut output_dir = output_dir;
         self.checkout_dir_ref(&family, &mut output_dir, dir_ref)
@@ -911,26 +892,25 @@ impl<B: StoreBackend> HatRc<B> {
     }
 
     pub fn deregister(&mut self, family: &Family<B>, snapshot_id: u64) -> Result<(), HatError> {
-        let (info, top_hash, top_ref) =
-            match self.snapshot_index.lookup(&family.name, snapshot_id) {
-                Some((i, h, Some(r))) => (i, h, r),
-                _ => {
-                    return Err(From::from(format!(
-                        "No complete snapshot found for family {} with \
-                                               id {:?}",
-                        family.name,
-                        snapshot_id
-                    )));
-                }
-            };
+        let (info, top_hash, top_ref) = match self.snapshot_index.lookup(&family.name, snapshot_id)
+        {
+            Some((i, h, Some(r))) => (i, h, r),
+            _ => {
+                return Err(From::from(format!(
+                    "No complete snapshot found for family {} with \
+                     id {:?}",
+                    family.name, snapshot_id
+                )));
+            }
+        };
 
         // Make the snapshot to enable resuming.
         self.snapshot_index.will_delete(&info);
         self.flush_snapshot_index();
 
-        let final_ref = self.hash_index.get_id(&top_hash).expect(
-            "Snapshot hash does not exist",
-        );
+        let final_ref = self.hash_index
+            .get_id(&top_hash)
+            .expect("Snapshot hash does not exist");
 
         {
             let hash_backend = self.hash_backend();

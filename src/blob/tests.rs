@@ -13,7 +13,7 @@
 // limitations under the License
 
 use backend::{MemoryBackend, StoreBackend};
-use blob::{Blob, BlobReader, BlobError, BlobIndex, BlobStore, ChunkRef, NodeType, LeafType};
+use blob::{Blob, BlobError, BlobIndex, BlobReader, BlobStore, ChunkRef, LeafType, NodeType};
 use crypto;
 use db;
 use hash;
@@ -250,7 +250,6 @@ fn blob_identity() {
     }
     quickcheck::quickcheck(prop as fn(Vec<Vec<u8>>) -> bool);
 }
-
 
 #[test]
 fn random_input_fails() {

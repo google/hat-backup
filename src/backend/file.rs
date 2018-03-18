@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-
 use backend::StoreBackend;
 use crypto::CipherText;
 use hex::{self, FromHex};
@@ -136,9 +135,9 @@ impl StoreBackend for FileBackend {
         let mut out = vec![];
         for p in fs::read_dir(&self.root).map_err(es)? {
             if let Some(name) = p.map_err(es)?.path().file_name() {
-                name.to_str().map(|s| Vec::from_hex(s).unwrap()).map(|b| {
-                    out.push(b.into_boxed_slice())
-                });
+                name.to_str()
+                    .map(|s| Vec::from_hex(s).unwrap())
+                    .map(|b| out.push(b.into_boxed_slice()));
             }
         }
         Ok(out)
