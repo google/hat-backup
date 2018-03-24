@@ -12,18 +12,18 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use serde_cbor;
+use models;
 use crypto;
 use chrono;
 use backend::StoreBackend;
 use blob;
-use capnp;
 use db;
 use errors::HatError;
 use filetime;
 use gc::{self, Gc, GcRc};
 use hash;
 use key;
-use root_capnp;
 use snapshot;
 use std::cmp;
 use std::fs;
@@ -362,31 +362,28 @@ impl<B: StoreBackend> HatRc<B> {
     pub fn meta_commit(&mut self) -> Result<(), HatError> {
         let all_snapshots = self.snapshot_index.list_all();
 
-        let mut message = capnp::message::Builder::new_default();
+        let mut snapshots = models::Snapshots { snapshots: vec![] };
+
         let mut all_root_ids = vec![];
 
-        {
-            let root = message.init_root::<root_capnp::snapshot_list::Builder>();
-            let mut snapshots = root.init_snapshots(all_snapshots.len() as u32);
+        for snapshot in all_snapshots {
+            let model = models::Snapshot {
+                id: snapshot.info.snapshot_id,
+                family_name: snapshot.family_name,
+                msg: snapshot.msg.unwrap_or("".into()),
+                hash_ref: hash::tree::HashRef::from_bytes(&snapshot.hash_ref.unwrap()[..])?
+                    .to_model(),
+                created_ts_utc: chrono::Utc::now().timestamp(),
+            };
 
-            for (i, snapshot) in all_snapshots.into_iter().enumerate() {
-                let mut s = snapshots.borrow().get(i as u32);
-                s.set_id(snapshot.info.snapshot_id);
-                s.set_family_name(&snapshot.family_name);
-                s.set_msg(&snapshot.msg.unwrap_or("".to_owned()));
-                s.set_utc_timestamp(snapshot.created.timestamp());
-                let hash_ref = snapshot.hash_ref.unwrap();
-                hash::tree::HashRef::from_bytes(&mut hash_ref.as_ref())?
-                    .populate_msg(s.init_hash_ref());
-
-                if snapshot.family_name == synthetic_roots_family() {
-                    all_root_ids.push(snapshot.info.snapshot_id);
-                }
+            if model.family_name == synthetic_roots_family() {
+                all_root_ids.push(snapshot.info.snapshot_id);
             }
+
+            snapshots.snapshots.push(model);
         }
 
-        let mut listing = Vec::new();
-        capnp::serialize_packed::write_message(&mut listing, &message).unwrap();
+        let listing = serde_cbor::to_vec(&snapshots).unwrap();
 
         // FIXME(jos): Split into N-entries per append().
         let mut tree = self.hash_tree_writer(blob::LeafType::SnapshotList);
@@ -460,24 +457,18 @@ impl<B: StoreBackend> HatRc<B> {
         let mut max_created = chrono::Utc.timestamp(0, 0);
 
         for msg in hash::tree::LeafIterator::new(self.hash_backend(), root_href.clone())?.unwrap() {
-            let message_reader = capnp::serialize_packed::read_message(
-                &mut &msg[..],
-                capnp::message::ReaderOptions::new(),
-            ).unwrap();
-            let snapshot_list = message_reader
-                .get_root::<root_capnp::snapshot_list::Reader>()
-                .unwrap();
+            let snapshot_list: models::Snapshots = serde_cbor::from_slice(&msg[..])?;
 
-            for s in snapshot_list.get_snapshots().unwrap().iter() {
-                let created = chrono::Utc.timestamp(s.get_utc_timestamp(), 0);
+            for s in snapshot_list.snapshots {
+                let created = chrono::Utc.timestamp(s.created_ts_utc, 0);
                 max_created = cmp::max(max_created, created);
 
-                let hash_ref = hash::tree::HashRef::read_msg(&s.get_hash_ref().unwrap()).unwrap();
+                let hash_ref = From::from(s.hash_ref);
                 self.snapshot_index.recover(
-                    s.get_id(),
-                    s.get_family_name().unwrap(),
+                    s.id,
+                    &s.family_name,
                     created,
-                    s.get_msg().unwrap(),
+                    &s.msg,
                     &hash_ref,
                     Some(db::SnapshotWorkStatus::RecoverInProgress),
                 );

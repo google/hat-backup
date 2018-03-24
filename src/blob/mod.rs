@@ -15,7 +15,6 @@
 //! Combines data chunks into larger blobs to be stored externally.
 
 use backend::StoreBackend;
-use capnp;
 use crypto;
 use errors;
 use hash::Hash;
@@ -27,6 +26,7 @@ use std::thread;
 use tags;
 use util::FnBox;
 use key;
+use serde_cbor;
 
 mod chunk;
 mod blob;
@@ -52,7 +52,7 @@ error_type! {
         CryptoError(errors::CryptoError) {
             cause;
         },
-        DataSerialization(capnp::Error) {
+        Serde(serde_cbor::error::Error) {
             cause;
         }
     }

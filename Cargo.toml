@@ -1,6 +1,5 @@
 [package]
 authors = ["Johan Nielsen <sejr@google.com>"]
-build = "build.rs"
 name = "hat-backup"
 version = "0.0.1-pre"
 
@@ -8,14 +7,13 @@ version = "0.0.1-pre"
 name = "hatbin"
 path = "src/main.rs"
 
-[build-dependencies]
-capnpc = "0.8.8"
-
 [dependencies]
+serde = "1.0.34"
+serde_derive = "1.0.34"
+serde_cbor = "0.8.2"
 argon2rs = "0.2.5"
 arrayref = "0.3.4"
 byteorder = "1.2.1"
-capnp = "0.8.16"
 chrono = "0.4.0"
 clap = "2.31.1"
 diesel_migrations = "1.1.0"

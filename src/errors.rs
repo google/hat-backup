@@ -36,12 +36,12 @@ impl error::Error for RetryError {
 mod hat_error {
 
     use blob;
-    use capnp;
     use key;
     use std::{io, str};
     use std::borrow::Cow;
     use std::sync::mpsc;
     use void;
+    use serde_cbor;
 
     error_type! {
         #[derive(Debug)]
@@ -52,7 +52,7 @@ mod hat_error {
             Keys(key::MsgError) {
                 cause;
             },
-            DataSerialization(capnp::Error) {
+            Serde(serde_cbor::error::Error) {
                 cause;
             },
             IO(io::Error) {

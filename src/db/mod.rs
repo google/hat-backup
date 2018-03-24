@@ -16,7 +16,8 @@
 
 use blob;
 
-use capnp;
+use models;
+use serde_cbor;
 use chrono;
 
 use diesel;
@@ -26,7 +27,6 @@ use diesel::sqlite::SqliteConnection;
 use errors::DieselError;
 
 use hash;
-use root_capnp;
 use std::sync::{Mutex, MutexGuard};
 use tags;
 use time::Duration;
@@ -51,32 +51,15 @@ impl Index {
 }
 
 fn encode_childs(childs: &[u64]) -> Vec<u8> {
-    let mut message = capnp::message::Builder::new_default();
-    {
-        let root = message.init_root::<root_capnp::hash_ids::Builder>();
-        let mut list = root.init_hash_ids(childs.len() as u32);
-        for (i, id) in childs.iter().enumerate() {
-            list.set(i as u32, *id);
-        }
-    }
-    let mut out = Vec::new();
-    capnp::serialize_packed::write_message(&mut out, &message).unwrap();
-    out
+    let model = models::HashIds {
+        ids: childs.to_vec(),
+    };
+    serde_cbor::to_vec(&model).unwrap()
 }
 
-fn decode_childs(bytes: &[u8]) -> Result<Vec<u64>, capnp::Error> {
-    let reader = capnp::serialize_packed::read_message(
-        &mut &bytes[..],
-        capnp::message::ReaderOptions::new(),
-    ).unwrap();
-    let msg = reader.get_root::<root_capnp::hash_ids::Reader>().unwrap();
-
-    let ids = msg.get_hash_ids()?;
-    let mut out = Vec::new();
-    for i in 0..ids.len() {
-        out.push(ids.get(i));
-    }
-    Ok(out)
+fn decode_childs(bytes: &[u8]) -> Result<Vec<u64>, serde_cbor::error::Error> {
+    let model: models::HashIds = serde_cbor::from_slice(bytes)?;
+    Ok(model.ids)
 }
 
 fn decode_chunk_ref(
