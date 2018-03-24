@@ -51,7 +51,7 @@ fn insert_128_kb_chunks(bench: &mut Bencher) {
     let chunk = [0u8; CHUNKSIZE];
     bench.iter(|| {
         if let Err(()) = b.try_append(&chunk[..], &mut href) {
-            b = Blob::new(keys.clone(), BLOBSIZE);
+            b.to_ciphertext();
             b.try_append(&chunk[..], &mut href).unwrap();
         }
     });
