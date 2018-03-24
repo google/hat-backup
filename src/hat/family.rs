@@ -294,6 +294,21 @@ impl<B: StoreBackend> Family<B> {
         is_directory: bool,
         contents: Option<FileIterator>,
     ) -> Result<u64, HatError> {
+        let id = self.snapshot_direct_no_commit(file, is_directory, contents)?;
+        let ks = self.key_store_process.iter().last().unwrap();
+        match ks.send_reply(key::Msg::CommitReservedNodes(None)) {
+            Ok(key::Reply::Ok) => (),
+            _ => return Err(From::from("Unexpected reply from keystore")),
+        }
+        Ok(id)
+    }
+
+    pub fn snapshot_direct_no_commit(
+        &self,
+        file: key::Entry,
+        is_directory: bool,
+        contents: Option<FileIterator>,
+    ) -> Result<u64, HatError> {
         let f = if is_directory {
             None
         } else {
@@ -304,10 +319,6 @@ impl<B: StoreBackend> Family<B> {
             key::Reply::Id(id) => id,
             _ => return Err(From::from("Unexpected reply from key store")),
         };
-        match ks.send_reply(key::Msg::CommitReservedNodes(None)) {
-            Ok(key::Reply::Ok) => (),
-            _ => return Err(From::from("Unexpected reply from keystore")),
-        }
         Ok(id)
     }
 
