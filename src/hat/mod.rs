@@ -372,7 +372,7 @@ impl<B: StoreBackend> HatRc<B> {
                 msg: snapshot.msg.unwrap_or("".into()),
                 hash_ref: hash::tree::HashRef::from_bytes(&snapshot.hash_ref.unwrap()[..])?
                     .to_model(),
-                created_ts_utc: chrono::Utc::now().timestamp(),
+                created_ts_utc: snapshot.created.timestamp(),
             };
 
             if model.family_name == synthetic_roots_family() {
