@@ -102,7 +102,7 @@ fn rng_filesystem(size: usize) -> FileSystem {
                         user_id: None,
                         group_id: None,
 
-                        hat_snapshot_ts: 0,
+                        snapshot_ts_utc: 0,
                     },
                 },
             };
@@ -131,7 +131,7 @@ fn rng_filesystem(size: usize) -> FileSystem {
                 user_id: None,
                 group_id: None,
                 byte_length: None,
-                hat_snapshot_ts: 0,
+                snapshot_ts_utc: 0,
             },
         },
     };

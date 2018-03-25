@@ -66,7 +66,7 @@ pub struct Info {
     pub group_id: Option<u64>,
 
     pub byte_length: Option<u64>,
-    pub hat_snapshot_ts: i64,
+    pub snapshot_ts_utc: i64,
 }
 
 impl Entry {
@@ -103,9 +103,9 @@ impl From<models::FileInfo> for Info {
 
         Info {
             name: info.name,
-            created_ts_secs: none_if_zero(info.created_ts_utc as u64),
-            modified_ts_secs: none_if_zero(info.modified_ts_utc as u64),
-            accessed_ts_secs: none_if_zero(info.accessed_ts_utc as u64),
+            created_ts_secs: none_if_zero(info.created_ts as u64),
+            modified_ts_secs: none_if_zero(info.modified_ts as u64),
+            accessed_ts_secs: none_if_zero(info.accessed_ts as u64),
             permissions: match info.permissions {
                 models::Permissions::None => None,
                 models::Permissions::Mode(mode) => Some(fs::Permissions::from_mode(mode)),
@@ -123,7 +123,7 @@ impl From<models::FileInfo> for Info {
                 models::Owner::None => None,
                 models::Owner::UserGroup(ref ug) => Some(ug.group_id as u64),
             },
-            hat_snapshot_ts: info.snapshot_ts_utc,
+            snapshot_ts_utc: info.snapshot_ts_utc,
         }
     }
 }
@@ -151,7 +151,7 @@ impl Info {
             group_id: meta.map(|m| m.st_gid() as u64),
 
             byte_length: meta.map(|m| m.len()),
-            hat_snapshot_ts: chrono::Utc::now().timestamp(),
+            snapshot_ts_utc: chrono::Utc::now().timestamp(),
         }
     }
 
@@ -165,16 +165,16 @@ impl Info {
         };
         models::FileInfo {
             name: self.name.clone(),
-            created_ts_utc: self.created_ts_secs.unwrap_or(0) as i64,
-            modified_ts_utc: self.modified_ts_secs.unwrap_or(0) as i64,
-            accessed_ts_utc: self.accessed_ts_secs.unwrap_or(0) as i64,
+            created_ts: self.created_ts_secs.unwrap_or(0) as i64,
+            modified_ts: self.modified_ts_secs.unwrap_or(0) as i64,
+            accessed_ts: self.accessed_ts_secs.unwrap_or(0) as i64,
             permissions: match self.permissions {
                 None => models::Permissions::None,
                 Some(ref perm) => models::Permissions::Mode(perm.mode()),
             },
             byte_length: self.byte_length.unwrap_or(0) as i64,
             owner: owner,
-            snapshot_ts_utc: self.hat_snapshot_ts,
+            snapshot_ts_utc: self.snapshot_ts_utc,
         }
     }
 }
@@ -346,7 +346,7 @@ impl InternalKeyIndex {
                     user_id: data.user_id.map(|x| x as u64),
                     group_id: data.group_id.map(|x| x as u64),
                     byte_length: None,
-                    hat_snapshot_ts: 0,
+                    snapshot_ts_utc: 0,
                 },
             }))
         } else {
@@ -403,7 +403,7 @@ impl InternalKeyIndex {
                             user_id: data.user_id.map(|x| x as u64),
                             group_id: data.group_id.map(|x| x as u64),
                             byte_length: None,
-                            hat_snapshot_ts: 0,
+                            snapshot_ts_utc: 0,
                         },
                     },
                     data.hash_ref

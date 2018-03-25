@@ -363,7 +363,6 @@ impl<B: StoreBackend> HatRc<B> {
         let all_snapshots = self.snapshot_index.list_all();
 
         let mut snapshots = models::Snapshots { snapshots: vec![] };
-
         let mut all_root_ids = vec![];
 
         for snapshot in all_snapshots {
