@@ -15,12 +15,10 @@
 use time::Duration;
 use time::SteadyTime;
 
-
 pub struct PeriodicTimer {
     start: SteadyTime,
     interval: Duration,
 }
-
 
 impl PeriodicTimer {
     pub fn new(interval: Duration) -> PeriodicTimer {

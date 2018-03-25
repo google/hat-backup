@@ -21,7 +21,6 @@ use std::sync::Arc;
 
 use super::BlobError;
 
-
 pub struct Blob {
     keys: Arc<crypto::keys::Keeper>,
     access_key: crypto::authed::desc::Key,
@@ -91,12 +90,8 @@ impl Blob {
         );
 
         let footer_overhead = self.footer.len() + self.overhead;
-        let footer = crypto::FixedKey::new(&self.keys).seal(
-            &access_key,
-            PlainTextRef::new(
-                &self.footer[..],
-            ),
-        );
+        let footer = crypto::FixedKey::new(&self.keys)
+            .seal(&access_key, PlainTextRef::new(&self.footer[..]));
         self.footer.truncate(0);
 
         assert!(self.chunks.len() + footer_overhead <= self.max_len);
@@ -143,12 +138,8 @@ impl<'b> BlobReader<'b> {
     }
 
     pub fn refs(&self) -> Result<Vec<HashRef>, BlobError> {
-        let (_rest, footer_vec) = crypto::FixedKey::new(&self.keys).unseal(
-            CipherTextRef::new(
-                &self.footer_ct[..],
-            ),
-            self.blob.as_ref(),
-        )?;
+        let (_rest, footer_vec) = crypto::FixedKey::new(&self.keys)
+            .unseal(CipherTextRef::new(&self.footer_ct[..]), self.blob.as_ref())?;
         let mut footer_pos = footer_vec.as_bytes();
 
         let mut hrefs = Vec::new();
@@ -164,9 +155,6 @@ impl<'b> BlobReader<'b> {
     }
 
     pub fn read_chunk(&self, href: &HashRef) -> Result<Vec<u8>, BlobError> {
-        Ok(
-            crypto::RefKey::unseal(&self.access_key, href, self.blob.as_ref())?
-                .into_vec(),
-        )
+        Ok(crypto::RefKey::unseal(&self.access_key, href, self.blob.as_ref())?.into_vec())
     }
 }

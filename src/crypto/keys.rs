@@ -43,8 +43,8 @@ pub fn random_bytes(size: usize) -> secstr::SecStr {
 }
 
 pub fn keyed_fingerprint(sk: &[u8], msg: &[u8], salt: &[u8], out: &mut [u8]) {
-    use libsodium_sys::{crypto_generichash_blake2b_SALTBYTES,
-                        crypto_generichash_blake2b_PERSONALBYTES};
+    use libsodium_sys::{crypto_generichash_blake2b_PERSONALBYTES,
+                        crypto_generichash_blake2b_SALTBYTES};
     assert_eq!(crypto_generichash_blake2b_SALTBYTES, salt.len());
 
     let outlen = out.len();
@@ -121,10 +121,8 @@ impl Keeper {
         self.fingerprint_key = Some(self.from_nonce("hat:FINGERPRINT-key".as_bytes(), 64));
 
         // Generate key for authenticating blob data.
-        self.blob_authentication_key = Some(self.from_nonce(
-            "hat:BLOB-AUTHENTICATION-key".as_bytes(),
-            64,
-        ));
+        self.blob_authentication_key =
+            Some(self.from_nonce("hat:BLOB-AUTHENTICATION-key".as_bytes(), 64));
 
         // Generate data key.
         // Required for reading blob data without a direct reference.
@@ -150,8 +148,8 @@ impl Keeper {
         let threads = 2;
         let kib = 16 * 1024;
 
-        let argon2 = argon2rs::Argon2::new(passes, threads, kib, argon2rs::Variant::Argon2d)
-            .unwrap();
+        let argon2 =
+            argon2rs::Argon2::new(passes, threads, kib, argon2rs::Variant::Argon2d).unwrap();
 
         let mut out = vec![0; 64];
         argon2.hash(&mut out[..], phrase.as_bytes(), salt.as_bytes(), &[], &[]);
@@ -236,9 +234,9 @@ impl Keeper {
 
     pub fn access_lock(&self, msg: &[u8]) -> Vec<u8> {
         Keeper::asymmetric_lock(
-            self.access_key_pk.as_ref().expect(
-                "need access publick key",
-            ),
+            self.access_key_pk
+                .as_ref()
+                .expect("need access publick key"),
             msg,
         )
     }
@@ -246,9 +244,9 @@ impl Keeper {
     pub fn access_unlock(&self, ciphertext: &[u8]) -> Vec<u8> {
         Keeper::asymmetric_unlock(
             self.access_key_pk.as_ref().expect("need access public key"),
-            self.access_key_sk.as_ref().expect(
-                "need access private key",
-            ),
+            self.access_key_sk
+                .as_ref()
+                .expect("need access private key"),
             ciphertext,
         )
     }
@@ -263,9 +261,9 @@ impl Keeper {
     pub fn naming_unlock(&self, ciphertext: &[u8]) -> Vec<u8> {
         Keeper::asymmetric_unlock(
             self.naming_key_pk.as_ref().expect("need naming public key"),
-            self.naming_key_sk.as_ref().expect(
-                "need naming private key",
-            ),
+            self.naming_key_sk
+                .as_ref()
+                .expect("need naming private key"),
             ciphertext,
         )
     }
@@ -276,9 +274,9 @@ impl Keeper {
     }
 
     pub fn blob_authentication(&self, blob: &[u8], out: &mut [u8]) {
-        let key = self.blob_authentication_key.as_ref().expect(
-            "need blob authentication key",
-        );
+        let key = self.blob_authentication_key
+            .as_ref()
+            .expect("need blob authentication key");
         let salt: &[u8; 16] = b"blob~~~~blob~~~~";
         keyed_fingerprint(key.unsecure(), blob, salt, &mut out[..])
     }

@@ -1,63 +1,55 @@
 [package]
 authors = ["Johan Nielsen <sejr@google.com>"]
-build = "build.rs"
 name = "hat-backup"
 version = "0.0.1-pre"
-
-[profile.release]
-debug = true
-
-[lib]
-name = "hat"
-path = "src/lib.rs"
 
 [[bin]]
 name = "hatbin"
 path = "src/main.rs"
 
-[build-dependencies]
-capnpc = "*"
-
 [dependencies]
-arrayref = "*"
-byteorder = "*"
-capnp = "*"
-clap = "*"
-chrono = "*"
-env_logger = "*"
+serde = "1.0.34"
+serde_derive = "1.0.34"
+serde_cbor = "0.8.2"
+argon2rs = "0.2.5"
+arrayref = "0.3.4"
+byteorder = "1.2.1"
+chrono = "0.4.0"
+clap = "2.31.1"
+diesel_migrations = "1.1.0"
+env_logger = "0.5.5"
 error-type = "0.1.2"
-libsodium-sys = "*"
-log = "*"
-quickcheck = "*"
-rand = "*"
-hex = "*"
-secstr = "*"
-time = "*"
-void = "1"
-scoped-pool = "*"
-filetime = "*"
-
-[dependencies.argon2rs]
-version = "*"
+filetime = "0.1.15"
+hex = "0.3.1"
+libsodium-sys = "0.0.16"
+log = "0.4.1"
+quickcheck = "0.6.2"
+rand = "0.4.2"
+scoped-pool = "1.0.0"
+secstr = "0.3.0"
+time = "0.1.39"
+void = "1.0.2"
 
 [dependencies.diesel]
 default-features = false
-features = ["sqlite", "chrono"]
-version = "^0.14.0"
+features = [
+    "sqlite",
+    "chrono",
+]
+version = "1.1.1"
 
 [dependencies.diesel_codegen]
 default-features = false
 features = ["sqlite"]
-version = "^0.14.0"
+version = "0.16.0"
 
 [features]
+benchmarks = []
 default = []
-
-# Allow for simd intrinsics for performance increase.
-# This is not supported on stable or beta yet.
 simd = ["argon2rs/simd"]
 
-# Running our benchmarks currently requires
-# running on nightly. Use this feature to enable
-# the code for this.
-benchmarks = []
+[lib]
+name = "hat"
+path = "src/lib.rs"
+[profile.release]
+debug = true

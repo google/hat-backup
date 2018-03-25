@@ -14,11 +14,11 @@
 
 //! Local state for keys in the snapshot in progress (the "index").
 
-
 use std::str;
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
 
+use models;
 use chrono;
 use diesel;
 use diesel::prelude::*;
@@ -26,17 +26,15 @@ use diesel::connection::TransactionManager;
 use diesel::sqlite::SqliteConnection;
 use errors::DieselError;
 use hash;
-use capnp;
 use filetime::FileTime;
 
 use std::sync::{Mutex, MutexGuard};
 
 use super::schema;
 use time::Duration;
-use std::path::{Path, PathBuf};
-use util::{InfoWriter, PeriodicTimer};
+use std::path::PathBuf;
+use util::PeriodicTimer;
 use tags::Tag;
-use root_capnp;
 
 #[derive(Clone, Eq, PartialEq, Debug)]
 pub enum Data {
@@ -68,7 +66,7 @@ pub struct Info {
     pub group_id: Option<u64>,
 
     pub byte_length: Option<u64>,
-    pub hat_snapshot_ts: i64,
+    pub snapshot_ts_utc: i64,
 }
 
 impl Entry {
@@ -87,9 +85,46 @@ impl Entry {
     }
 
     pub fn data_looks_unchanged(&self, them: &Entry) -> bool {
-        self.info.modified_ts_secs.is_some() &&
-            ((self.parent_id, &self.info.name, self.info.modified_ts_secs) ==
-                 (them.parent_id, &them.info.name, them.info.modified_ts_secs))
+        self.info.modified_ts_secs.is_some()
+            && ((self.parent_id, &self.info.name, self.info.modified_ts_secs)
+                == (them.parent_id, &them.info.name, them.info.modified_ts_secs))
+    }
+}
+
+impl From<models::FileInfo> for Info {
+    fn from(info: models::FileInfo) -> Info {
+        fn none_if_zero(x: u64) -> Option<u64> {
+            if x == 0 {
+                None
+            } else {
+                Some(x)
+            }
+        }
+
+        Info {
+            name: info.name,
+            created_ts_secs: none_if_zero(info.created_ts as u64),
+            modified_ts_secs: none_if_zero(info.modified_ts as u64),
+            accessed_ts_secs: none_if_zero(info.accessed_ts as u64),
+            permissions: match info.permissions {
+                models::Permissions::None => None,
+                models::Permissions::Mode(mode) => Some(fs::Permissions::from_mode(mode)),
+            },
+            byte_length: if info.byte_length == 0 {
+                None
+            } else {
+                Some(info.byte_length as u64)
+            },
+            user_id: match info.owner {
+                models::Owner::None => None,
+                models::Owner::UserGroup(ref ug) => Some(ug.user_id as u64),
+            },
+            group_id: match info.owner {
+                models::Owner::None => None,
+                models::Owner::UserGroup(ref ug) => Some(ug.group_id as u64),
+            },
+            snapshot_ts_utc: info.snapshot_ts_utc,
+        }
     }
 }
 
@@ -97,17 +132,11 @@ impl Info {
     pub fn new(name: Vec<u8>, meta: Option<&fs::Metadata>) -> Info {
         use std::os::linux::fs::MetadataExt;
 
-        let created = meta.and_then(|m| FileTime::from_creation_time(m)).map(
-            |t| {
-                t.seconds_relative_to_1970()
-            },
-        );
-        let modified = meta.map(|m| {
-            FileTime::from_last_modification_time(m).seconds_relative_to_1970()
-        });
-        let accessed = meta.map(|m| {
-            FileTime::from_last_access_time(m).seconds_relative_to_1970()
-        });
+        let created = meta.and_then(|m| FileTime::from_creation_time(m))
+            .map(|t| t.seconds_relative_to_1970());
+        let modified =
+            meta.map(|m| FileTime::from_last_modification_time(m).seconds_relative_to_1970());
+        let accessed = meta.map(|m| FileTime::from_last_access_time(m).seconds_relative_to_1970());
 
         Info {
             name: name,
@@ -122,70 +151,31 @@ impl Info {
             group_id: meta.map(|m| m.st_gid() as u64),
 
             byte_length: meta.map(|m| m.len()),
-            hat_snapshot_ts: chrono::Utc::now().timestamp(),
+            snapshot_ts_utc: chrono::Utc::now().timestamp(),
         }
     }
 
-    pub fn read(msg: root_capnp::file_info::Reader) -> Result<Info, capnp::Error> {
-        fn none_if_zero(x: u64) -> Option<u64> {
-            if x == 0 { None } else { Some(x) }
-        }
-        let owner = match msg.get_owner().which()? {
-            root_capnp::file_info::owner::None(()) => None,
-            root_capnp::file_info::owner::UserGroup(res) => {
-                let ug = res?;
-                Some((ug.get_user_id(), ug.get_group_id()))
-            }
+    pub fn to_model(&self) -> models::FileInfo {
+        let owner = match (self.user_id, self.group_id) {
+            (Some(user_id), Some(group_id)) => models::Owner::UserGroup(models::UserGroup {
+                user_id: user_id as i64,
+                group_id: group_id as i64,
+            }),
+            _ => models::Owner::None,
         };
-        Ok(Info {
-            name: msg.get_name()?.to_vec(),
-            created_ts_secs: none_if_zero(msg.get_created_timestamp_secs()),
-            modified_ts_secs: none_if_zero(msg.get_modified_timestamp_secs()),
-            accessed_ts_secs: none_if_zero(msg.get_accessed_timestamp_secs()),
-            permissions: match msg.get_permissions().which()? {
-                root_capnp::file_info::permissions::None(()) => None,
-                root_capnp::file_info::permissions::Mode(m) => Some(fs::Permissions::from_mode(m)),
+        models::FileInfo {
+            name: self.name.clone(),
+            created_ts: self.created_ts_secs.unwrap_or(0) as i64,
+            modified_ts: self.modified_ts_secs.unwrap_or(0) as i64,
+            accessed_ts: self.accessed_ts_secs.unwrap_or(0) as i64,
+            permissions: match self.permissions {
+                None => models::Permissions::None,
+                Some(ref perm) => models::Permissions::Mode(perm.mode()),
             },
-
-            user_id: owner.as_ref().map(|&(uid, _)| uid),
-            group_id: owner.as_ref().map(|&(_, gid)| gid),
-
-            byte_length: Some(msg.get_byte_length()),
-
-            hat_snapshot_ts: msg.get_utc_timestamp(),
-        })
-    }
-    pub fn populate_msg(&self, mut msg: root_capnp::file_info::Builder) {
-        msg.borrow().set_name(&self.name);
-
-        msg.borrow().set_created_timestamp_secs(
-            self.created_ts_secs.unwrap_or(0),
-        );
-        msg.borrow().set_modified_timestamp_secs(
-            self.modified_ts_secs.unwrap_or(0),
-        );
-        msg.borrow().set_accessed_timestamp_secs(
-            self.accessed_ts_secs.unwrap_or(0),
-        );
-        msg.borrow().set_byte_length(self.byte_length.unwrap_or(0));
-
-        match (self.user_id, self.group_id) {
-            (Some(uid), Some(gid)) => {
-                let mut ug = msg.borrow().get_owner().init_user_group();
-                ug.set_user_id(uid);
-                ug.set_group_id(gid);
-            }
-            _ => {
-                msg.borrow().get_owner().set_none(());
-            }
+            byte_length: self.byte_length.unwrap_or(0) as i64,
+            owner: owner,
+            snapshot_ts_utc: self.snapshot_ts_utc,
         }
-
-        match self.permissions {
-            Some(ref p) => msg.borrow().get_permissions().set_mode(p.mode()),
-            None => msg.borrow().get_permissions().set_none(()),
-        }
-
-        msg.borrow().set_utc_timestamp(self.hat_snapshot_ts);
     }
 }
 
@@ -196,9 +186,10 @@ pub struct InternalKeyIndex {
     flush_timer: PeriodicTimer,
 }
 
+embed_migrations!();
 
 impl InternalKeyIndex {
-    fn new(migrations_dir: &Path, path: &str) -> Result<InternalKeyIndex, DieselError> {
+    fn new(path: &str) -> Result<InternalKeyIndex, DieselError> {
         let conn = SqliteConnection::establish(path)?;
 
         let ki = InternalKeyIndex {
@@ -208,15 +199,10 @@ impl InternalKeyIndex {
 
         {
             // Enable foreign key support.
-            diesel::expression::sql::<diesel::types::Integer>("PRAGMA foreign_keys = ON;")
-                .execute(&ki.conn)?;
+            diesel::sql_query("PRAGMA foreign_keys = ON;").execute(&ki.conn)?;
         }
 
-        diesel::migrations::run_pending_migrations_in_directory(
-            &ki.conn,
-            &migrations_dir,
-            &mut InfoWriter,
-        )?;
+        embedded_migrations::run(&ki.conn)?;
 
         {
             let tm = ki.conn.transaction_manager();
@@ -235,9 +221,12 @@ impl InternalKeyIndex {
     }
 
     fn last_insert_rowid(&self) -> Result<i64, DieselError> {
-        let id = diesel::select(diesel::expression::sql("last_insert_rowid()"))
-            .first::<i64>(&self.conn)?;
-        Ok(id)
+        let rows: Vec<self::schema::RowId> =
+            diesel::sql_query("SELECT last_insert_rowid() AS row_id").load(&self.conn)?;
+
+        assert_eq!(1, rows.len());
+
+        Ok(rows[0].row_id)
     }
 
     fn maybe_flush(&mut self) -> Result<(), DieselError> {
@@ -272,14 +261,15 @@ impl InternalKeyIndex {
                 name: &entry.info.name[..],
             };
             use super::schema::key_tree::dsl::*;
-            diesel::insert(&new).into(key_tree).execute(&self.conn)?;
+            diesel::insert_into(key_tree)
+                .values(&new)
+                .execute(&self.conn)?;
             entry.node_id = Some(self.last_insert_rowid()? as u64);
         }
 
         {
             let link_path = match &entry.data {
-                &Data::DirPlaceholder |
-                &Data::FilePlaceholder => None,
+                &Data::DirPlaceholder | &Data::FilePlaceholder => None,
                 &Data::Symlink(ref path) => path.to_str(),
                 &Data::FileHash(_) => unreachable!("Unexpected FileHash"),
             };
@@ -303,7 +293,9 @@ impl InternalKeyIndex {
 
             // Insert replaces when (node_id, committed) already exists.
             use super::schema::key_data::dsl::*;
-            diesel::insert(&new).into(key_data).execute(&self.conn)?;
+            diesel::insert_into(key_data)
+                .values(&new)
+                .execute(&self.conn)?;
             self.maybe_flush()?;
         }
 
@@ -317,49 +309,44 @@ impl InternalKeyIndex {
         parent_: Option<u64>,
         name_: Vec<u8>,
     ) -> Result<Option<Entry>, DieselError> {
-        use super::schema::key_tree::dsl::{name, parent_id, key_tree};
+        use super::schema::key_tree::dsl::{key_tree, name, parent_id};
         use super::schema::key_data::dsl::*;
 
         let row_opt = match parent_ {
-            Some(p) => {
-                key_tree
-                    .inner_join(key_data)
-                    .filter(parent_id.eq(p as i64))
-                    .filter(name.eq(&name_[..]))
-                    .order(committed)
-                    .first::<(schema::KeyNode, schema::KeyData)>(&self.conn)
-                    .optional()?
-            }
-            None => {
-                key_tree
-                    .inner_join(key_data)
-                    .filter(parent_id.is_null())
-                    .filter(name.eq(&name_[..]))
-                    .order(committed)
-                    .first::<(schema::KeyNode, schema::KeyData)>(&self.conn)
-                    .optional()?
-            }
+            Some(p) => key_tree
+                .inner_join(key_data)
+                .filter(parent_id.eq(p as i64))
+                .filter(name.eq(&name_[..]))
+                .order(committed)
+                .first::<(schema::KeyNode, schema::KeyData)>(&self.conn)
+                .optional()?,
+            None => key_tree
+                .inner_join(key_data)
+                .filter(parent_id.is_null())
+                .filter(name.eq(&name_[..]))
+                .order(committed)
+                .first::<(schema::KeyNode, schema::KeyData)>(&self.conn)
+                .optional()?,
         };
 
         if let Some((node, data)) = row_opt {
             Ok(Some(Entry {
                 node_id: node.node_id.map(|n| n as u64),
                 parent_id: node.parent_id.map(|p| p as u64),
-                data: data.hash.map(|h| Data::FileHash(h)).unwrap_or(
-                    Data::DirPlaceholder,
-                ),
+                data: data.hash
+                    .map(|h| Data::FileHash(h))
+                    .unwrap_or(Data::DirPlaceholder),
                 info: Info {
                     name: name_,
                     created_ts_secs: data.created.map(|i| i as u64),
                     modified_ts_secs: data.modified.map(|i| i as u64),
                     accessed_ts_secs: data.accessed.map(|i| i as u64),
-                    permissions: data.permissions.map(
-                        |m| fs::Permissions::from_mode(m as u32),
-                    ),
+                    permissions: data.permissions
+                        .map(|m| fs::Permissions::from_mode(m as u32)),
                     user_id: data.user_id.map(|x| x as u64),
                     group_id: data.group_id.map(|x| x as u64),
                     byte_length: None,
-                    hat_snapshot_ts: 0,
+                    snapshot_ts_utc: 0,
                 },
             }))
         } else {
@@ -378,70 +365,60 @@ impl InternalKeyIndex {
         use super::schema::key_data::dsl::{committed, key_data};
 
         let rows = match parent_opt {
-            Some(p) => {
-                key_tree
-                    .inner_join(key_data)
-                    .filter(parent_id.eq(p as i64))
-                    .filter(committed.eq(true))
-                    .load::<(schema::KeyNode, schema::KeyData)>(&self.conn)?
-            }
-            None => {
-                key_tree
-                    .inner_join(key_data)
-                    .filter(parent_id.is_null())
-                    .filter(committed.eq(true))
-                    .load::<(schema::KeyNode, schema::KeyData)>(&self.conn)?
-            }
+            Some(p) => key_tree
+                .inner_join(key_data)
+                .filter(parent_id.eq(p as i64))
+                .filter(committed.eq(true))
+                .load::<(schema::KeyNode, schema::KeyData)>(&self.conn)?,
+            None => key_tree
+                .inner_join(key_data)
+                .filter(parent_id.is_null())
+                .filter(committed.eq(true))
+                .load::<(schema::KeyNode, schema::KeyData)>(&self.conn)?,
         };
 
-        Ok(
-            rows.into_iter()
-                .map(|(node, mut data)| {
-                    (
-                        Entry {
-                            node_id: node.node_id.map(|n| n as u64),
-                            parent_id: node.parent_id.map(|i| i as u64),
-                            data: match (data.hash.as_ref(), data.symbolic_link_path) {
-                                (Some(_), None) => Data::FilePlaceholder,
-                                (None, None) => Data::DirPlaceholder,
-                                (None, Some(path)) => {
-                                    Data::Symlink(PathBuf::from(str::from_utf8(&path[..]).unwrap()))
-                                }
-                                (Some(_), Some(lp)) => {
-                                    unreachable!(
-                                        "Cannot have both file data and link path: {:?}",
-                                        lp
-                                    )
-                                }
-                            },
-                            info: Info {
-                                name: node.name,
-                                created_ts_secs: data.created.map(|i| i as u64),
-                                modified_ts_secs: data.modified.map(|i| i as u64),
-                                accessed_ts_secs: data.accessed.map(|i| i as u64),
-                                permissions: data.permissions.map(|m| {
-                                    fs::Permissions::from_mode(m as u32)
-                                }),
-                                user_id: data.user_id.map(|x| x as u64),
-                                group_id: data.group_id.map(|x| x as u64),
-                                byte_length: None,
-                                hat_snapshot_ts: 0,
-                            },
+        Ok(rows.into_iter()
+            .map(|(node, mut data)| {
+                (
+                    Entry {
+                        node_id: node.node_id.map(|n| n as u64),
+                        parent_id: node.parent_id.map(|i| i as u64),
+                        data: match (data.hash.as_ref(), data.symbolic_link_path) {
+                            (Some(_), None) => Data::FilePlaceholder,
+                            (None, None) => Data::DirPlaceholder,
+                            (None, Some(path)) => {
+                                Data::Symlink(PathBuf::from(str::from_utf8(&path[..]).unwrap()))
+                            }
+                            (Some(_), Some(lp)) => {
+                                unreachable!("Cannot have both file data and link path: {:?}", lp)
+                            }
                         },
-                        data.hash_ref.as_mut().map(|p| {
-                            ::hash::tree::HashRef::from_bytes(&mut &p[..]).unwrap()
-                        }),
-                    )
-                })
-                .collect(),
-        )
+                        info: Info {
+                            name: node.name,
+                            created_ts_secs: data.created.map(|i| i as u64),
+                            modified_ts_secs: data.modified.map(|i| i as u64),
+                            accessed_ts_secs: data.accessed.map(|i| i as u64),
+                            permissions: data.permissions
+                                .map(|m| fs::Permissions::from_mode(m as u32)),
+                            user_id: data.user_id.map(|x| x as u64),
+                            group_id: data.group_id.map(|x| x as u64),
+                            byte_length: None,
+                            snapshot_ts_utc: 0,
+                        },
+                    },
+                    data.hash_ref
+                        .as_mut()
+                        .map(|p| ::hash::tree::HashRef::from_bytes(&mut &p[..]).unwrap()),
+                )
+            })
+            .collect())
     }
 
     fn mark_reserved(&mut self, entry: &Entry) -> Result<(), DieselError> {
         use super::schema::key_data::dsl::*;
-        diesel::update(key_data.filter(node_id.eq(entry.node_id.expect(
-            "Need ID to reserve entry",
-        ) as i64))).set((tag.eq(Tag::Reserved as i64)))
+        diesel::update(
+            key_data.filter(node_id.eq(entry.node_id.expect("Need ID to reserve entry") as i64)),
+        ).set(tag.eq(Tag::Reserved as i64))
             .execute(&self.conn)?;
         Ok(())
     }
@@ -451,11 +428,11 @@ impl InternalKeyIndex {
         // Promote all needed keys to 'ready' in one statement to preserve referential integrity.
         // If the (node_id, ready) combination already exist, the conflict is resolved by replace.
         use super::schema::key_data::dsl::*;
-        diesel::update(key_data.filter(tag.eq(Tag::Reserved as i64)).filter(
-            committed.eq(
-                false,
-            ),
-        )).set(committed.eq(true))
+        diesel::update(
+            key_data
+                .filter(tag.eq(Tag::Reserved as i64))
+                .filter(committed.eq(false)),
+        ).set(committed.eq(true))
             .execute(&self.conn)?;
 
         Ok(())
@@ -465,23 +442,19 @@ impl InternalKeyIndex {
     /// This function applies recursively to child directories.
     fn cleanup_unused(&mut self, parent_opt: Option<u64>) -> Result<(), DieselError> {
         use super::schema::key_tree::dsl::*;
-        use super::schema::key_data::dsl::{tag, key_data};
+        use super::schema::key_data::dsl::{key_data, tag};
 
         let children = match parent_opt {
-            Some(p) => {
-                key_tree
-                    .inner_join(key_data)
-                    .filter(parent_id.eq(p as i64))
-                    .select((node_id, tag))
-                    .load::<(Option<i64>, i64)>(&self.conn)?
-            }
-            None => {
-                key_tree
-                    .inner_join(key_data)
-                    .filter(parent_id.is_null())
-                    .select((node_id, tag))
-                    .load::<(Option<i64>, i64)>(&self.conn)?
-            }
+            Some(p) => key_tree
+                .inner_join(key_data)
+                .filter(parent_id.eq(p as i64))
+                .select((node_id, tag))
+                .load::<(Option<i64>, i64)>(&self.conn)?,
+            None => key_tree
+                .inner_join(key_data)
+                .filter(parent_id.is_null())
+                .select((node_id, tag))
+                .load::<(Option<i64>, i64)>(&self.conn)?,
         };
 
         for (node_id_, tag_) in children {
@@ -489,9 +462,7 @@ impl InternalKeyIndex {
             if tag_ == Tag::Reserved as i64 {
                 self.cleanup_unused(Some(id as u64))?;
             } else {
-                diesel::delete(key_tree.filter(node_id.eq(id))).execute(
-                    &self.conn,
-                )?;
+                diesel::delete(key_tree.filter(node_id.eq(id))).execute(&self.conn)?;
             }
         }
 
@@ -502,13 +473,13 @@ impl InternalKeyIndex {
 }
 
 impl KeyIndex {
-    pub fn new(migration_dir: &Path, name: &str) -> Result<KeyIndex, DieselError> {
-        InternalKeyIndex::new(migration_dir, name).map(|index| KeyIndex(Mutex::new(index)))
+    pub fn new(name: &str) -> Result<KeyIndex, DieselError> {
+        InternalKeyIndex::new(name).map(|index| KeyIndex(Mutex::new(index)))
     }
 
     #[cfg(test)]
     pub fn new_for_testing() -> Result<KeyIndex, DieselError> {
-        KeyIndex::new(Path::new("migrations"), ":memory:")
+        KeyIndex::new(":memory:")
     }
 
     fn lock(&self) -> MutexGuard<InternalKeyIndex> {

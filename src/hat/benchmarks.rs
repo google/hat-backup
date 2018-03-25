@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-
 use backend::DevNullBackend;
 use hat::HatRc;
 use hat::family::Family;
@@ -21,7 +20,6 @@ use std::io;
 use std::sync::{Arc, Mutex};
 use test::Bencher;
 use util::FileIterator;
-
 
 fn setup_family() -> (HatRc<DevNullBackend>, Family<DevNullBackend>) {
     let backend = Arc::new(DevNullBackend);
@@ -95,7 +93,7 @@ impl io::Read for UniqueBlockReader {
     }
 }
 
-fn insert_files(bench: &mut Bencher, filesize: i32, unique: bool) {
+fn insert_files(bench: &mut Bencher, filesize: i32, unique: bool, commit: bool) {
     let (hat, family) = setup_family();
 
     let mut filler = UniqueBlockFiller::new(0);
@@ -113,9 +111,16 @@ fn insert_files(bench: &mut Bencher, filesize: i32, unique: bool) {
         }
 
         let file = FileIterator::from_reader(Box::new(file_reader.clone()));
-        family
-            .snapshot_direct(entry(name.clone()), false, Some(file))
-            .unwrap();
+
+        if commit {
+            family
+                .snapshot_direct(entry(name.clone()), false, Some(file))
+                .unwrap();
+        } else {
+            family
+                .snapshot_direct_no_commit(entry(name.clone()), false, Some(file))
+                .unwrap();
+        }
     });
 
     hat.data_flush().unwrap();
@@ -123,31 +128,46 @@ fn insert_files(bench: &mut Bencher, filesize: i32, unique: bool) {
 }
 
 #[bench]
+fn insert_empty_files(mut bench: &mut Bencher) {
+    insert_files(&mut bench, 0, true, true);
+}
+
+#[bench]
+fn insert_empty_files_no_commit(mut bench: &mut Bencher) {
+    insert_files(&mut bench, 0, true, false);
+}
+
+#[bench]
 fn insert_small_unique_files(mut bench: &mut Bencher) {
-    insert_files(&mut bench, 8, true);
+    insert_files(&mut bench, 8, true, true);
 }
 
 #[bench]
 fn insert_small_identical_files(mut bench: &mut Bencher) {
-    insert_files(&mut bench, 8, false);
+    insert_files(&mut bench, 8, false, true);
 }
 
 #[bench]
 fn insert_medium_unique_files(mut bench: &mut Bencher) {
-    insert_files(&mut bench, 1024 * 1024, true);
+    insert_files(&mut bench, 1024 * 1024, true, true);
 }
 
 #[bench]
 fn insert_medium_identical_files(mut bench: &mut Bencher) {
-    insert_files(&mut bench, 1024 * 1024, false);
+    insert_files(&mut bench, 1024 * 1024, false, true);
 }
 
 #[bench]
 fn insert_large_unique_files(mut bench: &mut Bencher) {
-    insert_files(&mut bench, 8 * 1024 * 1024, true);
+    insert_files(&mut bench, 16 * 1024 * 1024, true, true);
+}
+
+#[bench]
+fn insert_large_unique_files_no_commit(mut bench: &mut Bencher) {
+    insert_files(&mut bench, 16 * 1024 * 1024, true, false);
 }
 
 #[bench]
 fn insert_large_identical_files(mut bench: &mut Bencher) {
-    insert_files(&mut bench, 8 * 1024 * 1024, false);
+    insert_files(&mut bench, 16 * 1024 * 1024, false, true);
 }

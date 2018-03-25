@@ -12,10 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use capnp;
-use root_capnp;
-use secstr;
+use models;
+pub use models::LeafType;
 
+use serde_cbor;
+use secstr;
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub enum Packing {
@@ -52,30 +53,6 @@ impl From<NodeType> for u64 {
     }
 }
 
-#[derive(Debug, Clone, Copy, Eq, PartialEq)]
-pub enum LeafType {
-    FileChunk = 1,
-    TreeList = 2,
-    SnapshotList = 3,
-}
-
-impl LeafType {
-    pub fn read_msg(which: root_capnp::hash_ref::leaf_type::Which) -> LeafType {
-        match which {
-            root_capnp::hash_ref::leaf_type::Chunk(()) => LeafType::FileChunk,
-            root_capnp::hash_ref::leaf_type::TreeList(()) => LeafType::TreeList,
-            root_capnp::hash_ref::leaf_type::SnapshotList(()) => LeafType::SnapshotList,
-        }
-    }
-    pub fn populate_msg(self, mut msg: root_capnp::hash_ref::leaf_type::Builder) {
-        match self {
-            LeafType::FileChunk => msg.set_chunk(()),
-            LeafType::TreeList => msg.set_tree_list(()),
-            LeafType::SnapshotList => msg.set_snapshot_list(()),
-        }
-    }
-}
-
 impl From<u64> for LeafType {
     fn from(n: u64) -> LeafType {
         match n {
@@ -107,82 +84,60 @@ pub struct ChunkRef {
     pub key: Option<Key>,
 }
 
-impl ChunkRef {
-    pub fn from_bytes(bytes: &mut &[u8]) -> Result<ChunkRef, capnp::Error> {
-        let reader =
-            capnp::serialize_packed::read_message(bytes, capnp::message::ReaderOptions::new())?;
-        let root = reader.get_root::<root_capnp::chunk_ref::Reader>()?;
+impl From<models::ChunkRef> for ChunkRef {
+    fn from(chunk_ref: models::ChunkRef) -> ChunkRef {
+        ChunkRef {
+            blob_id: None,
+            blob_name: chunk_ref.blob_name,
+            offset: chunk_ref.offset as usize,
+            length: chunk_ref.length as usize,
+            packing: match chunk_ref.packing {
+                models::Packing::Raw => None,
+                models::Packing::GZip => Some(Packing::GZip),
+                models::Packing::Snappy => Some(Packing::Snappy),
+            },
+            key: match chunk_ref.key {
+                models::Key::None => None,
+                models::Key::AeadChacha20Poly1305(key) => {
+                    Some(Key::AeadChacha20Poly1305(secstr::SecVec::new(key)))
+                }
+            },
+        }
+    }
+}
 
-        Ok(ChunkRef::read_msg(&root)?)
+impl ChunkRef {
+    pub fn to_model(&self) -> models::ChunkRef {
+        models::ChunkRef {
+            blob_name: self.blob_name.clone(),
+            offset: self.offset as u64,
+            length: self.length as u64,
+            packing: match self.packing {
+                None => models::Packing::Raw,
+                Some(Packing::GZip) => models::Packing::GZip,
+                Some(Packing::Snappy) => models::Packing::Snappy,
+            },
+            key: match self.key {
+                None => models::Key::None,
+                Some(Key::AeadChacha20Poly1305(ref key)) => {
+                    models::Key::AeadChacha20Poly1305(key.unsecure().to_owned())
+                }
+            },
+        }
+    }
+
+    pub fn from_bytes(bytes: &[u8]) -> Result<ChunkRef, serde_cbor::error::Error> {
+        let model: models::ChunkRef = serde_cbor::from_slice(bytes)?;
+        Ok(From::from(model))
     }
 
     pub fn as_bytes(&self) -> Vec<u8> {
-        let mut message = ::capnp::message::Builder::new_default();
-        {
-            let mut root = message.init_root::<root_capnp::chunk_ref::Builder>();
-            self.populate_msg(root.borrow());
-        }
-        let mut out = Vec::new();
-        capnp::serialize_packed::write_message(&mut out, &message).unwrap();
-        out
+        serde_cbor::to_vec(&self.to_model()).unwrap()
     }
 
     pub fn as_bytes_no_name(&self) -> Vec<u8> {
-        let mut message = ::capnp::message::Builder::new_default();
-        {
-            let mut root = message.init_root::<root_capnp::chunk_ref::Builder>();
-            self.populate_msg_no_name(root.borrow());
-        }
-        let mut out = Vec::new();
-        capnp::serialize_packed::write_message(&mut out, &message).unwrap();
-        out
-    }
-
-    pub fn populate_msg(&self, mut msg: root_capnp::chunk_ref::Builder) {
-        self.populate_msg_name(msg.borrow());
-        self.populate_msg_no_name(msg);
-    }
-
-    pub fn populate_msg_name(&self, mut msg: root_capnp::chunk_ref::Builder) {
-        msg.set_blob_name(&self.blob_name[..]);
-    }
-
-    pub fn populate_msg_no_name(&self, mut msg: root_capnp::chunk_ref::Builder) {
-        msg.set_offset(self.offset as u64);
-        msg.set_length(self.length as u64);
-
-        if let Some(Key::AeadChacha20Poly1305(ref chacha)) = self.key {
-            msg.borrow().init_key().set_aead_chacha20_poly1305(
-                chacha.unsecure(),
-            );
-        } else {
-            msg.borrow().init_key().set_none(());
-        }
-
-        match self.packing {
-            None => msg.borrow().init_packing().set_none(()),
-            Some(Packing::GZip) => msg.borrow().init_packing().set_gzip(()),
-            Some(Packing::Snappy) => msg.borrow().init_packing().set_snappy(()),
-        }
-    }
-
-    pub fn read_msg(msg: &root_capnp::chunk_ref::Reader) -> Result<ChunkRef, capnp::Error> {
-        Ok(ChunkRef {
-            blob_id: None,
-            blob_name: msg.get_blob_name()?.to_owned(),
-            offset: msg.get_offset() as usize,
-            length: msg.get_length() as usize,
-            packing: match msg.get_packing().which()? {
-                root_capnp::chunk_ref::packing::None(()) => None,
-                root_capnp::chunk_ref::packing::Gzip(()) => Some(Packing::GZip),
-                root_capnp::chunk_ref::packing::Snappy(()) => Some(Packing::Snappy),
-            },
-            key: match msg.get_key().which()? {
-                root_capnp::chunk_ref::key::None(()) => None,
-                root_capnp::chunk_ref::key::AeadChacha20Poly1305(res) => {
-                    Some(Key::AeadChacha20Poly1305(secstr::SecStr::from(res?)))
-                }
-            },
-        })
+        let mut model = self.to_model();
+        model.blob_name = "".into();
+        serde_cbor::to_vec(&model).unwrap()
     }
 }

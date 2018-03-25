@@ -14,7 +14,6 @@
 
 //! External API for creating and manipulating snapshots.
 
-
 use backend::StoreBackend;
 use blob;
 use crypto;
@@ -39,7 +38,6 @@ mod benchmarks;
 pub use self::hash_store_backend::HashStoreBackend;
 pub use self::index::{Data, Entry, Info, KeyIndex};
 
-
 error_type! {
     #[derive(Debug)]
     pub enum MsgError {
@@ -60,10 +58,13 @@ error_type! {
      }
 }
 
-
 pub type StoreProcess<IT, B> = Process<Msg<IT>, Reply<B>, MsgError>;
 
-pub type DirElem<B> = (Entry, Option<hash::tree::HashRef>, Option<HashTreeReaderInitializer<B>>);
+pub type DirElem<B> = (
+    Entry,
+    Option<hash::tree::HashRef>,
+    Option<HashTreeReaderInitializer<B>>,
+);
 
 pub struct HashTreeReaderInitializer<B> {
     hash_ref: hash::tree::HashRef,
@@ -132,10 +133,10 @@ impl<B: StoreBackend> Store<B> {
         keys: Arc<crypto::keys::Keeper>,
     ) -> Store<B> {
         Store {
-            index: index,
-            hash_index: hash_index,
-            blob_store: blob_store,
-            keys: keys,
+            index,
+            hash_index,
+            blob_store,
+            keys,
         }
     }
 
@@ -188,16 +189,12 @@ fn file_size_warning(name: &[u8], wanted: u64, got: u64) {
     if wanted < got {
         println!(
             "Warning: File grew while reading it: {:?} (wanted {}, got {})",
-            name,
-            wanted,
-            got
+            name, wanted, got
         )
     } else if wanted > got {
         println!(
             "Warning: Could not read whole file (or it shrank): {:?} (wanted {}, got {})",
-            name,
-            wanted,
-            got
+            name, wanted, got
         )
     }
 }
@@ -226,34 +223,32 @@ impl<IT: io::Read, B: StoreBackend> MsgHandler<Msg<IT>, Reply<B>> for Store<B> {
                 reply_ok!(Reply::FlushOk)
             }
 
-            Msg::ListDir(parent) => {
-                match self.index.list_dir(parent) {
-                    Ok(entries) => {
-                        let mut my_entries: Vec<DirElem<B>> = Vec::with_capacity(entries.len());
-                        for (entry, hash_ref_opt) in entries {
-                            let hash_ref = hash_ref_opt.or_else(|| match entry.data {
-                                Data::FileHash(ref hash_bytes) => {
-                                    let h = hash::Hash { bytes: hash_bytes.clone() };
-                                    self.hash_index.fetch_hash_ref(&h).expect("Unknown hash")
-                                }
-                                _ => None,
-                            });
-                            let open_fn = hash_ref.as_ref().map(|r| {
-                                HashTreeReaderInitializer {
-                                    hash_ref: r.clone(),
-                                    hash_index: self.hash_index.clone(),
-                                    blob_store: self.blob_store.clone(),
-                                    keys: self.keys.clone(),
-                                }
-                            });
+            Msg::ListDir(parent) => match self.index.list_dir(parent) {
+                Ok(entries) => {
+                    let mut my_entries: Vec<DirElem<B>> = Vec::with_capacity(entries.len());
+                    for (entry, hash_ref_opt) in entries {
+                        let hash_ref = hash_ref_opt.or_else(|| match entry.data {
+                            Data::FileHash(ref hash_bytes) => {
+                                let h = hash::Hash {
+                                    bytes: hash_bytes.clone(),
+                                };
+                                self.hash_index.fetch_hash_ref(&h).expect("Unknown hash")
+                            }
+                            _ => None,
+                        });
+                        let open_fn = hash_ref.as_ref().map(|r| HashTreeReaderInitializer {
+                            hash_ref: r.clone(),
+                            hash_index: self.hash_index.clone(),
+                            blob_store: self.blob_store.clone(),
+                            keys: self.keys.clone(),
+                        });
 
-                            my_entries.push((entry, hash_ref, open_fn));
-                        }
-                        reply_ok!(Reply::ListResult(my_entries))
+                        my_entries.push((entry, hash_ref, open_fn));
                     }
-                    Err(e) => reply_err!(From::from(e)),
+                    reply_ok!(Reply::ListResult(my_entries))
                 }
-            }
+                Err(e) => reply_err!(From::from(e)),
+            },
 
             Msg::CommitReservedNodes(clean_parent_opt) => {
                 self.index.commit_reserved_nodes()?;
@@ -264,25 +259,26 @@ impl<IT: io::Read, B: StoreBackend> MsgHandler<Msg<IT>, Reply<B>> for Store<B> {
             }
 
             Msg::Insert(insert_entry, chunk_it_opt) => {
-                let entry = match self.index.lookup(
-                    insert_entry.parent_id,
-                    insert_entry.info.name.clone(),
-                )? {
+                let entry = match self.index
+                    .lookup(insert_entry.parent_id, insert_entry.info.name.clone())?
+                {
                     Some(ref stored_entry) if insert_entry.data_looks_unchanged(stored_entry) => {
-                        match &stored_entry.data {
-                            &Data::FileHash(ref hash_bytes) if chunk_it_opt.is_some() => {
-                                let hash = hash::Hash { bytes: hash_bytes.to_vec() };
+                        match stored_entry.data {
+                            Data::FileHash(ref hash_bytes) if chunk_it_opt.is_some() => {
+                                let hash = hash::Hash {
+                                    bytes: hash_bytes.to_vec(),
+                                };
                                 if self.hash_index.hash_exists(&hash) {
                                     // Short-circuit: We have the data.
                                     debug!("Skip entry: {:?}", stored_entry.info.name);
-                                    self.index.mark_reserved(&stored_entry)?;
+                                    self.index.mark_reserved(stored_entry)?;
                                     return reply_ok!(Reply::Id(stored_entry.node_id.unwrap()));
                                 }
                             }
                             _ if chunk_it_opt.is_none() => {
                                 // Short-circuit: No data needed.
                                 debug!("Skip empty entry: {:?}", stored_entry.info.name);
-                                self.index.mark_reserved(&stored_entry)?;
+                                self.index.mark_reserved(stored_entry)?;
                                 return reply_ok!(Reply::Id(stored_entry.node_id.unwrap()));
                             }
                             _ => (),
@@ -293,12 +289,10 @@ impl<IT: io::Read, B: StoreBackend> MsgHandler<Msg<IT>, Reply<B>> for Store<B> {
                             ..insert_entry
                         }
                     }
-                    Some(entry) => {
-                        Entry {
-                            node_id: entry.node_id,
-                            ..insert_entry
-                        }
-                    }
+                    Some(entry) => Entry {
+                        node_id: entry.node_id,
+                        ..insert_entry
+                    },
                     None => insert_entry,
                 };
 

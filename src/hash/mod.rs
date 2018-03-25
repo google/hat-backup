@@ -14,7 +14,6 @@
 
 //! Local state for known hashes and their external location (blob reference).
 
-
 use blob;
 use crypto;
 use db;
@@ -32,16 +31,13 @@ mod tests;
 #[cfg(all(test, feature = "benchmarks"))]
 mod benchmarks;
 
-
 pub struct HashIndex(InternalHashIndex);
-
 
 /// A wrapper around Hash digests.
 #[derive(Clone, Debug, Hash, Eq, PartialEq)]
 pub struct Hash {
     pub bytes: Vec<u8>,
 }
-
 
 impl Hash {
     /// Computes `hash(text)` and stores this digest as the `bytes` field in a new `Hash` structure.
@@ -59,7 +55,6 @@ impl Hash {
         hash
     }
 }
-
 
 /// An entry that can be inserted into the hash index.
 #[derive(Clone)]
@@ -132,8 +127,8 @@ impl InternalHashIndex {
     fn reserve(
         &self,
         hash_entry: &Entry,
-        mut queue: &mut MutexGuard<Queue>,
-        mut index: &mut db::IndexGuard,
+        queue: &mut MutexGuard<Queue>,
+        index: &mut db::IndexGuard,
     ) -> u64 {
         index.maybe_flush();
 
@@ -165,7 +160,7 @@ impl InternalHashIndex {
         queue.find_key(&hash.bytes).cloned()
     }
 
-    fn update_reserved(&self, id: u64, hash_entry: Entry, mut queue: &mut MutexGuard<Queue>) {
+    fn update_reserved(&self, id: u64, hash_entry: Entry, queue: &mut MutexGuard<Queue>) {
         let Entry {
             hash,
             node,
@@ -181,7 +176,6 @@ impl InternalHashIndex {
             unreachable!("Tried to update unreserved hash.");
         }
 
-
         // If we didn't already commit and pop() the hash, update it:
         queue.update_value(&hash.bytes, |qe| {
             qe.node = node;
@@ -191,11 +185,7 @@ impl InternalHashIndex {
         });
     }
 
-    fn insert_completed_in_order(
-        &self,
-        mut queue: &mut MutexGuard<Queue>,
-        mut index: &mut db::IndexGuard,
-    ) {
+    fn insert_completed_in_order(&self, queue: &mut MutexGuard<Queue>, index: &mut db::IndexGuard) {
         while let Some((id_, _, queue_entry)) = queue.pop_min_if_complete() {
             assert_eq!(id_, queue_entry.id);
             index.hash_set_ready(id_, &queue_entry);
@@ -217,7 +207,6 @@ impl InternalHashIndex {
     }
 }
 
-
 impl HashIndex {
     pub fn new(index: Arc<db::Index>) -> Result<HashIndex, DieselError> {
         index.lock().hash_delete_not_ready();
@@ -228,9 +217,9 @@ impl HashIndex {
     pub fn get_id(&self, hash: &Hash) -> Option<u64> {
         assert!(!hash.bytes.is_empty());
         let (queue, mut index) = self.0.lock();
-        self.0.locate(hash, &queue, &mut index).map(
-            |entry| entry.id,
-        )
+        self.0
+            .locate(hash, &queue, &mut index)
+            .map(|entry| entry.id)
     }
 
     /// Locate hash entry from its ID.
@@ -249,9 +238,9 @@ impl HashIndex {
     pub fn fetch_childs(&self, hash: &Hash) -> Option<Option<Vec<u64>>> {
         assert!(!hash.bytes.is_empty());
         let (queue, mut index) = self.0.lock();
-        self.0.locate(hash, &queue, &mut index).map(|queue_entry| {
-            queue_entry.childs
-        })
+        self.0
+            .locate(hash, &queue, &mut index)
+            .map(|queue_entry| queue_entry.childs)
     }
 
     /// Locate the persistent reference (external blob reference) for this `Hash`.
@@ -271,15 +260,13 @@ impl HashIndex {
         let (queue, mut index) = self.0.lock();
         match self.0.locate(hash, &queue, &mut index) {
             Some(ref queue_entry) if queue_entry.persistent_ref.is_none() => Err(RetryError),
-            Some(queue_entry) => {
-                Ok(Some(tree::HashRef {
-                    hash: hash.clone(),
-                    node: queue_entry.node,
-                    leaf: queue_entry.leaf,
-                    info: None,
-                    persistent_ref: queue_entry.persistent_ref.expect("persistent_ref"),
-                }))
-            }
+            Some(queue_entry) => Ok(Some(tree::HashRef {
+                hash: hash.clone(),
+                node: queue_entry.node,
+                leaf: queue_entry.leaf,
+                info: None,
+                persistent_ref: queue_entry.persistent_ref.expect("persistent_ref"),
+            })),
             None => Ok(None),
         }
     }
@@ -374,11 +361,10 @@ impl HashIndex {
         family_id: u64,
         update_fn: F,
     ) -> db::GcData {
-        self.0.index.lock().hash_update_gc_data(
-            hash_id,
-            family_id,
-            update_fn,
-        )
+        self.0
+            .index
+            .lock()
+            .hash_update_gc_data(hash_id, family_id, update_fn)
     }
 
     /// API related to garbage collector metadata tied to (hash id, family id) pairs.
@@ -387,10 +373,10 @@ impl HashIndex {
         family_id: u64,
         update_fns: I,
     ) {
-        self.0.index.lock().hash_update_family_gc_data(
-            family_id,
-            update_fns,
-        )
+        self.0
+            .index
+            .lock()
+            .hash_update_family_gc_data(family_id, update_fns)
     }
 
     /// Manual commit. This also disables automatic periodic commit.

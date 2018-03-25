@@ -13,7 +13,7 @@
 // limitations under the License
 
 use backend::{MemoryBackend, StoreBackend};
-use blob::{Blob, BlobReader, BlobError, BlobIndex, BlobStore, ChunkRef, NodeType, LeafType};
+use blob::{Blob, BlobError, BlobIndex, BlobReader, BlobStore, ChunkRef, LeafType, NodeType};
 use crypto;
 use db;
 use hash;
@@ -251,7 +251,6 @@ fn blob_identity() {
     quickcheck::quickcheck(prop as fn(Vec<Vec<u8>>) -> bool);
 }
 
-
 #[test]
 fn random_input_fails() {
     fn prop(data: Vec<u8>) -> bool {
@@ -321,12 +320,7 @@ fn blob_ciphertext_authed_allbytes() {
         Ok(vs)
     };
 
-    fn with_modified<F>(
-        mut bytes: &mut [u8],
-        i: usize,
-        b: u8,
-        f: F,
-    ) -> Result<Vec<Vec<u8>>, BlobError>
+    fn with_modified<F>(bytes: &mut [u8], i: usize, b: u8, f: F) -> Result<Vec<Vec<u8>>, BlobError>
     where
         F: FnOnce(&[u8]) -> Result<Vec<Vec<u8>>, BlobError>,
     {

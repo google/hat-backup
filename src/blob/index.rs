@@ -14,7 +14,6 @@
 
 //! Local state for external blobs and their states.
 
-
 use crypto;
 use db;
 
@@ -23,7 +22,6 @@ use errors::DieselError;
 use std::sync::{Arc, Mutex};
 
 use tags;
-
 
 #[derive(Clone, Debug, Default)]
 pub struct BlobDesc {
@@ -38,7 +36,6 @@ pub struct InternalBlobIndex {
 }
 
 pub struct BlobIndex(InternalBlobIndex);
-
 
 impl InternalBlobIndex {
     pub fn new(
@@ -61,13 +58,11 @@ impl InternalBlobIndex {
     }
 
     fn id_of_name(&self, name: &[u8]) -> Result<i64, String> {
-        return Ok(
-            crypto::FixedKey::new(&self.keys)
-                .unseal_blob_name(crypto::CipherTextRef::new(name))
-                .as_ref()
-                .read_i64()
-                .unwrap(),
-        );
+        return Ok(crypto::FixedKey::new(&self.keys)
+            .unseal_blob_name(crypto::CipherTextRef::new(name))
+            .as_ref()
+            .read_i64()
+            .unwrap());
     }
 
     fn new_blob_desc(&self) -> BlobDesc {
@@ -79,9 +74,7 @@ impl InternalBlobIndex {
     }
 
     pub fn refresh_next_id(&self) {
-        let id = {
-            self.index.lock().blob_next_id()
-        };
+        let id = { self.index.lock().blob_next_id() };
         let mut next_id = self.next_id.lock().unwrap();
         *next_id = 1 + id;
     }
@@ -94,10 +87,7 @@ impl InternalBlobIndex {
 
     fn recover(&self, name: Vec<u8>) -> BlobDesc {
         let wanted_id = self.id_of_name(&name).unwrap();
-        if let Some(id) = {
-            self.index.lock().blob_id_from_name(&name[..])
-        }
-        {
+        if let Some(id) = { self.index.lock().blob_id_from_name(&name[..]) } {
             assert_eq!(id, wanted_id);
 
             // Blob exists.

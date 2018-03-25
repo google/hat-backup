@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use diesel::prelude::*;
+use diesel::sql_types::BigInt;
 
 // Table schemas.
 
@@ -47,7 +47,13 @@ table! {
 
 joinable!(key_data -> key_tree (node_id));
 
+allow_tables_to_appear_in_same_query!(key_data, key_tree,);
+
 // Rust models.
+#[derive(Queryable, QueryableByName)]
+pub struct RowId {
+    #[sql_type = "BigInt"] pub row_id: i64,
+}
 
 #[derive(Queryable)]
 pub struct KeyNode {

@@ -16,7 +16,6 @@ use std::mem;
 use std::ops;
 use std::sync::{Condvar, Mutex, MutexGuard, PoisonError};
 
-
 pub struct SyncPool<V> {
     vals: Mutex<Vec<V>>,
     cond: Condvar,

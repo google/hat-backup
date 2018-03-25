@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-
 use backend::{MemoryBackend, StoreBackend};
 use errors::HatError;
 use hat::HatRc;
@@ -22,13 +21,16 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use util::FileIterator;
 
-
 pub fn setup_hat<B: StoreBackend>(backend: Arc<B>) -> HatRc<B> {
     let max_blob_size = 4 * 1024 * 1024;
     HatRc::new_for_testing(backend, max_blob_size).unwrap()
 }
 
-fn setup_family() -> (Arc<MemoryBackend>, HatRc<MemoryBackend>, Family<MemoryBackend>) {
+fn setup_family() -> (
+    Arc<MemoryBackend>,
+    HatRc<MemoryBackend>,
+    Family<MemoryBackend>,
+) {
     let backend = Arc::new(MemoryBackend::new());
     let mut hat = setup_hat(backend.clone());
 
@@ -68,11 +70,7 @@ fn snapshot_files<B: StoreBackend>(
             // We have a file to insert.
             let mut e = entry(current.bytes().collect());
             e.parent_id = parent.clone();
-            family.snapshot_direct(
-                e,
-                false,
-                Some(FileIterator::from_bytes(contents)),
-            )?;
+            family.snapshot_direct(e, false, Some(FileIterator::from_bytes(contents)))?;
         }
     }
     Ok(())
@@ -92,7 +90,7 @@ fn basic_snapshot<B: StoreBackend>(fam: &Family<B>) {
             ("block12", "block1".into()),
             (
                 "some/number/of/empty/dirs/with/an/empty/file/deep/down",
-                vec![]
+                vec![],
             ),
             ("dir1/zeros", vec![0; 10]),
             ("dir1/block1", "block1".into()),

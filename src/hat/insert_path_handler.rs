@@ -12,15 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-
 use backend::StoreBackend;
 use key;
 use std::error::Error;
 use std::fs;
 use std::io;
 use std::path::PathBuf;
-use std::str;
-use std::sync::{Mutex, atomic};
+use std::sync::{atomic, Mutex};
 use time;
 use util::{FileIterator, PathHandler, SyncPool};
 
@@ -34,9 +32,10 @@ impl FileEntry {
     fn new(full_path: PathBuf, parent: Option<u64>) -> Result<FileEntry, Box<Error>> {
         debug!("FileEntry::new({:?})", full_path);
 
-        let filename_opt = full_path.file_name().and_then(|n| n.to_str()).map(|s| {
-            s.as_bytes().to_vec()
-        });
+        let filename_opt = full_path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .map(|s| s.as_bytes().to_vec());
 
         if let Some(filename) = filename_opt {
             let meta = fs::symlink_metadata(&full_path)?;
@@ -120,15 +119,13 @@ impl<B: StoreBackend> PathHandler<Option<u64>> for InsertPathHandler<B> {
                 match ks.send_reply(key::Msg::Insert(
                     file_entry.key_entry,
                     if is_file {
-                        Some(Box::new(move |()| {
-                        match FileIterator::new(&full_path) {
+                        Some(Box::new(move |()| match FileIterator::new(&full_path) {
                             Err(e) => {
                                 println!("Skipping '{}': {}", local_root.display(), e.to_string());
                                 None
                             }
                             Ok(it) => Some(it),
-                        }
-                    }))
+                        }))
                     } else {
                         None
                     },

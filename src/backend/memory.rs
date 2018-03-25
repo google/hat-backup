@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-
 use backend::StoreBackend;
 use crypto::CipherText;
 use std::collections::BTreeMap;
@@ -24,7 +23,9 @@ pub struct MemoryBackend {
 
 impl MemoryBackend {
     pub fn new() -> MemoryBackend {
-        MemoryBackend { files: Mutex::new(BTreeMap::new()) }
+        MemoryBackend {
+            files: Mutex::new(BTreeMap::new()),
+        }
     }
 
     fn guarded_insert(&self, key: Vec<u8>, value: Vec<u8>) -> Result<(), String> {
@@ -51,13 +52,11 @@ impl MemoryBackend {
 
     fn guarded_list(&self) -> Result<Vec<Box<[u8]>>, String> {
         let guarded_files = self.files.lock().unwrap();
-        Ok(
-            guarded_files
-                .keys()
-                .cloned()
-                .map(|x| x.into_boxed_slice())
-                .collect(),
-        )
+        Ok(guarded_files
+            .keys()
+            .cloned()
+            .map(|x| x.into_boxed_slice())
+            .collect())
     }
 }
 

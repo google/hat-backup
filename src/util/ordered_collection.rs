@@ -33,11 +33,8 @@ impl<K: Clone + Ord, V> OrderedCollection<K, V> for BTreeMap<K, V> {
     where
         F: FnOnce(&K, &V) -> bool,
     {
-        let k_opt = self.find_min().and_then(|(k, v)| if ready(k, v) {
-            Some(k.clone())
-        } else {
-            None
-        });
+        let k_opt = self.find_min()
+            .and_then(|(k, v)| if ready(k, v) { Some(k.clone()) } else { None });
         k_opt.map(|k| {
             let v = self.remove(&k).unwrap();
             (k, v)

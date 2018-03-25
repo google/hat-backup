@@ -29,7 +29,7 @@ use clap::{App, SubCommand};
 use hat::backend;
 use std::borrow::ToOwned;
 use std::convert::From;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::Arc;
 
 static MAX_BLOB_SIZE: usize = 4 * 1024 * 1024;
@@ -44,9 +44,8 @@ fn license() {
     println!(include_str!("../LICENSE-CLAP"));
 }
 
-
 fn main() {
-    env_logger::init().unwrap();
+    env_logger::init();
 
     // Because "snapshot" and "checkout" use the exact same type of arguments, we can make a
     // template. This template defines two positional arguments, both are required
@@ -59,7 +58,6 @@ fn main() {
         .about("Create backup snapshots")
         .args_from_usage(
             "-l, --license 'Display the license'
-                          --hat_migrations_dir=[DIR] 'Location of Hat SQL migrations'
                           --hat_cache_dir=[DIR] 'Location of Hat local state'",
         )
         .subcommand(
@@ -72,9 +70,7 @@ fn main() {
                 .about("Checkout a snapshot")
                 .args_from_usage(arg_template),
         )
-        .subcommand(SubCommand::with_name("recover").about(
-            "Recover list of commit'ed snapshots",
-        ))
+        .subcommand(SubCommand::with_name("recover").about("Recover list of commit'ed snapshots"))
         .subcommand(
             SubCommand::with_name("delete")
                 .about("Delete a snapshot")
@@ -89,9 +85,7 @@ fn main() {
                 .about("Garbage collect: identify and remove unused data blocks.")
                 .args_from_usage("-p --pretend 'Do not modify any data'"),
         )
-        .subcommand(SubCommand::with_name("resume").about(
-            "Resume previous failed command.",
-        ))
+        .subcommand(SubCommand::with_name("resume").about("Resume previous failed command."))
         .get_matches();
 
     // Check for license flag
@@ -104,15 +98,11 @@ fn main() {
         matches
             .value_of(name)
             .map(|x| x.to_string())
-            .or_else(|| {
-                env::var_os(name.to_uppercase()).map(|s| s.into_string().unwrap())
-            })
+            .or_else(|| env::var_os(name.to_uppercase()).map(|s| s.into_string().unwrap()))
             .expect(&format!("{} required", name))
     };
 
     // Setup config variables that can take their value from either flag or environment.
-    let migrations_dir_str = flag_or_env("hat_migrations_dir");
-    let migrations_dir = Path::new(&migrations_dir_str);
     let cache_dir = PathBuf::from(flag_or_env("hat_cache_dir"));
 
     // Initialize sodium (must only be called once)
@@ -122,22 +112,18 @@ fn main() {
         ("resume", Some(_cmd)) => {
             // Setting up the repository triggers automatic resume.
             let backend = Arc::new(backend::FileBackend::new(blob_dir()));
-            hat::Hat::open_repository(migrations_dir, cache_dir, backend, MAX_BLOB_SIZE).unwrap();
+            hat::Hat::open_repository(cache_dir, backend, MAX_BLOB_SIZE).unwrap();
         }
         ("commit", Some(cmd)) => {
             let name = cmd.value_of("NAME").unwrap().to_owned();
             let path = cmd.value_of("PATH").unwrap();
 
             let backend = Arc::new(backend::FileBackend::new(blob_dir()));
-            let mut hat =
-                hat::Hat::open_repository(migrations_dir, cache_dir, backend, MAX_BLOB_SIZE)
-                    .unwrap();
+            let mut hat = hat::Hat::open_repository(cache_dir, backend, MAX_BLOB_SIZE).unwrap();
 
             // Update the family index.
-            let mut family = hat.open_family(name.clone()).expect(&format!(
-                "Could not open family '{}'",
-                name
-            ));
+            let mut family = hat.open_family(name.clone())
+                .expect(&format!("Could not open family '{}'", name));
             family.snapshot_dir(PathBuf::from(path));
 
             // Commit the updated index.
@@ -154,17 +140,13 @@ fn main() {
             let path = cmd.value_of("PATH").unwrap();
 
             let backend = Arc::new(backend::FileBackend::new(blob_dir()));
-            let mut hat =
-                hat::Hat::open_repository(migrations_dir, cache_dir, backend, MAX_BLOB_SIZE)
-                    .unwrap();
+            let mut hat = hat::Hat::open_repository(cache_dir, backend, MAX_BLOB_SIZE).unwrap();
 
             hat.checkout_in_dir(name, PathBuf::from(path)).unwrap();
         }
         ("recover", Some(_cmd)) => {
             let backend = Arc::new(backend::FileBackend::new(blob_dir()));
-            let mut hat =
-                hat::Hat::open_repository(migrations_dir, cache_dir, backend, MAX_BLOB_SIZE)
-                    .unwrap();
+            let mut hat = hat::Hat::open_repository(cache_dir, backend, MAX_BLOB_SIZE).unwrap();
 
             hat.recover().unwrap();
         }
@@ -173,22 +155,17 @@ fn main() {
             let id = cmd.value_of("ID").unwrap().to_owned();
 
             let backend = Arc::new(backend::FileBackend::new(blob_dir()));
-            let mut hat =
-                hat::Hat::open_repository(migrations_dir, cache_dir, backend, MAX_BLOB_SIZE)
-                    .unwrap();
+            let mut hat = hat::Hat::open_repository(cache_dir, backend, MAX_BLOB_SIZE).unwrap();
 
             hat.deregister_by_name(name, id.parse::<u64>().unwrap())
                 .unwrap();
         }
         ("gc", Some(_cmd)) => {
             let backend = Arc::new(backend::FileBackend::new(blob_dir()));
-            let mut hat =
-                hat::Hat::open_repository(migrations_dir, cache_dir, backend, MAX_BLOB_SIZE)
-                    .unwrap();
+            let mut hat = hat::Hat::open_repository(cache_dir, backend, MAX_BLOB_SIZE).unwrap();
             let (deleted_hashes, live_blobs) = hat.gc().unwrap();
             println!("Deleted hashes: {:?}", deleted_hashes);
             println!("Live data blobs after deletion: {:?}", live_blobs);
-
         }
         _ => {
             println!(

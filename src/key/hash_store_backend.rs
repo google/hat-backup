@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-
 use backend::StoreBackend;
 use blob;
 use crypto;
@@ -65,8 +64,7 @@ impl<B: StoreBackend> HashTreeBackend for HashStoreBackend<B> {
             } else {
                 error!(
                     "Data hash does not match expectation: {:?} instead of {:?}",
-                    actual_hash,
-                    href.hash
+                    actual_hash, href.hash
                 );
                 None
             }
@@ -78,8 +76,8 @@ impl<B: StoreBackend> HashTreeBackend for HashStoreBackend<B> {
         loop {
             match self.hash_index.fetch_persistent_ref(hash) {
                 Ok(Some(r)) => return Some(r), // done
-                Ok(None) => return None, // done
-                Err(RetryError) => (),  // continue loop
+                Ok(None) => return None,       // done
+                Err(RetryError) => (),         // continue loop
             }
         }
     }
@@ -118,9 +116,8 @@ impl<B: StoreBackend> HashTreeBackend for HashStoreBackend<B> {
                 );
 
                 // Someone came before us: piggyback on their result.
-                let pref = self.fetch_persistent_ref(&hash_entry.hash).expect(
-                    "Could not find persistent ref for known hash",
-                );
+                let pref = self.fetch_persistent_ref(&hash_entry.hash)
+                    .expect("Could not find persistent ref for known hash");
                 Ok((
                     id,
                     hash::tree::HashRef {

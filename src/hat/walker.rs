@@ -67,8 +67,7 @@ where
     B: hash::tree::HashTreeBackend,
 {
     pub fn new(backend: B, root_hash: hash::tree::HashRef) -> Result<Walker<B>, B::Err> {
-        let tree = hash::tree::Walker::new(backend.clone(), root_hash)?
-            .unwrap();
+        let tree = hash::tree::Walker::new(backend.clone(), root_hash)?.unwrap();
         Ok(Walker {
             backend: backend,
             tree: tree,
@@ -77,11 +76,7 @@ where
         })
     }
 
-    pub fn resume_child<FV, DV>(
-        &mut self,
-        mut file_v: &mut FV,
-        mut dir_v: &mut DV,
-    ) -> Result<bool, B::Err>
+    pub fn resume_child<FV, DV>(&mut self, file_v: &mut FV, dir_v: &mut DV) -> Result<bool, B::Err>
     where
         FV: LikesFiles,
         DV: HasFiles,
@@ -95,11 +90,7 @@ where
         })
     }
 
-    pub fn resume<FV, DV>(
-        &mut self,
-        mut file_v: &mut FV,
-        mut dir_v: &mut DV,
-    ) -> Result<bool, B::Err>
+    pub fn resume<FV, DV>(&mut self, file_v: &mut FV, dir_v: &mut DV) -> Result<bool, B::Err>
     where
         FV: LikesFiles,
         DV: HasFiles,
@@ -117,8 +108,7 @@ where
                     _ => unreachable!("Expected file"),
                 };
                 Some(Child::File(
-                    hash::tree::Walker::new(self.backend.clone(), href)?
-                        .unwrap(),
+                    hash::tree::Walker::new(self.backend.clone(), href)?.unwrap(),
                 ))
             }
             Some(StackItem::Dir(f)) => {
@@ -126,9 +116,9 @@ where
                     Content::Dir(href) => href,
                     _ => unreachable!("Expected dir"),
                 };
-                Some(Child::Dir(
-                    Box::new(Walker::new(self.backend.clone(), href).unwrap()),
-                ))
+                Some(Child::Dir(Box::new(
+                    Walker::new(self.backend.clone(), href).unwrap(),
+                )))
             }
             None => None,
         };
